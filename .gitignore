@@ -6,3 +6,5 @@ out.png
 filesystem/
 viewer/assets/
 viewer/level_index.h
+bpdemo/src/gen/
+bpdemo/src/u64_rt.c

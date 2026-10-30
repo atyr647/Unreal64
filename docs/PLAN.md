@@ -31,10 +31,28 @@ What each Unreal feature becomes:
 | Reflections | Planned: sphere-map env texture on glossy materials (Tiny3D supports UV generation) | No |
 | Streaming/World Partition | Grid cells, culled by distance at runtime | Yes (cells; runtime culling in source) |
 | LODs | Planned: second coarser set per cell | No |
-| Lights/Blueprints/animation/audio/UI | Not converted. Needs a Blueprint bytecode interpreter and asset converters | No |
+| Blueprint gameplay | Kismet bytecode decoded and lowered to C (`tools/ue64/kismet.py`, `codegen.py`), linked against `runtime/u64_rt.h`. Dynamic-typed values; natives are by-name calls the N64 runtime must implement (`compat_report.txt` lists them) | **Yes for the saved-class path** (see below) |
+| Animation/audio/UI/physics/natives | Not converted | No |
 
 Honest quality expectation: you get a *recognisable, pre-lit low-poly rendition of the level* you can walk around,
 not the game. 5-bit colour, 4 KB textures, a few thousand triangles on screen.
+
+## Blueprints
+
+Blueprint logic exists on disk as compiled Kismet bytecode only in packages that saved their generated class
+(UE4-era assets, and any **cooked** build). Editor-saved UE5 Blueprints store just the graph nodes
+(`K2Node_*`), so for those the route is the editor cook on the Mac mini, or compiling the graph directly (not done).
+
+On `tranek/GASDocumentation` (UE 5.3 project, 259 packages incl. UE4.0-era assets):
+- 153 `Function` exports found; **150 decode and validate** (every jump lands on a token boundary and the decoded
+  in-memory size equals the header's size field). The 3 failures are a UE 4.8-era bytecode dialect.
+- All 150 lower to C that compiles with gcc, and **link into one N64 ROM that runs in ares** (docs/img/ares_blueprint.png:
+  `BP_MinionSpawner.BeginPlay` -> ubergraph -> `HasAuthority` -> `K2_SetTimerDelegate`, identical to the host run).
+- 159 distinct native functions are called by name; none are implemented yet beyond a logging stub. That list
+  (`bpc.py` writes `compat_report.txt`) is the real work queue: it is the engine API surface the runtime must provide.
+
+Known gaps: out-parameters are passed by value; struct members use a placeholder accessor; no typing (all values are
+`u64_v`); latent actions/timers/delegates are stubs; C++ gameplay is not handled at all.
 
 ## Status — what is and isn't verified
 
@@ -43,7 +61,7 @@ not the game. 5-bit colour, 4 KB textures, a few thousand triangles on screen.
 | `tools/n64fit` converter | 14 unit tests pass on a synthetic Unreal-style level (room, pillar, high-poly sphere, sun + point light). Baked output inspected visually: lamp falloff, pillar and sphere shadows, corner occlusion, bounce light all present |
 | Material JSON vs Tiny3D importer | Checked by reading the importer source and a real Fast64 file, **not** by running the importer |
 | `viewer/` ROM | **Builds** (real MIPS build against Pak-pinned libdragon + Tiny3D) and **runs in ares**: textured floor, baked-lit walls (docs/img/ares_viewer.png). Camera/input/culling untested; test-scene walls show a winding issue |
-| `tools/ue64/uasset.py` | Parses all 259 packages of tranek/GASDocumentation (UE 5.3 project incl. UE4.0-era assets): names, import/export counts. Blueprint class inventory works. No export-table/bytecode reading yet |
+| `tools/ue64/uasset.py`, `kismet.py`, `codegen.py` | All 259 packages' import/export tables parse (gated per package version, with a bounds oracle that rejects misparses); 150/153 functions decode and validate; generated C compiles on host and MIPS; runs in ares |
 | `viewer/src/main.c` (older note) | Pass a syntax/type check (`gcc -fsyntax-only -DN64`) against libdragon `preview` + Tiny3D headers. The check was confirmed able to fail. **Never compiled for MIPS, never run** |
 | MIPS toolchain | Downloaded libdragon's prebuilt toolchain and unpacked it; **running it was blocked by the session's permission policy**, so nothing has been built |
 | ares / any emulator run | **Not done** (blocked for the same reason; ares has no prebuilt Linux release asset at the URLs I tried, so it would also need a source build) |

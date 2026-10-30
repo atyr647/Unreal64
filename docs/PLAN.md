@@ -10,17 +10,7 @@ Lumen, Nanite, hardware RT or path tracing has an N64 equivalent that *runs*. Wh
 features offline, on a PC, and bake their results into something the N64 can draw.** That is how this plan treats
 "preserve as much as possible": the project is never modified, the PC does the expensive work once, the N64 plays the result.
 
-Two modes, both in this repo:
-
-| | Mode A — convert (native) | Mode B — stream |
-|---|---|---|
-| Runs on N64 | Yes, standalone ROM | Display + controller only |
-| Needs a PC while playing | No | Yes |
-| Lumen/Nanite/RT/PT | Baked offline into vertex colours / LODs | Run live on the PC, shown at ~320x240 |
-| Gameplay (Blueprints, C++) | **Not converted yet.** Walk-through viewer only | Fully preserved (it's the real game) |
-| Status | Converter built and tested; ROM not built | Host built and tested; ROM not built |
-
-## Mode A: unmodified project -> N64 ROM
+## Pipeline: unmodified project -> N64 ROM
 
 ```
 Unreal project --(UnrealEditor-Cmd + tools/ue/export_level.py, project untouched)--> level.glb  (+KHR lights)
@@ -46,21 +36,13 @@ What each Unreal feature becomes:
 Honest quality expectation: you get a *recognisable, pre-lit low-poly rendition of the level* you can walk around,
 not the game. 5-bit colour, 4 KB textures, a few thousand triangles on screen.
 
-## Mode B: stream (full fidelity, PC required)
-
-`host/` + `n64/`: capture the running game, dither to RGBA5551, send changed tiles over a flashcart's USB link,
-return controller input. Preserves everything the game does, including live Lumen/RT/PT, at the cost of needing the PC
-and a link whose throughput is **unmeasured**. The simulation shows fast full-screen motion exceeds a 2 MB/s link
-without better compression.
-
 ## Status — what is and isn't verified
 
 | Item | State |
 |---|---|
-| `host/` streaming bridge | 8 unit tests pass; simulated receiver reproduces frames exactly |
 | `tools/n64fit` converter | 14 unit tests pass on a synthetic Unreal-style level (room, pillar, high-poly sphere, sun + point light). Baked output inspected visually: lamp falloff, pillar and sphere shadows, corner occlusion, bounce light all present |
 | Material JSON vs Tiny3D importer | Checked by reading the importer source and a real Fast64 file, **not** by running the importer |
-| `viewer/src/main.c`, `n64/src/main.c` | Pass a syntax/type check (`gcc -fsyntax-only -DN64`) against libdragon `preview` + Tiny3D headers. The check was confirmed able to fail. **Never compiled for MIPS, never run** |
+| `viewer/src/main.c` | Pass a syntax/type check (`gcc -fsyntax-only -DN64`) against libdragon `preview` + Tiny3D headers. The check was confirmed able to fail. **Never compiled for MIPS, never run** |
 | MIPS toolchain | Downloaded libdragon's prebuilt toolchain and unpacked it; **running it was blocked by the session's permission policy**, so nothing has been built |
 | ares / any emulator run | **Not done** (blocked for the same reason; ares has no prebuilt Linux release asset at the URLs I tried, so it would also need a source build) |
 | `tools/ue/export_level.py` | **Untested.** No Unreal install here; API names from memory |
@@ -75,4 +57,3 @@ without better compression.
 4. Reflections (sphere map), LODs, collision + gravity so you can walk a real level.
 5. Production bake backend (Embree or Cycles) for path-traced quality; the interface is `bake.bake()`.
 6. Gameplay: a Blueprint bytecode interpreter is the only route to preserving game logic natively. Large.
-7. Measure the USB link and compress for Mode B.

@@ -6,8 +6,7 @@ The engine can't execute on an N64 (4–8 MB RAM, 4 KB texture memory, no shader
 work on a PC and gives the N64 the result. Read [docs/PLAN.md](docs/PLAN.md): it states what each Unreal feature
 becomes and, importantly, what is verified versus only written.
 
-- **Mode A, convert** (`tools/n64fit`, `viewer/`): Unreal level -> glTF -> decimated, TMEM-fitted, **light-baked** (shadows, AO, one GI bounce into vertex colours) Tiny3D assets -> standalone ROM that walks the level.
-- **Mode B, stream** (`host/`, `n64/`): the real game runs on the PC at full quality; the N64 shows it and sends controller input.
+- **Convert** (`tools/n64fit`, `viewer/`): Unreal level -> glTF -> decimated, TMEM-fitted, **light-baked** (shadows, AO, one GI bounce into vertex colours) Tiny3D assets -> standalone ROM that walks the level.
 
 ## Status
 

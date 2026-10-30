@@ -51,6 +51,14 @@ On `tranek/GASDocumentation` (UE 5.3 project, 259 packages incl. UE4.0-era asset
 - 159 distinct native functions are called by name; none are implemented yet beyond a logging stub. That list
   (`bpc.py` writes `compat_report.txt`) is the real work queue: it is the engine API surface the runtime must provide.
 
+**World runtime** (`runtime/u64_natives.c`): timers, actor spawning, multicast delegates, kill/respawn, ~50 engine natives
+(math, vectors, comparisons, `IsValid`, `HasAuthority`, `SetTimerDelegate`, `BeginDeferredActorSpawnFromClass`, ...).
+Class default values come from each Blueprint's default object (tagged properties) and placed actors from the map
+(`leveldata.py`). On the real `Map_Startup` the converted Blueprints reproduce the minion-spawner behaviour:
+both spawners spawn at t=2.0 (the Blue one with its per-instance `MinionClass` override), a killed minion triggers
+`MinionDied`, which re-arms the timer and respawns at t+2.0 — identical on host and in ares (docs/img/ares_world.png).
+The compiler reports exactly which engine functions remain unimplemented (`compat_report.txt`).
+
 Known gaps: out-parameters are passed by value; struct members use a placeholder accessor; no typing (all values are
 `u64_v`); latent actions/timers/delegates are stubs; C++ gameplay is not handled at all.
 

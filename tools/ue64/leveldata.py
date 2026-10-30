@@ -1,0 +1,82 @@
+"""Class defaults (CDOs) and placed actors from packages -> C tables for the runtime."""
+from __future__ import annotations
+
+import codegen
+import uasset
+
+
+def cval(v):
+    """C expression for a tagged-property value, or None if it can't be represented."""
+    if isinstance(v, bool): return f"u64_bool({int(v)})"
+    if isinstance(v, int): return f"u64_int({v})"
+    if isinstance(v, float): return f"u64_float({v!r}f)"
+    if isinstance(v, str): return f"u64_str({codegen.cstr(v)})"
+    if isinstance(v, tuple):
+        if v[0] == "name": return f"u64_name({codegen.cstr(v[1])})"
+        if v[0] == "obj": return f"u64_cls({codegen.cstr(v[1].removesuffix('_C'))})"
+        if v[0] == "vec": return f"u64_vec({v[1][0]!r}f, {v[1][1]!r}f, {v[1][2]!r}f)"
+    return None
+
+
+def class_defaults(p, data):
+    """{ClassName: {prop: value}} from `Default__X_C` exports."""
+    out = {}
+    for e in p.exports:
+        if e.name.startswith("Default__") and e.name.endswith("_C"):
+            try:
+                out[e.name[len("Default__"):-2]] = uasset.read_tags(p, data, e)
+            except Exception:
+                pass  # older tag layouts (pre-UE4.20 assets) are not handled; defaults are skipped
+    return out
+
+
+def level_actors(p, data):
+    """Blueprint-class actors placed in a map: [(label, class, props, (x,y,z))]."""
+    actors = []
+    for e in p.exports:
+        cn = uasset.class_name(p, e.cls)
+        if not cn.endswith("_C") or e.name.startswith("Default__"):
+            continue
+        try:
+            props = uasset.read_tags(p, data, e)
+        except Exception:
+            continue
+        loc = (0.0, 0.0, 0.0)
+        root = props.get("RootComponent")
+        if isinstance(root, tuple) and root[0] == "obj" and 0 < root[2] <= len(p.exports):
+            try:
+                rt = uasset.read_tags(p, data, p.exports[root[2] - 1])
+            except Exception:
+                rt = {}
+            if isinstance(rt.get("RelativeLocation"), tuple) and rt["RelativeLocation"][0] == "vec":
+                loc = rt["RelativeLocation"][1]
+        actors.append((e.name, cn.removesuffix("_C"), props, loc))
+    return actors
+
+
+def emit_defaults_c(defaults):
+    lines = ['#include "u64_rt.h"', "void u64_apply_defaults(u64_obj *o, const char *cls) {"]
+    for cls in sorted(defaults):
+        sets = [(k, cval(v)) for k, v in defaults[cls].items() if k not in ("UberGraphFrame", "ActorLabel")]
+        sets = [(k, c) for k, c in sets if c]
+        if not sets:
+            continue
+        lines.append(f'  if (!strcmp(cls, {codegen.cstr(cls)})) {{')
+        lines += [f'    *u64_ivar(o, {codegen.cstr(codegen.ident(k))}) = {c};' for k, c in sets]
+        lines.append("  }")
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
+def emit_level_c(actors):
+    lines = ['#include "u64_rt.h"', "void u64_level_load(void) {", "  u64_obj *a;"]
+    for label, cls, props, loc in actors:
+        lines.append(f"  a = u64_new({codegen.cstr(label)}, {codegen.cstr(cls)});")
+        lines.append(f"  *u64_ivar(a, \"Location\") = u64_vec({loc[0]!r}f, {loc[1]!r}f, {loc[2]!r}f);")
+        for k, v in props.items():
+            c = cval(v)
+            if c and k not in ("UberGraphFrame", "ActorLabel", "RootComponent"):
+                lines.append(f"  *u64_ivar(a, {codegen.cstr(codegen.ident(k))}) = {c};")
+    lines.append("  u64_world_begin_play();")
+    lines.append("}")
+    return "\n".join(lines) + "\n"

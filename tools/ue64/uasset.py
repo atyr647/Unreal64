@@ -191,3 +191,65 @@ def function_params(p, data, fn_export):
             if flags & CPF_PARM and not flags & CPF_RETURN:
                 out.append(x.name)
     return out
+
+
+# ---- tagged property reader (class default objects) -------------------------------------------------------------
+
+def read_tags(p, data, e):
+    """Tagged properties at the start of an export's data -> {name: value}. Unknown types are skipped by size.
+
+    Values: int/float/bool/str; ('name', s); ('obj', pkg-index resolved name); ('vec', (x, y, z)); ('raw', bytes).
+    Handles the UE 4.2x/5.0 tag layout (no 5.4 tag extensions).
+    """
+    r = R(data)
+    r.p = e.offset
+    end = e.offset + e.size
+    out = {}
+    while r.p + 8 <= end:
+        name = fname(r, p.names)
+        if name == "None":
+            break
+        typ = fname(r, p.names)
+        size, idx = r.i32(), r.i32()
+        sub = None
+        if typ == "StructProperty":
+            sub = fname(r, p.names)
+            if p.ue4 >= 441:
+                r.skip(16)
+        elif typ == "BoolProperty":
+            sub = r.b[r.p]; r.p += 1
+        elif typ in ("ByteProperty", "EnumProperty"):
+            sub = fname(r, p.names)
+        elif typ in ("ArrayProperty", "SetProperty"):
+            sub = fname(r, p.names)
+        elif typ == "MapProperty":
+            sub = (fname(r, p.names), fname(r, p.names))
+        if p.ue4 >= 282:
+            has_guid = r.b[r.p]; r.p += 1
+            if has_guid:
+                r.skip(16)
+        start = r.p
+        if r.p + size > end:
+            break
+        v = None
+        if typ == "IntProperty": v = r.i32()
+        elif typ == "UInt32Property": v = r.u32()
+        elif typ == "Int64Property": v = struct.unpack_from("<q", r.b, r.p)[0]
+        elif typ == "FloatProperty": v = struct.unpack_from("<f", r.b, r.p)[0]
+        elif typ == "DoubleProperty": v = struct.unpack_from("<d", r.b, r.p)[0]
+        elif typ == "BoolProperty": v = bool(sub)
+        elif typ == "NameProperty": v = ("name", fname(r, p.names))
+        elif typ == "StrProperty": v = r.fstring()
+        elif typ in ("ObjectProperty", "ClassProperty", "SoftObjectProperty", "InterfaceProperty"):
+            ref = r.i32()
+            v = ("obj", class_name(p, ref), ref)
+        elif typ == "ByteProperty": v = r.b[r.p] if size == 1 else ("name", fname(r, p.names))
+        elif typ == "StructProperty" and sub in ("Vector", "Rotator") and size in (12, 24):
+            fmt = "<3f" if size == 12 else "<3d"
+            v = ("vec", struct.unpack_from(fmt, r.b, r.p))
+        else:
+            v = ("raw", bytes(r.b[r.p:r.p + size]))
+        key = name if idx == 0 else f"{name}[{idx}]"
+        out[key] = v
+        r.p = start + size
+    return out

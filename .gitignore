@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+build/
+*.z64
+out.png

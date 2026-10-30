@@ -59,6 +59,25 @@ both spawners spawn at t=2.0 (the Blue one with its per-instance `MinionClass` o
 `MinionDied`, which re-arms the timer and respawns at t+2.0 — identical on host and in ares (docs/img/ares_world.png).
 The compiler reports exactly which engine functions remain unimplemented (`compat_report.txt`).
 
+**Engine function coverage: 127/129** of the functions this project's Blueprints call (the other two are Blueprint
+ubergraphs in the old-dialect assets that cannot be decoded). Grouped in `runtime/u64_natives.c` (world, math, timers)
+and `runtime/u64_gas.c` (text, rotators/vectors with out-parameters, animation queries, UI widget state, collision,
+Gameplay Ability System, ability tasks, latent `Delay`, and the project's own C++ movement/death functions).
+Verified by scenario tests that drive the project's *own compiled abilities*: Sprint (activate -> `StartSprinting`
+-> input release -> `K2_OnEndAbility` -> `StopSprinting`), Dash (root-motion task ends the ability; the pending montage
+task is cancelled), damage with armor (`Damage * 100/(100+Armor)`, lethal damage destroys the actor), `BreakVector`
+out-parameters and `Format`. Same 12 checks pass on host and in ares (docs/img/ares_gas.png).
+
+Fidelity of the ports: faithful where the project's C++ was read (damage formula, Die/FinishDying, sprint,
+`GetAbilityLevel`); **approximated** elsewhere. In particular GameplayEffect modifier magnitudes are chosen from the
+effect class name (the modifier arrays inside GE assets are not parsed yet), attribute defaults are fixed
+(100/100/100, MoveSpeed 600), there is no physics (`LineTrace`/`GetOverlappingActors` find nothing), animation montages
+complete after a fixed 1 s, and arrays are not modelled. "Ported" here means every called function has defined behaviour
+that the tests exercise or that is trivially correct, not that GAS is reimplemented in full.
+
+Bugs found by this work: argument expressions of a `Context` call were evaluated against the callee instead of the caller
+(`Self` as an argument pointed at the wrong object) — fixed in `codegen.py`.
+
 Known gaps: out-parameters are passed by value; struct members use a placeholder accessor; no typing (all values are
 `u64_v`); latent actions/timers/delegates are stubs; C++ gameplay is not handled at all.
 

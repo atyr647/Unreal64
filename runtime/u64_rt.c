@@ -38,7 +38,7 @@ static u64_v *slot(slot_t *a, int *n, const char *k)
 
 u64_v *u64_ivar(u64_obj *o, const char *name)   { if (!o) o = &null_obj; return slot(o->iv, &o->niv, name); }
 u64_v *u64_pframe(u64_obj *o, const char *name) { if (!o) o = &null_obj; return slot(o->pf, &o->npf, name); }
-u64_v *u64_member(u64_v *s, const char *name)   { static u64_v scratch[8]; static int i; (void)s; (void)name; return &scratch[i++ & 7]; }
+u64_v *u64_member(u64_v *s, const char *name)   { static u64_v scratch[8]; static int i; if (s && s->t == U64_OBJ && s->u.o) return u64_ivar(s->u.o, name); return &scratch[i++ & 7]; }
 
 u64_obj *u64_find(const char *name)
 {

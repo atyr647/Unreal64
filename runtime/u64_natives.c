@@ -6,8 +6,8 @@
 void u64_mc_broadcast(u64_v *m, int argc, const u64_v *argv);
 void u64_obj_destroy(u64_obj *o);
 
-#define MAX_TIMERS 32
-typedef struct { int live; u64_v dg; float t, period; } timer_t_;
+#define MAX_TIMERS 64
+typedef struct { int live; u64_v dg; float t, period; u64_obj *bt; const char *bname; u64_v barg; } timer_t_;
 static timer_t_ timers[MAX_TIMERS];
 static float now_;
 static int spawn_serial;
@@ -30,7 +30,7 @@ int u64_native_hits(const char *fn) { for (int i = 0; i < nhit; i++) if (!strcmp
 static u64_v set_timer(int argc, const u64_v *a)
 {
   for (int i = 0; i < MAX_TIMERS; i++) if (!timers[i].live) {
-    timers[i] = (timer_t_){1, arg(argc, a, 0), F(arg(argc, a, 1)), F(arg(argc, a, 1))};
+    timers[i] = (timer_t_){1, arg(argc, a, 0), F(arg(argc, a, 1)), F(arg(argc, a, 1)), 0, 0, {U64_NONE}};
     if (!u64_true(arg(argc, a, 2))) timers[i].period = 0;
     return u64_int(i + 1);
   }
@@ -48,6 +48,28 @@ static u64_obj *spawn(u64_v cls, u64_v xform)
                        (int)now_, (int)(now_ * 10) % 10);
   return o;
 }
+
+void u64_timer_broadcast(float t, u64_obj *task, const char *name, u64_v arg)
+{
+  for (int i = 0; i < MAX_TIMERS; i++) if (!timers[i].live) {
+    timers[i] = (timer_t_){1, {U64_NONE}, t, 0, task, name, arg}; return;
+  }
+}
+void u64_timer_latent(float t, u64_v dg)
+{
+  for (int i = 0; i < MAX_TIMERS; i++) if (!timers[i].live) {
+    timers[i] = (timer_t_){1, dg, t, 0, 0, 0, {U64_NONE}}; return;
+  }
+}
+void u64_timers_cancel_for(u64_obj *ability)   // an ending ability cancels its tasks' pending timers
+{
+  for (int i = 0; i < MAX_TIMERS; i++)
+    if (timers[i].live && timers[i].bt) {
+      u64_v *ab = u64_ivar(timers[i].bt, "Ability");
+      if (ab->t == U64_OBJ && ab->u.o == ability) timers[i].live = 0;
+    }
+}
+u64_obj *u64_spawn_actor(const char *cls, u64_v loc) { return spawn(u64_cls(cls), loc); }
 
 u64_v u64_native(u64_obj *self, const char *fn, int argc, const u64_v *a)
 {
@@ -97,7 +119,7 @@ u64_v u64_native(u64_obj *self, const char *fn, int argc, const u64_v *a)
   // --- arrays (arrays are not modelled yet: length 0)
   if (IS("Array_Length")) { HIT; return u64_int(0); }
   if (IS("Array_Get")) { HIT; return u64_objv(0); }
-  return (u64_v){U64_NONE};
+  return u64_native_gas(self, fn, argc, a);
 }
 
 void u64_world_begin_play(void)
@@ -118,7 +140,11 @@ void u64_world_tick(float dt)
     if (timers[i].t > 0) continue;
     u64_v d = timers[i].dg;
     if (timers[i].period > 0) timers[i].t += timers[i].period; else timers[i].live = 0;
-    if (d.t == U64_DELEGATE && u64_obj_alive(d.dobj)) u64_call(d.dobj, d.u.s, 0, 0);
+    if (timers[i].bt) { u64_v av = timers[i].barg; u64_mc_broadcast(u64_ivar(timers[i].bt, timers[i].bname), 1, &av); continue; }
+    if (d.t == U64_DELEGATE && u64_obj_alive(d.dobj)) {
+      if (d.aux) { u64_v entry = u64_int(d.aux); u64_call(d.dobj, d.u.s, 1, &entry); }   // latent: re-enter the event graph
+      else u64_call(d.dobj, d.u.s, 0, 0);
+    }
   }
 }
 

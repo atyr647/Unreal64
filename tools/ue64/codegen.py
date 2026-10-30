@@ -42,7 +42,10 @@ class Gen:
         self.unsupported.append(n.op + " (as l-value)")
         return "L._unsupported"
 
-    def ex(self, n, s="self"):
+    def ex(self, n, s="self", c=None):
+        # s: object the expression runs against (changes under Context); c: the caller frame, where call arguments
+        # are evaluated (Unreal evaluates arguments before switching to the callee object).
+        c = c or s
         o, a = n.op, n.args
         if o in ("LocalVariable", "LocalOutVariable", "InstanceVariable", "DefaultVariable", "StructMemberContext"):
             return self.lv(n, s)
@@ -65,12 +68,12 @@ class Gen:
         if o == "PrimitiveCast": return self.ex(a[1], s)
         if o in ("MetaCast", "DynamicCast", "ObjToInterfaceCast", "CrossInterfaceCast", "InterfaceToObjCast"): return self.ex(a[1], s)
         if o in ("FinalFunction", "CallMath", "LocalFinalFunction"):
-            return self.call(a[0], a[1], s)
+            return self.call(a[0], a[1], s, c)
         if o in ("VirtualFunction", "LocalVirtualFunction"):
-            return self.call(a[0], a[1], s)
+            return self.call(a[0], a[1], s, c)
         if o in ("Context", "Context_FailSilent", "ClassContext"):
-            obj = self.ex(a[0], s)
-            return f"({{ u64_v _o = {obj}; {self.ex(a[3], '_o.u.o')}; }})"
+            obj = self.ex(a[0], c)
+            return f"({{ u64_v _o = {obj}; {self.ex(a[3], '_o.u.o', c)}; }})"
         if o == "TextConst":
             kind = a[0]
             if kind in (2, 3) and len(a) > 1: return self.ex(a[1], s)
@@ -83,15 +86,29 @@ class Gen:
                 out = f"(u64_as_int(_sw) == u64_as_int({self.ex(cv, s)}) ? {self.ex(res, s)} : {out})"
             return f"({{ u64_v _sw = {sel}; {out}; }})"
         if o == "InterfaceContext": return self.ex(a[0], s)
+        if o == "SkipOffsetConst": return f"u64_int({a[0]})"
+        if o == "FieldPathConst": return self.ex(a[0], s)
         if o == "StructConst":
+            sname, fields = a[0], a[2]
+            if sname == "LatentActionInfo" and len(fields) >= 4:   # (linkage, uuid, function, target)
+                return f"u64_latent({self.ex(fields[3], s)}, {self.ex(fields[2], s)}.u.s, {self.ex(fields[0], s)}.u.i)"
+            if sname in ("GameplayTag", "CollisionProfileName", "GameplayAttribute") and fields:
+                return self.ex(fields[0], s)    # these structs are identified by their name
             return "u64_int(0) /* struct const */"
         self.unsupported.append(o)
         return f'u64_int(0) /* UNSUPPORTED {o} */'
 
-    def call(self, fn, params, s):
+    def arg(self, p, s, name, i):
+        # Out-parameters: LocalOutVariable always; Break* natives also write their trailing args.
+        if p.op == "LocalOutVariable" or (name.startswith("Break") and i > 0 and p.op in ("LocalVariable", "InstanceVariable")):
+            return f"u64_ref(&{self.lv(p, s)})"
+        return self.ex(p, s)
+
+    def call(self, fn, params, s, c=None):
+        c = c or s
         name = last(fn)
         self.natives.add(name)
-        args = ", ".join(self.ex(p, s) for p in params)
+        args = ", ".join(self.arg(p, c, name, i) for i, p in enumerate(params))
         return f"U64_CALL({s}, {cstr(name)}{', ' + args if args else ''})"
 
     # ---- statements

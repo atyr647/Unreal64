@@ -14,6 +14,8 @@ static void logf_(const char *f, ...)
   va_list a; va_start(a, f); vprintf(f, a); va_end(a); putchar('\n');
 }
 
+int u64_run_scenarios(int verbose);
+
 int main(void)
 {
   console_init();
@@ -39,6 +41,7 @@ int main(void)
       }
     }
   }
-  printf("\nt=12.0 done, %d actors total\n", u64_obj_count());
+  printf("\nt=12.0 done, %d actors total\n\n", u64_obj_count());
+  u64_run_scenarios(0);   // GAS / ability / task / out-param scenarios against the compiled Blueprints
   for(;;) { console_render(); }
 }

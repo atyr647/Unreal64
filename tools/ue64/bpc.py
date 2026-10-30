@@ -66,6 +66,7 @@ def main(content, out):
         fh.write(f"functions compiled: {nfun} in {files} files\nunsupported constructs: {unsup}\nskipped (undecodable): {skipped}\n")
         import re
         rt = open(os.path.join(os.path.dirname(__file__), "..", "..", "runtime", "u64_natives.c")).read()
+        rt += open(os.path.join(os.path.dirname(__file__), "..", "..", "runtime", "u64_gas.c")).read()
         impl = set(re.findall(r'IS\("([A-Za-z_0-9]+)"\)', rt))
         bpfn = {fn for _, fn in reg}
         external = sorted(n for n in natives if n not in bpfn)  # calls into engine/plugin code, not other compiled BPs

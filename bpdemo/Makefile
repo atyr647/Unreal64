@@ -3,10 +3,10 @@
 BUILD_DIR=build
 SOURCE_DIR=src
 include $(N64_INST)/include/n64.mk
-N64_CFLAGS += -std=gnu2x -I../runtime -Wno-unused-label -Wno-unused-variable -Wno-unused-but-set-variable -Wno-error
+N64_CFLAGS += -std=gnu2x -DU64_NO_MAIN -I../runtime -Wno-unused-label -Wno-unused-variable -Wno-unused-but-set-variable -Wno-error
 N64_LDFLAGS += -lm
 
-src = src/main.c src/u64_rt.c src/u64_natives.c $(wildcard src/gen/*.c)
+src = src/main.c src/u64_rt.c src/u64_natives.c src/u64_gas.c src/scenarios.c $(wildcard src/gen/*.c)
 
 all: bpdemo.z64
 $(BUILD_DIR)/bpdemo.elf: $(patsubst $(SOURCE_DIR)/%.c,$(BUILD_DIR)/%.o,$(src))

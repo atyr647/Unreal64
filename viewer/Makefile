@@ -1,11 +1,12 @@
 # Unreal64 level viewer. Usage:
 #   python -m n64fit <level.glb> viewer/        (run from tools/, writes viewer/assets/ and viewer/level_index.h)
-#   make T3D_INST=/path/to/tiny3d               (needs libdragon toolchain, Tiny3D built, N64_INST set)
+#   make                                        (needs N64_INST with libdragon + Tiny3D installed)
 BUILD_DIR=build
-T3D_INST ?= $(shell realpath ../third_party/tiny3d)
+# Tiny3D comes from an install (pak/tools/build_tiny3d.sh) or a source checkout via T3D_MK=/path/to/tiny3d/t3d.mk
+T3D_MK ?= $(N64_INST)/include/t3d.mk
 
 include $(N64_INST)/include/n64.mk
-include $(T3D_INST)/t3d.mk
+include $(T3D_MK)
 -include assets/formats.mk
 
 N64_CFLAGS += -std=gnu2x -I.

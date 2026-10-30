@@ -12,7 +12,7 @@
 #define TURN_SPEED 2.2f   // radians per second at full stick
 #define DRAW_DISTANCE 80.0f
 
-static bool cell_visible(const u64_cell_t *c, fm_vec3_t eye)
+static bool cell_visible(const u64_cell_t *c, T3DVec3 eye)
 {
   // Distance from the eye to the cell's AABB; whole cells beyond the draw distance are skipped.
   float d2 = 0;
@@ -32,10 +32,11 @@ int main(void)
   dfs_init(DFS_DEFAULT_LOCATION);
   display_init(RESOLUTION_320x240, DEPTH_16_BPP, FB_COUNT, GAMMA_NONE, FILTERS_RESAMPLE_ANTIALIAS);
   rdpq_init();
+  surface_t zbuf = surface_alloc(FMT_RGBA16, display_get_width(), display_get_height());
   joypad_init();
   t3d_init((T3DInitParams){});
 
-  T3DViewport viewport = t3d_viewport_create_buffered(FB_COUNT);
+  T3DViewport viewport = t3d_viewport_create();
   T3DModel *models[U64_CELL_COUNT];
   T3DMat4FP *mats = malloc_uncached(sizeof(T3DMat4FP) * U64_CELL_COUNT * FB_COUNT);
   for(int i = 0; i < U64_CELL_COUNT; i++) {
@@ -45,7 +46,7 @@ int main(void)
   // Light is baked into vertex colours, so runtime lighting is neutral: white ambient, no lights.
   uint8_t ambient[4] = {0xFF, 0xFF, 0xFF, 0xFF};
 
-  fm_vec3_t eye = {{U64_START[0], U64_START[1] + EYE_HEIGHT_PAD, U64_START[2]}};
+  T3DVec3 eye = {{U64_START[0], U64_START[1] + EYE_HEIGHT_PAD, U64_START[2]}};
   float yaw = 0.0f;
   int frame = 0;
   uint64_t last = get_ticks();
@@ -62,18 +63,20 @@ int main(void)
     float fwd = (in.stick_y / 80.0f) * MOVE_SPEED * dt;
     eye.v[0] += -fm_sinf(yaw) * fwd;
     eye.v[2] += -fm_cosf(yaw) * fwd;
-    fm_vec3_t target = {{eye.v[0] - fm_sinf(yaw), eye.v[1], eye.v[2] - fm_cosf(yaw)}};
+    T3DVec3 target = {{eye.v[0] - fm_sinf(yaw), eye.v[1], eye.v[2] - fm_cosf(yaw)}};
 
     t3d_viewport_set_projection(&viewport, T3D_DEG_TO_RAD(80.0f), 0.2f, DRAW_DISTANCE);
-    t3d_viewport_look_at(&viewport, &eye, &target, &(fm_vec3_t){{0, 1, 0}});
+    t3d_viewport_look_at(&viewport, &eye, &target, &(T3DVec3){{0, 1, 0}});
 
     for(int i = 0; i < U64_CELL_COUNT; i++) {
       const u64_cell_t *c = &U64_CELLS[i];
       float s = c->scale;  // model units -> metres
-      t3d_mat4fp_from_srt_euler(&mats[i * FB_COUNT + frame], (float[3]){s, s, s}, (float[3]){0, 0, 0}, (float[3]){c->origin[0], c->origin[1], c->origin[2]});
+      T3DMat4 m;
+      t3d_mat4_from_srt_euler(&m, (float[3]){s, s, s}, (float[3]){0, 0, 0}, (float[3]){c->origin[0], c->origin[1], c->origin[2]});
+      t3d_mat4_to_fixed(&mats[i * FB_COUNT + frame], &m);
     }
 
-    rdpq_attach(display_get(), display_get_zbuf());
+    rdpq_attach(display_get(), &zbuf);
     t3d_frame_start();
     t3d_viewport_attach(&viewport);
     t3d_screen_clear_color(RGBA32(24, 28, 40, 0xFF));

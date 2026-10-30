@@ -3,3 +3,6 @@ __pycache__/
 build/
 *.z64
 out.png
+filesystem/
+viewer/assets/
+viewer/level_index.h

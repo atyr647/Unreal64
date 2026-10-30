@@ -1,83 +1,78 @@
 # Unreal64 — plan
 
-## The constraint that decides everything
+Goal: take an **unmodified Unreal Engine project** and get it onto a real N64 with as much preserved as possible.
 
-An N64 has a 93.75 MHz VR4300, 4 MB of RAM (8 MB with the Expansion Pak) and a fixed-function RDP.
-Unreal Engine 5 needs gigabytes of RAM and a modern GPU. That is a gap of roughly **1000x in memory**
-before counting compute, and the RDP has no programmable shaders, let alone ray tracing.
-No port, however clever, runs Lumen, Nanite, hardware RT or path tracing *on* an N64, and none can
-run a modern UE project unmodified on one.
+## The hard limit, stated once
 
-So the goal "unmodified latest UE project, with all the bells and whistles, on an N64" has exactly
-one honest reading, and it is the one this repo implements:
+N64: 93.75 MHz CPU, 4 MB RAM (8 MB with Expansion Pak), a fixed-function RDP with 4 KB of texture memory (TMEM).
+Unreal 5 needs gigabytes of RAM and a programmable GPU. The engine itself cannot execute on an N64, and nothing in
+Lumen, Nanite, hardware RT or path tracing has an N64 equivalent that *runs*. What can be done is to **run those
+features offline, on a PC, and bake their results into something the N64 can draw.** That is how this plan treats
+"preserve as much as possible": the project is never modified, the PC does the expensive work once, the N64 plays the result.
 
-> **The unmodified Unreal project runs at full fidelity on a host GPU. The N64 is the display and the
-> controller.** A bridge captures the game's output, converts it to what the N64 can show, and sends
-> it over the flashcart's USB link. The N64 sends its controller state back.
+Two modes, both in this repo:
 
-What that does and does not give you:
-
-| Wanted | Result |
-|---|---|
-| Unmodified project, any UE version | **Yes.** Nothing is injected into the engine or project. Capture is a window grab; input is a virtual gamepad. |
-| Lumen, Nanite, HW ray tracing, path tracing | **Yes, on the host.** They run exactly as the project configures them. They are *not* running on the N64. |
-| Those effects visible on the N64 screen | **Heavily degraded.** The picture is downscaled to ~320x240, 15/16-bit colour, dithered. GI and reflections survive as lighting; fine detail does not. |
-| Playable | **Depends on link throughput and latency**, which is unmeasured. See risks. |
-| Running on N64 with no PC | **No.** Not possible. |
-
-## Architecture
-
-```
- Unreal game (unmodified)        host/unreal64 bridge                    N64 (libdragon ROM)
- ┌──────────────────────┐   ┌──────────────────────────────┐   USB   ┌────────────────────────┐
- │ Lumen/Nanite/RT/PT   │   │ capture (ffmpeg window grab)  │ ──────► │ receive, rebuild frame │
- │ renders at full res  │──►│ scale → quantise → delta/comp │  frames │ show via VI            │
- │                      │◄──│ virtual gamepad (uinput/ViGEm)│ ◄────── │ read pad, send state   │
- └──────────────────────┘   └──────────────────────────────┘  input  └────────────────────────┘
-```
-
-Why capture rather than an engine plugin: a plugin is a change to the project/engine and breaks the
-"unmodified, latest version" requirement. A window grab works with any version and any project.
-
-## Bandwidth is the central problem
-
-320x240 at 16 bpp is 153,600 B/frame, 4.6 MB/s at 30 fps raw. The link's real throughput is **unknown**
-until measured on hardware, and libdragon's generic USB path (`usb_read`) pulls 512-byte polled
-blocks, which is likely slow. The host sim (`python -m unreal64 selftest`, 2 MB/s assumed) shows:
-a mostly-static scene converges losslessly, but fast full-screen motion leaves ~25% of pixels stale.
-Tile deltas alone are not enough for gameplay; compression is on the critical path.
-
-Options, in the order I'd try them:
-1. **Measure first** (Phase 2). Everything else is sized from that number.
-2. **8-bit palettised frames** (CI8 + per-frame optimised palette, error diffusion): halves bytes, usually
-   looks better than dithered 5551 at the same budget.
-3. **Lower resolution** (256x192 / 160x120) stretched by the VI scaler: cheap, large byte savings.
-4. **MPEG-1 decoded on the RSP.** Best quality per byte; libdragon has had RSP video decoding, but I have
-   not confirmed it exists in the current release. Verify before committing to it.
-5. **Cart-specific bulk USB read** replacing libdragon's generic debug path, if (1) shows it is the bottleneck.
-
-## Phases
-
-| # | Phase | State |
+| | Mode A — convert (native) | Mode B — stream |
 |---|---|---|
-| 0 | Wire protocol, host quantiser + delta encoder with byte budget, simulated receiver, tests, N64 client source | **Done.** Host side tested (8 tests). N64 source passes a syntax/type check against libdragon headers only. |
-| 1 | Build the MIPS toolchain + libdragon, build `unreal64.z64`, boot it in an emulator with a canned frame | **Not done.** Toolchain build was not run in this session. |
-| 2 | Real hardware: pick cart (SummerCart64 / EverDrive / 64drive), write the host transport, **measure throughput and latency** | Not started. Needs hardware. |
-| 3 | Compression (options above), chosen from Phase 2 data | Not started |
-| 4 | Input backends: Linux uinput, Windows ViGEm virtual Xbox pad; stick curve, deadzone, button map profiles | Interface only (`inputmap.py`) |
-| 5 | Audio: capture, downmix, 16-bit ~22–32 kHz to the N64 audio interface | Not started |
-| 6 | Quality pass: tone-map/gamma for 5551, temporal dither, HUD-aware tile priority, adaptive budget | Not started |
-| 7 | Optional: remote UE host (cloud GPU) with a small bridge box next to the N64 | Not started |
+| Runs on N64 | Yes, standalone ROM | Display + controller only |
+| Needs a PC while playing | No | Yes |
+| Lumen/Nanite/RT/PT | Baked offline into vertex colours / LODs | Run live on the PC, shown at ~320x240 |
+| Gameplay (Blueprints, C++) | **Not converted yet.** Walk-through viewer only | Fully preserved (it's the real game) |
+| Status | Converter built and tested; ROM not built | Host built and tested; ROM not built |
 
-## Keeping the project unmodified
+## Mode A: unmodified project -> N64 ROM
 
-Everything below is outside the project and uses no engine changes:
-- Launch args, e.g. `-windowed -ResX=1280 -ResY=720` (small window = cheap capture; the N64 downscales anyway).
-- Whatever RT/Lumen/Nanite/path-tracing settings the project already ships with. Hardware RT needs DX12 and an RT-capable GPU on the host; I have not touched this.
+```
+Unreal project --(UnrealEditor-Cmd + tools/ue/export_level.py, project untouched)--> level.glb  (+KHR lights)
+level.glb --(tools/n64fit)--> assets/*.glb + *.png + formats.mk + level_index.h
+assets --(Tiny3D gltf_to_t3d + libdragon mksprite)--> .t3dm models + .sprite textures --> viewer/ ROM
+```
 
-## Risks / open questions
+What each Unreal feature becomes:
 
-1. **Link throughput and latency**: unmeasured; could make the whole thing unplayable. Phase 2 answers it.
-2. **Capture latency** (ffmpeg grab → scale → encode) adds to input-to-photon delay; may need a faster grabber (DXGI/NvFBC).
-3. **libdragon API drift**: only checked against the current master headers by syntax check.
-4. **Hardware needed to go further**: which flashcart do you own, and is the host Windows or Linux?
+| Unreal feature | N64 treatment | Implemented |
+|---|---|---|
+| Static meshes / Nanite | Triangle-budget decimation (meshoptimizer quadric), then re-tessellation of flat areas so baked light has vertices to live on. Hard cap on total triangles. | Yes (tested) |
+| Lumen GI | CPU bake into vertex colours: direct light, ambient occlusion, one diffuse bounce | Yes (tested, brute-force rays) |
+| Hardware RT shadows | Ray-traced shadows in the same bake | Yes (tested) |
+| Path tracing | Not yet. The bake is the hook: swap in Embree/Cycles for production-quality converged results | No |
+| Materials | Base colour only: textured -> `TEX0 × SHADE` combiner, untextured -> `SHADE`; cutout and translucent modes map to RDP render modes. Normal/roughness/metallic are dropped | Yes (schema checked against a real Fast64 export) |
+| Textures | Fitted to TMEM: best of RGBA16 / CI8 / CI4 at power-of-two sizes by error vs a reference | Yes (tested) |
+| Reflections | Planned: sphere-map env texture on glossy materials (Tiny3D supports UV generation) | No |
+| Streaming/World Partition | Grid cells, culled by distance at runtime | Yes (cells; runtime culling in source) |
+| LODs | Planned: second coarser set per cell | No |
+| Lights/Blueprints/animation/audio/UI | Not converted. Needs a Blueprint bytecode interpreter and asset converters | No |
+
+Honest quality expectation: you get a *recognisable, pre-lit low-poly rendition of the level* you can walk around,
+not the game. 5-bit colour, 4 KB textures, a few thousand triangles on screen.
+
+## Mode B: stream (full fidelity, PC required)
+
+`host/` + `n64/`: capture the running game, dither to RGBA5551, send changed tiles over a flashcart's USB link,
+return controller input. Preserves everything the game does, including live Lumen/RT/PT, at the cost of needing the PC
+and a link whose throughput is **unmeasured**. The simulation shows fast full-screen motion exceeds a 2 MB/s link
+without better compression.
+
+## Status — what is and isn't verified
+
+| Item | State |
+|---|---|
+| `host/` streaming bridge | 8 unit tests pass; simulated receiver reproduces frames exactly |
+| `tools/n64fit` converter | 14 unit tests pass on a synthetic Unreal-style level (room, pillar, high-poly sphere, sun + point light). Baked output inspected visually: lamp falloff, pillar and sphere shadows, corner occlusion, bounce light all present |
+| Material JSON vs Tiny3D importer | Checked by reading the importer source and a real Fast64 file, **not** by running the importer |
+| `viewer/src/main.c`, `n64/src/main.c` | Pass a syntax/type check (`gcc -fsyntax-only -DN64`) against libdragon `preview` + Tiny3D headers. The check was confirmed able to fail. **Never compiled for MIPS, never run** |
+| MIPS toolchain | Downloaded libdragon's prebuilt toolchain and unpacked it; **running it was blocked by the session's permission policy**, so nothing has been built |
+| ares / any emulator run | **Not done** (blocked for the same reason; ares has no prebuilt Linux release asset at the URLs I tried, so it would also need a source build) |
+| `tools/ue/export_level.py` | **Untested.** No Unreal install here; API names from memory |
+| `tools/run_ares.sh` | **Untested** |
+| Anything on real hardware | **Not done** |
+
+## Next steps, in order
+
+1. Allow building/running the downloaded toolchain (see below), build libdragon `preview` + Tiny3D, build `viewer`, boot in ares, screenshot. This is the first real proof and will probably expose bugs.
+2. Run the importer on `n64fit` output; fix whatever it rejects.
+3. Export a real level from a real Unreal project with `export_level.py`; fix the script and the loader against real exporter output.
+4. Reflections (sphere map), LODs, collision + gravity so you can walk a real level.
+5. Production bake backend (Embree or Cycles) for path-traced quality; the interface is `bake.bake()`.
+6. Gameplay: a Blueprint bytecode interpreter is the only route to preserving game logic natively. Large.
+7. Measure the USB link and compress for Mode B.

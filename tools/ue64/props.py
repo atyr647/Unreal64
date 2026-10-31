@@ -43,7 +43,7 @@ def _tag_header(r, ctx):
         inner = fname(r, ctx.p.names)
     elif typ == "MapProperty":
         inner = (fname(r, ctx.p.names), fname(r, ctx.p.names))
-    if ctx.p.ue4 >= 282:
+    if ctx.p.ue4 >= 503:                                    # VER_UE4_PROPERTY_GUID_IN_PROPERTY_TAG
         has_guid = r.b[r.p]; r.p += 1
         if has_guid:
             r.skip(16)

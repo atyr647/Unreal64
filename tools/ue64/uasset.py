@@ -224,7 +224,7 @@ def read_tags(p, data, e):
             sub = fname(r, p.names)
         elif typ == "MapProperty":
             sub = (fname(r, p.names), fname(r, p.names))
-        if p.ue4 >= 282:
+        if p.ue4 >= 503:
             has_guid = r.b[r.p]; r.p += 1
             if has_guid:
                 r.skip(16)

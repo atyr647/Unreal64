@@ -91,13 +91,16 @@ overlap, the whole shooting chain, respawn after 5 s); they pass on the host (al
 emulated N64** (docs/img/ares_suite.png). The runtime counts storage exhaustion and the tests fail if any pool overflows.
 
 **Still not ported (reported, not guessed):**
-- **Skeletal data:** socket locations (the fire gun's muzzle uses the gun component's position, not the `Muzzle` socket),
-  animation graphs / state machines, pose evaluation and skinning. These need skeleton reference poses and, for UE5
-  editor-saved assets, the anim-graph nodes; not parsed.
+- **Skeletal data:** `tools/ue64/skeleton.py` now reads reference skeletons (bone hierarchy + local transforms, validated
+  scan; 6-bone gun and 68-bone mannequin both parse) and `SkeletalMeshSocket`s (e.g. gun `Muzzle` = Grip_Bone + (52.96, 0, 11.34)).
+  Not wired into the fire-gun muzzle: the gun is attached to the mannequin's `GunSocket` on `hand_r`, and where `hand_r` is
+  depends on the animation (the reference pose has the arm out sideways), so a correct muzzle needs animation evaluation —
+  anim sequences (compressed tracks) and the AnimBP state machine — which is not parsed. Until then the muzzle is the gun
+  component's position. Skinning is likewise not done.
 - **World geometry:** the data has no level collision meshes, so the floor is the height an actor starts at and traces/
   overlaps only see characters, projectiles and trigger volumes. (The editor export on a Mac mini provides geometry.)
 - `ScalableFloat` curve tables, custom magnitude calculation classes and effect `Components`: the extractor flags them as
-  unsupported (this project uses none). Pre-UE4.20 asset tag layouts (a few old template assets) keep defaults unread.
+  unsupported (this project uses none). 
 - UE5 editor-saved Blueprints contain only graph nodes, not bytecode (they need a cook or a graph compiler); networking;
   UI drawing beyond the HUD bars; audio; hit-react/damage-number visuals; AI behaviour (minions stand still).
 - Lumen, Nanite and the rest of the rendering pipeline (see the pipeline section; geometry/lighting conversion is

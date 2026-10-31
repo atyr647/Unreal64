@@ -81,6 +81,7 @@ public:
   bool InstanceOf(const UClass *c) const override { return c == StaticClass(); }
   virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &) const {}
   virtual bool GetShouldTick() const { return false; }
+  template <class... A> void SetReplicationMode(A...) {} template <class... A> void SetIsReplicated(A...) {} FGameplayAbilitySpec *FindAbilitySpecFromHandle(FGameplayAbilitySpecHandle) const { return nullptr; }
   virtual void TickComponent(float, ELevelTick, FActorComponentTickFunction *) {}
   virtual void InitAbilityActorInfo(AActor *, AActor *) {}
   virtual void AbilityLocalInputPressed(int32) {}
@@ -90,8 +91,9 @@ public:
   void AddLooseGameplayTag(const FGameplayTag &, int32 = 1) {} void AddLooseGameplayTags(const FGameplayTagContainer &, int32 = 1) {}
   void RemoveLooseGameplayTag(const FGameplayTag &, int32 = 1) {} void RemoveLooseGameplayTags(const FGameplayTagContainer &, int32 = 1) {}
   AActor *GetOwnerActor() const { return nullptr; } AActor *GetAvatarActor() const { return nullptr; }
-  virtual void SetNumericAttributeBase(const FGameplayAttribute &a, float v) = 0;
-  virtual void ApplyModToAttributeUnsafe(const FGameplayAttribute &a, EGameplayModOp op, float magnitude) = 0;
+  virtual void SetNumericAttributeBase(const FGameplayAttribute &, float) {}
+  virtual void ApplyModToAttributeUnsafe(const FGameplayAttribute &, EGameplayModOp, float) {}
+  template <class... A> FGameplayAbilitySpec *FindAbilitySpecFromClass(A...) const { return nullptr; }
   TSharedPtr<FGameplayAbilityActorInfo> AbilityActorInfo;
   virtual FGameplayEffectContextHandle MakeEffectContext() { return FGameplayEffectContextHandle(); }
   virtual void ApplyGameplayEffectToSelf(const UGameplayEffect *, float, FGameplayEffectContextHandle) {}

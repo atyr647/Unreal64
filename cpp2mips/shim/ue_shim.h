@@ -16,6 +16,8 @@ typedef uint8_t uint8; typedef uint16_t uint16; typedef uint32_t uint32; typedef
 #define UCLASS(...)
 #define USTRUCT(...)
 #define UENUM(...)
+#define UINTERFACE(...)
+#define MinimalAPI
 #define UPROPERTY(...)
 #define UFUNCTION(...)
 #define UMETA(...)
@@ -29,8 +31,18 @@ typedef uint8_t uint8; typedef uint16_t uint16; typedef uint32_t uint32; typedef
 #define UE_CONCAT(a, b) UE_CONCAT_(a, b)
 // UHT emits <File>.generated.h with one macro per GENERATED_BODY() line; uht_lite.py does the same.
 #define GENERATED_USTRUCT_BODY() GENERATED_BODY()
-#define DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(Name, T1, N1) struct Name { void Broadcast(T1) {} }
-#define DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(Name, T1, N1, T2, N2) struct Name { void Broadcast(T1, T2) {} }
+struct FDelegateBase { template <class... A> void Broadcast(A...) const {} template <class... A> void AddDynamic(A...) {} template <class... A> void RemoveDynamic(A...) {} template <class... A> void AddUniqueDynamic(A...) {} template <class... A> void BindDynamic(A...) {} bool IsBound() const { return false; } template <class... A> void Execute(A...) const {} template <class... A> bool ExecuteIfBound(A...) const { return false; } };
+#define DECLARE_DYNAMIC_MULTICAST_DELEGATE(Name) struct Name : FDelegateBase {}
+#define DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(Name, ...) struct Name : FDelegateBase {}
+#define DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(Name, ...) struct Name : FDelegateBase {}
+#define DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(Name, ...) struct Name : FDelegateBase {}
+#define DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(Name, ...) struct Name : FDelegateBase {}
+#define DECLARE_DYNAMIC_MULTICAST_DELEGATE_FiveParams(Name, ...) struct Name : FDelegateBase {}
+#define DECLARE_DYNAMIC_DELEGATE_OneParam(Name, ...) struct Name : FDelegateBase {}
+#define DECLARE_DYNAMIC_DELEGATE(Name) struct Name : FDelegateBase {}
+#define DECLARE_MULTICAST_DELEGATE_OneParam(Name, ...) struct Name : FDelegateBase {}
+#define DECLARE_MULTICAST_DELEGATE_TwoParams(Name, ...) struct Name : FDelegateBase {}
+#define DECLARE_DELEGATE_OneParam(Name, ...) struct Name : FDelegateBase {}
 #define GENERATED_BODY() UE_CONCAT(UE_CONCAT(CURRENT_FILE_ID, _), UE_CONCAT(__LINE__, _GENERATED_BODY))
 
 struct FName {                                               // interned: identical names compare by pointer
@@ -45,16 +57,19 @@ struct FName {                                               // interned: identi
 
 struct UClass { const char *Name; };
 struct FText { const char *s = ""; };
-struct FString { const char *s = ""; };
+struct FString { const char *s = ""; template <class... A> static FString Printf(const char *, A...) { return FString(); } };
+static int GPlayInEditorID = 0;
 struct FProperty { FName Name; };
 static const FName NAME_None;
 struct UObject {
   virtual ~UObject() {}
   virtual bool InstanceOf(const UClass *) const { return false; }     // generated per class (Cast<> without RTTI)
-  void *rt = nullptr;                                                     // the Unreal64 runtime object this one stands for
+  template <class T, class... A> T *CreateDefaultSubobject(A...) { return new T(); }
+  void *rt = nullptr; struct UWorld *GetWorld() const { return nullptr; }                                                     // the Unreal64 runtime object this one stands for
 };
 template <class T, class U> T *Cast(U *p) { return p && p->InstanceOf(T::StaticClass()) ? static_cast<T *>(p) : nullptr; }
-template <class T> struct TSubclassOf { UClass *c = nullptr; };
+template <class T> struct TEnumAsByte { uint8 v = 0; TEnumAsByte() {} TEnumAsByte(T x) : v((uint8)x) {} operator T() const { return (T)v; } };
+template <class T> struct TSubclassOf { UClass *c = nullptr; bool operator!() const { return c == nullptr; } explicit operator bool() const { return c != nullptr; } UClass *Get() const { return c; } };
 template <class T> struct TWeakObjectPtr { T *p = nullptr; TWeakObjectPtr() {} TWeakObjectPtr(T *x) : p(x) {} bool operator==(const TWeakObjectPtr &o) const { return p == o.p; } bool IsValid() const { return p != nullptr; } T *Get() const { return p; } T *operator->() const { return p; } };
 template <class T> struct TSharedPtr { T *p = nullptr; bool IsValid() const { return p != nullptr; } T *Get() const { return p; } T *operator->() const { return p; } T &operator*() const { return *p; } };
 struct UPackage {};
@@ -83,7 +98,7 @@ template <class T> struct TArray {                             // the part of TA
   int32 AddUnique(const T &v) { for (int i = 0; i < n; i++) if (d[i] == v) return i; return Add(v); }
   void Append(const TArray &o) { for (int i = 0; i < o.n; i++) Add(o.d[i]); }
   bool Contains(const T &v) const { for (int i = 0; i < n; i++) if (d[i] == v) return true; return false; }
-  void Empty() { n = 0; } void Reset() { n = 0; }
+  void Empty() { n = 0; } void Reset() { n = 0; } int32 Remove(const T &v) { int32 r = 0; for (int i = 0; i < n;) if (d[i] == v) { d[i] = d[--n]; r++; } else i++; return r; }
   bool IsValidIndex(int32 i) const { return i >= 0 && i < n; }
   T *begin() { return d; } T *end() { return d + n; } const T *begin() const { return d; } const T *end() const { return d + n; }
   int32 Num() const { return n; }
@@ -99,4 +114,5 @@ template <class K, class V> struct TMap { K k[32]; V v[32]; int n = 0;          
   V *Find(const K &key) { for (int i = 0; i < n; i++) if (k[i] == key) return &v[i]; return nullptr; }
   const V *Find(const K &key) const { for (int i = 0; i < n; i++) if (k[i] == key) return &v[i]; return nullptr; }
   V &Add(const K &key, const V &val) { V *f = Find(key); if (f) { *f = val; return *f; } k[n] = key; v[n] = val; return v[n++]; }
+  bool Contains(const K &key) const { return Find(key) != nullptr; } void Empty() { n = 0; } int32 Remove(const K &key) { for (int i = 0; i < n; i++) if (k[i] == key) { k[i] = k[n - 1]; v[i] = v[n - 1]; n--; return 1; } return 0; }
   V &operator[](const K &key) { V *f = Find(key); return f ? *f : Add(key, V()); } int32 Num() const { return n; } };

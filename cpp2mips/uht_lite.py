@@ -26,14 +26,15 @@ def generate(header, out):
         p = PROP.match(ln)
         if p and cur:
             props[cur].append(p.group(1))
-        if re.search(r"GENERATED_(USTRUCT_)?BODY\(\)", ln) and cur:
+        if re.search(r"GENERATED_(USTRUCT_|UCLASS_)?BODY\(\)", ln) and cur:
             sup = f"typedef {bases[cur]} Super; " if bases.get(cur) else ""
             finders = ""
             if bases.get(cur) == "UAttributeSet" or (bases.get(cur) or "").startswith("UGS") and False:
                 pass
             sstruct = f" static UScriptStruct *StaticStruct() {{ static UScriptStruct s; return &s; }}" if kinds.get(cur) == "struct" else ""
             inst = f" bool InstanceOf(const UClass *c) const override {{ return c == StaticClass() || Super::InstanceOf(c); }}" if bases.get(cur) and bases[cur][0] in "UA" else ""
-            body = f"public: {sup}typedef {cur} ThisClass; static UClass *StaticClass() {{ static UClass c = {{\"{cur}\"}}; return &c; }}{inst}{sstruct}"
+            ctor = f" {cur}(const FObjectInitializer &i = FObjectInitializer());" if "GENERATED_UCLASS_BODY" in ln else ""
+            body = f"public: {sup}{ctor} typedef {cur} ThisClass; static UClass *StaticClass() {{ static UClass c = {{\"{cur}\"}}; return &c; }}{inst}{sstruct}"
             res.append(f"#define {fid}_{i}_GENERATED_BODY {body} @FIND@{cur}@")
     text = "\n".join(res) + "\n"
     for cls, plist in props.items():

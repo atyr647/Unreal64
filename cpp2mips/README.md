@@ -63,7 +63,7 @@ Not mirrored: the spec's dynamic asset tags (damage-number UI only).
 
 ## Compile coverage (measured: `cpp2mips/coverage.sh <Source/Module>`, `g++ -fsyntax-only` against the shim)
 
-10 of the 45 `.cpp` files compile unmodified (the two attribute sets, effect types, target types, the empty UI / controller / cue-manager classes). Started
+13 of the 45 `.cpp` files compile unmodified (the two attribute sets, effect types, target types, UI / cue-manager classes and more; `coverage.sh` lists them). Started
 the GAS core in the shim (`shim/ue_gas.h`: ability specs / handles / target data / events / effect contexts, `UGameplayAbility`, `UAbilitySystemGlobals`,
 the ASC surface in `AttributeSet.h`; `shim/ue_engine.h`: collision query params, world, components, tasks, widgets, movement stubs). The remaining 35 each stop at
 a handful of missing members or types; the loop that was used (compile, read the most common first error, add the type, repeat) took the count from 2 to 10

@@ -14,7 +14,7 @@ enum class EGameplayAbilityActivationMode { Authority, NonAuthority, Predicting,
 struct FGameplayAbilityActivationInfo { EGameplayAbilityActivationMode ActivationMode = EGameplayAbilityActivationMode::Authority; FPredictionKey GetActivationPredictionKey() const { return FPredictionKey(); } };
 struct FGameplayEventData { FGameplayEffectContextHandle ContextHandle; FGameplayTag EventTag; AActor *Instigator = nullptr, *Target = nullptr; const UObject *OptionalObject = nullptr; FGameplayTagContainer InstigatorTags, TargetTags; float EventMagnitude = 0; };
 class UGameplayAbility;
-struct FGameplayAbilitySpec { FGameplayAbilitySpecHandle Handle; UGameplayAbility *Ability = nullptr; int32 Level = 1; int32 InputID = -1; UObject *SourceObject = nullptr; bool IsActive() const { return false; } };
+struct FGameplayAbilitySpec { UGameplayAbility *GetPrimaryInstance() const { return Ability; } FGameplayAbilitySpecHandle Handle; UGameplayAbility *Ability = nullptr; int32 Level = 1; int32 InputID = -1; UObject *SourceObject = nullptr; bool IsActive() const { return false; } };
 
 struct FGameplayAbilityTargetData { virtual ~FGameplayAbilityTargetData() {} virtual bool HasHitResult() const { return false; } virtual const FHitResult *GetHitResult() const { return nullptr; } };
 struct FGameplayAbilityTargetData_SingleTargetHit : FGameplayAbilityTargetData { FHitResult HitResult; FGameplayAbilityTargetData_SingleTargetHit() {} FGameplayAbilityTargetData_SingleTargetHit(const FHitResult &h) : HitResult(h) {}
@@ -31,11 +31,12 @@ public:
   static UClass *StaticClass() { static UClass c = {"UAbilitySystemGlobals"}; return &c; }
   bool InstanceOf(const UClass *c) const override { return c == StaticClass(); }
   virtual FGameplayEffectContext *AllocGameplayEffectContext() const { return new FGameplayEffectContext(); }
-  virtual void InitGlobalTags() {}
+  virtual void InitGlobalTags() {} virtual void InitGlobalData() {}
   static UAbilitySystemGlobals &Get() { static UAbilitySystemGlobals g; return g; }
 };
 struct USkeletalMeshComponent : UObject {}; struct UAnimMontage : UObject {};
 struct FGameplayAbilityActorInfoFull;
+enum class EGameplayAbilityInstancingPolicy { NonInstanced, InstancedPerActor, InstancedPerExecution };
 class UGameplayAbility : public UObject {
 public:
   static UClass *StaticClass() { static UClass c = {"UGameplayAbility"}; return &c; }
@@ -58,5 +59,7 @@ public:
   UAbilitySystemComponent *GetAbilitySystemComponentFromActorInfo() const { return CurrentActorInfo ? CurrentActorInfo->AbilitySystemComponent : nullptr; }
   virtual void InputReleased(const FGameplayAbilitySpecHandle, const FGameplayAbilityActorInfo *, FGameplayAbilityActivationInfo) {}
   virtual void InputPressed(const FGameplayAbilitySpecHandle, const FGameplayAbilityActorInfo *, FGameplayAbilityActivationInfo) {}
+  EGameplayAbilityInstancingPolicy InstancingPolicy = EGameplayAbilityInstancingPolicy::InstancedPerActor; int NetExecutionPolicy = 0;
+  bool IsActive() const { return false; } bool IsInstantiated() const { return true; }
   void K2_EndAbility() {} void K2_CancelAbility() {}
 };

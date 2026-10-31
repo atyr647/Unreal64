@@ -50,3 +50,13 @@ Recommended order: (a) shim `UAbilitySystemComponent` over the runtime ASC and r
 most exact-value-checkable class) through `PostGameplayEffectExecute`, replacing `rules_*` in `u64_cpp_gasshooter.c`, keeping the shooter
 scenarios (`tools/run_shooter_tests.sh`) as the regression; (b) property/function tables from `uht_lite` so Blueprints call C++ methods
 without registry glue; (c) the heavy classes, one at a time, each swapped in only when the scenarios still pass.
+
+## Update: the damage rules run in the project's C++ too
+
+`GSAttributeSetBase.cpp` (damage -> shield -> health, clamps, bounty effect, max-change scaling, MoveSpeed clamp) also compiles unmodified against the
+shim and runs inside the scenario suite (`cpp2mips/bridge_base.cpp`; 1270 calls, all scenarios pass on the host, `run_shooter_cxx.sh`). What it took:
+the character / controller types as runtime-backed proxies (`IsAlive` reads the runtime's Health; one "controller" per actor), `Cast<>` without RTTI
+(uht_lite emits `InstanceOf`), `FGameplayEffectSpec` / context / `NewObject<UGameplayEffect>` stand-ins, and the project's `GSCharacterBase` /
+`GSPlayerController` members that this build does not compile defined as runtime glue (`bridge_base.cpp`). Two bugs the suite caught in my own shim:
+a property table that recycled entries (attribute identity broke after 256 lookups) and proxies cached by runtime object slot (slots are reused).
+Not mirrored: the spec's dynamic asset tags (damage-number UI only).

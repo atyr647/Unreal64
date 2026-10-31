@@ -37,6 +37,9 @@ static const char *ammo_attr(const char *tag, int max)
 static float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
 static void gs_pre_attribute_change(u64_obj *asc, const char *name, float *nv)      // UGSAttributeSetBase::PreAttributeChange
 {
+#ifdef U64_CXX_BASE                                                // the project's own C++ (UGSAttributeSetBase.cpp, unmodified): see cpp2mips/
+  { extern int u64_cxx_base_pre_change(u64_obj *, const char *, float *); if (u64_cxx_base_pre_change(asc, name, nv)) return; }
+#endif
   if (!strcmp(name, "MaxHealth")) u64_adjust_for_max_change(asc, "Health", "MaxHealth", *nv);
   else if (!strcmp(name, "MaxMana")) u64_adjust_for_max_change(asc, "Mana", "MaxMana", *nv);
   else if (!strcmp(name, "MaxStamina")) u64_adjust_for_max_change(asc, "Stamina", "MaxStamina", *nv);
@@ -45,6 +48,9 @@ static void gs_pre_attribute_change(u64_obj *asc, const char *name, float *nv)  
 static int is_alive(u64_obj *ch) { return u64_obj_alive(ch) && u64_attr_get(u64_asc_of(ch), "Health") > 0; }   // GetHealth() > 0
 static int gs_post_execute(u64_obj *tgt, const char *name, u64_obj *src)            // UGSAttributeSetBase / UGSAmmoAttributeSet::PostGameplayEffectExecute
 {
+#ifdef U64_CXX_BASE
+  { extern int u64_cxx_base_post_execute(u64_obj *, const char *, u64_obj *); if (u64_cxx_base_post_execute(tgt, name, src)) return 1; }
+#endif
   u64_obj *target_actor = u64_asc_owner(tgt), *source_actor = src ? u64_asc_owner(src) : 0;
   if (!strcmp(name, "Damage")) {
     float local = u64_attr_get(tgt, "Damage");
@@ -72,6 +78,9 @@ static int gs_post_execute(u64_obj *tgt, const char *name, u64_obj *src)        
   if (!strcmp(name, "Mana")) { u64_attr_set_base(tgt, "Mana", clampf(u64_attr_get(tgt, "Mana"), 0.0f, u64_attr_get(tgt, "MaxMana"))); return 1; }
   if (!strcmp(name, "Stamina")) { u64_attr_set_base(tgt, "Stamina", clampf(u64_attr_get(tgt, "Stamina"), 0.0f, u64_attr_get(tgt, "MaxStamina"))); return 1; }
   if (!strcmp(name, "Shield")) { u64_attr_set_base(tgt, "Shield", clampf(u64_attr_get(tgt, "Shield"), 0.0f, u64_attr_get(tgt, "MaxShield"))); return 1; }
+#ifdef U64_CXX_AMMO                                                // the project's own C++ (UGSAmmoAttributeSet.cpp, unmodified) instead of the port below: see cpp2mips/
+  { extern int u64_cxx_ammo_post_execute(u64_obj *, const char *); if (u64_cxx_ammo_post_execute(tgt, name)) return 1; }
+#endif
   static const char *const ammo[] = {"Rifle", "Rocket", "Shotgun"};
   for (int i = 0; i < 3; i++) {
     char cur[32], max[32]; snprintf(cur, sizeof cur, "%sReserveAmmo", ammo[i]); snprintf(max, sizeof max, "Max%sReserveAmmo", ammo[i]);

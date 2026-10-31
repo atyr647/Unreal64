@@ -15,7 +15,7 @@ int main() {
   UGSAmmoAttributeSet s; MockASC asc; asc.set = &s; s.Owner = &asc;
   s.InitMaxRifleReserveAmmo(300); s.InitRifleReserveAmmo(60);
   s.InitMaxRocketReserveAmmo(30); s.InitRocketReserveAmmo(24);
-  FGameplayEffectModCallbackData d;
+  FGameplayEffectModCallbackData d(asc);
   s.RifleReserveAmmo.SetCurrentValue(350);                          // an effect pushed the value over the max
   d.EvaluatedData.Attribute = UGSAmmoAttributeSet::GetRifleReserveAmmoAttribute();
   s.PostGameplayEffectExecute(d);

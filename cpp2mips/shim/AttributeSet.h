@@ -2,6 +2,7 @@
 #include "ue_shim.h"
 #include "Net/UnrealNetwork.h"
 
+enum class EGameplayModOp { Additive, Multiplicitive, Division, Override };
 struct FGameplayTag {
   FName Name;
   static FGameplayTag RequestGameplayTag(FName n) { FGameplayTag t; t.Name = n; return t; }
@@ -27,17 +28,44 @@ struct FGameplayAttributeData {
   void SetCurrentValue(float v) { CurrentValue = v; }
 };
 
-enum class EGameplayModOp { Additive, Multiplicitive, Division, Override };
 
+struct AActor; struct AController; class UAbilitySystemComponent; class UGameplayEffect;
+struct FGameplayTagContainer {
+  FGameplayTag t[16]; int n = 0;
+  void AddTagFast(const FGameplayTag &x) { if (n < 16) t[n++] = x; }
+  void AddTag(const FGameplayTag &x) { if (!HasTag(x)) AddTagFast(x); }
+  void AppendTags(const FGameplayTagContainer &o) { for (int i = 0; i < o.n; i++) AddTag(o.t[i]); }
+  bool HasTag(const FGameplayTag &x) const { for (int i = 0; i < n; i++) if (t[i] == x) return true; return false; }
+};
+struct FGameplayAbilityActorInfo { TWeakObjectPtr<AActor> AvatarActor; TWeakObjectPtr<AController> PlayerController; };
+struct FGameplayEffectContext { AActor *EffectCauser = nullptr; UAbilitySystemComponent *Instigator = nullptr; };
+struct FGameplayEffectContextHandle {
+  FGameplayEffectContext *d = nullptr;
+  UAbilitySystemComponent *GetOriginalInstigatorAbilitySystemComponent() const { return d ? d->Instigator : nullptr; }
+  AActor *GetEffectCauser() const { return d ? d->EffectCauser : nullptr; }
+};
+struct FTagCapture { FGameplayTagContainer agg; const FGameplayTagContainer *GetAggregatedTags() const { return &agg; } };
+struct FGameplayEffectSpec {
+  FGameplayEffectContextHandle Context; FTagCapture CapturedSourceTags; FGameplayTagContainer DynamicAssetTags, AssetTags;
+  FGameplayEffectContextHandle GetContext() const { return Context; }
+  void GetAllAssetTags(FGameplayTagContainer &o) const { o = AssetTags; o.AppendTags(DynamicAssetTags); }
+};
+struct FScalableFloat { float Value = 0; FScalableFloat() {} FScalableFloat(float v) : Value(v) {} };
+enum class EGameplayEffectDurationType { Instant, Infinite, HasDuration };
+struct FGameplayModifierInfo { FScalableFloat ModifierMagnitude; EGameplayModOp ModifierOp = EGameplayModOp::Additive; FGameplayAttribute Attribute; };
+class UGameplayEffect : public UObject { public: EGameplayEffectDurationType DurationPolicy = EGameplayEffectDurationType::Instant; TArray<FGameplayModifierInfo> Modifiers; };
 class UAbilitySystemComponent {                                   // implemented by the Unreal64 runtime (bridge): the C++ only calls these
 public:
   virtual ~UAbilitySystemComponent() {}
   virtual void SetNumericAttributeBase(const FGameplayAttribute &a, float v) = 0;
   virtual void ApplyModToAttributeUnsafe(const FGameplayAttribute &a, EGameplayModOp op, float magnitude) = 0;
+  TSharedPtr<FGameplayAbilityActorInfo> AbilityActorInfo;
+  virtual FGameplayEffectContextHandle MakeEffectContext() { return FGameplayEffectContextHandle(); }
+  virtual void ApplyGameplayEffectToSelf(const UGameplayEffect *, float, FGameplayEffectContextHandle) {}
 };
 
 struct FGameplayModifierEvaluatedData { FGameplayAttribute Attribute; float Magnitude = 0; };
-struct FGameplayEffectModCallbackData { FGameplayModifierEvaluatedData EvaluatedData; };
+struct FGameplayEffectModCallbackData { FGameplayEffectSpec EffectSpec; FGameplayModifierEvaluatedData EvaluatedData; UAbilitySystemComponent &Target; FGameplayEffectModCallbackData(UAbilitySystemComponent &t) : Target(t) {} };
 
 class UAttributeSet : public UObject {
 public:

@@ -41,7 +41,7 @@ extern "C" int u64_cxx_ammo_post_execute(u64_obj *asc, const char *name)
   Slot *s = mine ? slot_for(asc) : nullptr;
   if (!s) return 0;
   for (int i = 0; names[i]; i++) { FGameplayAttributeData *d = s->set.FindAttributeData(FName(names[i])); float v = u64_attr_get(asc, names[i]); d->SetBaseValue(v); d->SetCurrentValue(v); }
-  FGameplayEffectModCallbackData data;
+  FGameplayEffectModCallbackData data(*s->set.Owner);
   data.EvaluatedData.Attribute = FGameplayAttribute(FindFieldChecked<FProperty>(nullptr, FName(name)));
   s->set.PostGameplayEffectExecute(data);
   u64_cxx_ammo_calls++;

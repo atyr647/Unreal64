@@ -956,6 +956,7 @@ float u64_max_speed(u64_obj *actor)                            // UGDCharacterMo
   return ms;
 }
 int u64_asc_ability_count(u64_obj *asc) { asc_t *a = asc_from(asc); return a ? a->nabil : 0; }
+void u64_attr_add_base_unsafe(u64_obj *asc, const char *name, float d) { asc_t *a = asc_from(asc); if (a) { attr(a, name)->base += d; recompute(a); } }   // ApplyModToAttributeUnsafe (additive): no change callbacks
 void u64_attr_set_base(u64_obj *asc, const char *name, float v) { asc_t *a = asc_from(asc); if (a) set_base(a, name, v); }
 
 // ---------------------------------------------------------------------------------------------------- component overlap events

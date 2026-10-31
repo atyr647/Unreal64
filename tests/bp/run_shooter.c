@@ -380,6 +380,9 @@ int u64_run_shooter_scenarios(int verbose)
 #ifdef U64_CXX_AMMO
   { extern int u64_cxx_ammo_calls; printf("ammo attribute rules run by the project's C++: %d calls\n", u64_cxx_ammo_calls); CHECK(u64_cxx_ammo_calls > 0); }
 #endif
+#ifdef U64_CXX_BASE
+  { extern int u64_cxx_base_calls; printf("damage / health rules run by the project's C++: %d calls\n", u64_cxx_base_calls); CHECK(u64_cxx_base_calls > 0); }
+#endif
   CHECK(u64_rt_overflows == 0);
   printf(fails ? "shooter: %d FAILED\n" : "shooter: ALL PASSED\n", fails);
   return fails;

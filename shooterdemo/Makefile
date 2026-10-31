@@ -15,16 +15,21 @@ objs = $(patsubst $(SOURCE_DIR)/%.c,$(BUILD_DIR)/%.o,$(src))
 
 ifdef CXX_AMMO
 GS = $(GASSHOOTER_SRC)
-N64_CFLAGS += -DU64_CXX_AMMO
-N64_CXXFLAGS += -std=gnu++17 -fno-exceptions -fno-rtti -fno-threadsafe-statics -w -I../cpp2mips/shim -I$(BUILD_DIR)/ugen -I$(GS)/Public -I../runtime
-objs += $(BUILD_DIR)/cxx/bridge_ammo.o $(BUILD_DIR)/cxx/fname.o $(BUILD_DIR)/cxx/GSAmmoAttributeSet.o
-$(BUILD_DIR)/ugen/GSAmmoAttributeSet.generated.h: $(GS)/Public/Characters/Abilities/AttributeSets/GSAmmoAttributeSet.h
-	python3 ../cpp2mips/uht_lite.py $(BUILD_DIR)/ugen $<
+N64_CFLAGS += -DU64_CXX_AMMO -DU64_CXX_BASE
+N64_CXXFLAGS += -std=gnu++20 -fno-exceptions -fno-rtti -fno-threadsafe-statics -w -I../cpp2mips/shim -I$(BUILD_DIR)/ugen -I$(GS)/Public -I$(GS)/.. -I../runtime
+objs += $(BUILD_DIR)/cxx/bridge_ammo.o $(BUILD_DIR)/cxx/fname.o $(BUILD_DIR)/cxx/GSAmmoAttributeSet.o $(BUILD_DIR)/cxx/bridge_base.o $(BUILD_DIR)/cxx/GSAttributeSetBase.o
+UHT_HEADERS = $(GS)/Public/Characters/Abilities/AttributeSets/GSAmmoAttributeSet.h $(GS)/Public/Characters/Abilities/AttributeSets/GSAttributeSetBase.h $(GS)/Public/Characters/GSCharacterBase.h $(GS)/Public/Player/GSPlayerController.h
+$(BUILD_DIR)/ugen/GSAmmoAttributeSet.generated.h: $(UHT_HEADERS)
+	python3 ../cpp2mips/uht_lite.py $(BUILD_DIR)/ugen $(UHT_HEADERS)
 $(BUILD_DIR)/cxx/bridge_ammo.o: ../cpp2mips/bridge_ammo.cpp $(BUILD_DIR)/ugen/GSAmmoAttributeSet.generated.h
 	@mkdir -p $(dir $@); echo "    [CXX] $<"; $(N64_CXX) $(N64_CXXFLAGS) -c -o $@ $<
 $(BUILD_DIR)/cxx/fname.o: ../cpp2mips/fname.cpp
 	@mkdir -p $(dir $@); echo "    [CXX] $<"; $(N64_CXX) $(N64_CXXFLAGS) -c -o $@ $<
 $(BUILD_DIR)/cxx/GSAmmoAttributeSet.o: $(GS)/Private/Characters/Abilities/AttributeSets/GSAmmoAttributeSet.cpp $(BUILD_DIR)/ugen/GSAmmoAttributeSet.generated.h
+	@mkdir -p $(dir $@); echo "    [CXX] $<"; $(N64_CXX) $(N64_CXXFLAGS) -c -o $@ $<
+$(BUILD_DIR)/cxx/bridge_base.o: ../cpp2mips/bridge_base.cpp $(BUILD_DIR)/ugen/GSAmmoAttributeSet.generated.h
+	@mkdir -p $(dir $@); echo "    [CXX] $<"; $(N64_CXX) $(N64_CXXFLAGS) -c -o $@ $<
+$(BUILD_DIR)/cxx/GSAttributeSetBase.o: $(GS)/Private/Characters/Abilities/AttributeSets/GSAttributeSetBase.cpp $(BUILD_DIR)/ugen/GSAmmoAttributeSet.generated.h
 	@mkdir -p $(dir $@); echo "    [CXX] $<"; $(N64_CXX) $(N64_CXXFLAGS) -c -o $@ $<
 endif
 

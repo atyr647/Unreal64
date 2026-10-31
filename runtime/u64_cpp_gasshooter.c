@@ -37,6 +37,9 @@ static const char *ammo_attr(const char *tag, int max)
 static float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
 static void gs_pre_attribute_change(u64_obj *asc, const char *name, float *nv)      // UGSAttributeSetBase::PreAttributeChange
 {
+#ifdef U64_CXX_BASE                                                // the project's own C++ (UGSAttributeSetBase.cpp, unmodified): see cpp2mips/
+  { extern int u64_cxx_base_pre_change(u64_obj *, const char *, float *); if (u64_cxx_base_pre_change(asc, name, nv)) return; }
+#endif
   if (!strcmp(name, "MaxHealth")) u64_adjust_for_max_change(asc, "Health", "MaxHealth", *nv);
   else if (!strcmp(name, "MaxMana")) u64_adjust_for_max_change(asc, "Mana", "MaxMana", *nv);
   else if (!strcmp(name, "MaxStamina")) u64_adjust_for_max_change(asc, "Stamina", "MaxStamina", *nv);
@@ -45,6 +48,9 @@ static void gs_pre_attribute_change(u64_obj *asc, const char *name, float *nv)  
 static int is_alive(u64_obj *ch) { return u64_obj_alive(ch) && u64_attr_get(u64_asc_of(ch), "Health") > 0; }   // GetHealth() > 0
 static int gs_post_execute(u64_obj *tgt, const char *name, u64_obj *src)            // UGSAttributeSetBase / UGSAmmoAttributeSet::PostGameplayEffectExecute
 {
+#ifdef U64_CXX_BASE
+  { extern int u64_cxx_base_post_execute(u64_obj *, const char *, u64_obj *); if (u64_cxx_base_post_execute(tgt, name, src)) return 1; }
+#endif
   u64_obj *target_actor = u64_asc_owner(tgt), *source_actor = src ? u64_asc_owner(src) : 0;
   if (!strcmp(name, "Damage")) {
     float local = u64_attr_get(tgt, "Damage");

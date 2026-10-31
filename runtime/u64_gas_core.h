@@ -95,6 +95,7 @@ int u64_cpp_ability_activate(u64_obj *ability);             // 1 if a C++ overri
 int u64_cpp_ability_can_activate(u64_obj *ability);
 void u64_cpp_ability_input_released(u64_obj *ability);
 int u64_ge_register(const u64_ge_def *def);                    // effects created at run time (e.g. the bounty effect, tests)
+void u64_attr_add_base_unsafe(u64_obj *asc, const char *name, float delta);
 void u64_attr_set_base(u64_obj *asc, const char *name, float v);   // the attribute setter (SetHealth etc.)
 void u64_overlap_events_tick(void);
 int u64_sweep_sphere(const float start[3], const float end[3], float radius, u64_obj *ignore, float *t_out);

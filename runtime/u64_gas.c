@@ -11,12 +11,12 @@ static float F(u64_v v) { return v.t == U64_INT || v.t == U64_BOOL ? (float)v.u.
 static const u64_v NONE_ = {U64_NONE};
 
 // ---- string pool ----
-static char pool[8192]; static int pool_n;
+static char pool[65536]; static int pool_n;
 const char *u64_intern(const char *s)
 {
   for (int i = 0; i < pool_n; i += (int)strlen(pool + i) + 1) if (!strcmp(pool + i, s)) return pool + i;
   int n = (int)strlen(s) + 1;
-  if (pool_n + n > (int)sizeof pool) return "?";
+  if (pool_n + n > (int)sizeof pool) { if (!u64_rt_overflows++ && u64_log) u64_log("  [error] string pool exhausted"); return "?"; }
   memcpy(pool + pool_n, s, n); pool_n += n;
   return pool + pool_n - n;
 }

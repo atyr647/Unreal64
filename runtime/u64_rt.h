@@ -76,6 +76,8 @@ int u64_obj_alive(u64_obj *o);
 int u64_native_hits(const char *fn);                   // times a native ran; -1 if never implemented
 
 // Natives implemented in u64_gas.c (Gameplay Ability System, UI, animation, tasks).
+u64_v u64_xform_new(u64_v loc, u64_v rot);   // a transform keeps location + rotation
+u64_v u64_array_get(u64_v a, int i);
 int u64_native_math(u64_obj *self, const char *fn, int argc, const u64_v *a, u64_v *out);   // 1 if handled
 u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *argv);
 void u64_timer_broadcast(float t, u64_obj *task, const char *delegate_name, u64_v arg);
@@ -106,6 +108,8 @@ void u64_set_return(u64_v v);   // a Blueprint function's return value, picked u
 const char *u64_parent_of(const char *cls);
 int u64_class_is(const char *cls, const char *ancestor);
 void u64_cpp_construct(u64_obj *o, const char *cls);                         // C++ constructor defaults of exactly this class
+void u64_cpp_register_class(const char *cls, const char *parent, void (*ctor)(u64_obj *));   // a project's C++ class (constructor defaults)
+void u64_cpp_register_method(const char *cls, const char *fn, u64_v (*f)(u64_obj *self, int argc, const u64_v *argv));
 int u64_cpp_dispatch(u64_obj *self, const char *fn, int argc, const u64_v *argv, u64_v *ret);   // member functions along the chain
 float u64_world_dt(void);
 void u64_obj_set_alive(u64_obj *o, int v);

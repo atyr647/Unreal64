@@ -24,6 +24,10 @@ def cval(v, owner="o"):
             return f"u64_cls({codegen.cstr(v[1].removesuffix('_C'))})"
         if v[0] == "vec": return f"u64_vec({v[1][0]!r}f, {v[1][1]!r}f, {v[1][2]!r}f)"
         if v[0] == "enum": return f"u64_name({codegen.cstr(v[1])})"
+        if v[0] == "struct" and len(v) > 2 and v[2] == "GameplayTag" and isinstance(v[1], dict) and v[1].get("TagName", (None,))[0] == "name":
+            return f"u64_name({codegen.cstr(v[1]['TagName'][1])})"                 # 4.26 saves the tag as a struct with TagName
+        if v[0] == "struct" and len(v) > 2 and v[2] == "GameplayTagContainer" and isinstance(v[1], dict) and isinstance(v[1].get("GameplayTags"), tuple):
+            return cval(("array", v[1]["GameplayTags"][1]) if v[1]["GameplayTags"][0] == "array" else v[1]["GameplayTags"], owner)
         if v[0] == "tag": return f"u64_name({codegen.cstr(v[1])})"
         if v[0] == "tags":
             items = ", ".join(f"u64_name({codegen.cstr(t)})" for t in v[1])

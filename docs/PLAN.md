@@ -140,3 +140,24 @@ Known gaps: out-parameters are passed by value; struct members use a placeholder
 Additional bug found while porting: in UE 4.25-style packages a field path is stored innermost-first, so taking the last
 name collapsed every variable of `UI_HUD` into one (fixed; regression test in tests/test_props.py). Another: argument
 expressions of a `Context` call must run in the caller's frame (fixed earlier).
+
+
+## Second project: GASShooter (tranek/GASShooter, UE 4.26)
+
+Chosen because it has what the first project lacks: animations and AnimBPs (AnimGraph nodes are readable data), skeletal meshes,
+a real map, 91 Blueprints and ~8k lines of C++. Status:
+
+* Bytecode: 385/385 functions decode (4.26 field paths carry an owner index in some saves; the decoder tries each dialect and
+  confirms it by in-memory size and jump targets).
+* Ported from the C++ so far (`runtime/u64_cpp_gasshooter.c`, test `tests/bp/run_shooter.c`, run `tools/run_shooter_tests.sh`):
+  `UGSAttributeSetBase`/`UGSAmmoAttributeSet` rules (shield absorbs damage, clamps, MoveSpeed range, bounty), `AGSWeapon`
+  (ammo, abilities, drop), `AGSHeroCharacter` inventory (add/equip/next/previous/remove-all with the ring drop), ammo pickup
+  effects, KnockDown / FinishDying and the game mode respawn. Expected values come from the assets and the C++.
+* Not yet ported: `UGSAbilitySystemComponent` (effect containers, target data), `GSGameplayAbility`, target actors (line /
+  sphere trace), ability tasks (montage-for-mesh, wait-interactable, wait-input, FOV, move-relative-location), pickups,
+  interaction, player controller / HUD, projectile, damage execution (`GSDamageExecutionCalc`).
+* Runtime limits found and fixed by this project: the interned-string pool (8 KB) silently turned names into "?"; attribute,
+  tag, active-effect and ability tables were too small and also failed silently. All are larger and now report overflow.
+* Unverified assumption: the first execution of a periodic effect (`bExecutePeriodicEffectOnApplication`) happens on the next
+  tick rather than inside the Apply call. Executing inside the call makes GASShooter's KnockDown apply GE_BleedingOut while Health
+  is 0, which would kill the hero it just knocked down; the shipping game doesn't do that. Check against the engine source.

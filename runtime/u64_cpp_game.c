@@ -50,8 +50,22 @@ static const cpp_class_t cpp_classes[] = {
   {"GDHeroCharacter", "GDCharacterBase", ctor_hero}, {"GDMinionCharacter", "GDCharacterBase", 0},
   {"GDProjectile", 0, 0}, {"GASDocumentationGameMode", 0, ctor_gamemode},
 };
+// Other projects register their C++ classes and members here (u64_cpp_gasshooter.c) instead of editing the tables above.
+#define MAX_REG 512
+static struct { const char *cls, *parent; void (*ctor)(u64_obj *); } reg_cls[MAX_REG]; static int n_reg_cls;
+typedef u64_v (*cpp_fn)(u64_obj *self, int argc, const u64_v *argv);
+static struct { const char *cls, *fn; cpp_fn f; } reg_fn[MAX_REG]; static int n_reg_fn;
+void u64_cpp_register_class(const char *cls, const char *parent, void (*ctor)(u64_obj *))
+{
+  if (n_reg_cls < MAX_REG) reg_cls[n_reg_cls++] = (typeof(reg_cls[0])){cls, parent, ctor};
+}
+void u64_cpp_register_method(const char *cls, const char *fn, u64_v (*f)(u64_obj *, int, const u64_v *))
+{
+  if (n_reg_fn < MAX_REG) reg_fn[n_reg_fn++] = (typeof(reg_fn[0])){cls, fn, f};
+}
 const char *u64_parent_of(const char *cls)
 {
+  for (int i = 0; i < n_reg_cls; i++) if (!strcmp(reg_cls[i].cls, cls)) return reg_cls[i].parent;
   for (const u64_class_parent_def *p = u64_class_parents; p->cls; p++) if (!strcmp(p->cls, cls)) return p->parent;
   for (unsigned i = 0; i < sizeof cpp_classes / sizeof cpp_classes[0]; i++) if (!strcmp(cpp_classes[i].cls, cls)) return cpp_classes[i].parent;
   return 0;
@@ -59,6 +73,7 @@ const char *u64_parent_of(const char *cls)
 int u64_class_is(const char *cls, const char *anc) { for (; cls; cls = u64_parent_of(cls)) if (!strcmp(cls, anc)) return 1; return 0; }
 void u64_cpp_construct(u64_obj *o, const char *cls)
 {
+  for (int i = 0; i < n_reg_cls; i++) if (!strcmp(reg_cls[i].cls, cls) && reg_cls[i].ctor) reg_cls[i].ctor(o);
   for (unsigned i = 0; i < sizeof cpp_classes / sizeof cpp_classes[0]; i++)
     if (!strcmp(cpp_classes[i].cls, cls) && cpp_classes[i].ctor) cpp_classes[i].ctor(o);
 }
@@ -186,7 +201,9 @@ static u64_obj *game_mode, *player_pawn_;
 u64_obj *u64_player_pawn(void) { return player_pawn_; }
 static u64_obj *find_class(const char *cls) { for (int i = 0; i < u64_obj_count(); i++) { u64_obj *o = u64_obj_at(i); if (!strcmp(u64_obj_class(o), cls) && u64_ivar(o, "Location")->t == U64_VEC) return o; } return 0; }   // placed actors of a class (PlayerStart is not alive: it is not a pawn)
 static u64_obj *find_named(const char *name) { for (int i = 0; i < u64_obj_count(); i++) { u64_obj *o = u64_obj_at(i); if (u64_obj_alive(o) && !strcmp(u64_obj_name(o), name)) return o; } return 0; }
-static u64_obj *gm(void) { if (!game_mode) game_mode = u64_new("GameMode", "GASDocumentationGameMode"); return game_mode; }
+const char *u64_game_mode_class = "GASDocumentationGameMode";       // a project port selects its own (e.g. GASShooter's BP_GameMode)
+void u64_set_player_pawn(u64_obj *p) { player_pawn_ = p; }
+static u64_obj *gm(void) { if (!game_mode) game_mode = u64_new("GameMode", u64_game_mode_class); return game_mode; }
 static u64_obj *spawn_hero_at(u64_obj *start)
 {
   u64_v loc = start ? vec_of(start, "Location") : u64_vec(0, 0, 0), rot = start ? vec_of(start, "Rotation") : u64_vec(0, 0, 0);
@@ -236,7 +253,6 @@ void u64_input_axis(u64_obj *pawn, const char *axis, float v)
 }
 
 // ---------------------------------------------------------------------------------------------------- member-function dispatch
-typedef u64_v (*cpp_fn)(u64_obj *self, int argc, const u64_v *argv);
 static u64_v fn_finish_dying(u64_obj *self, int argc, const u64_v *a)   // AGDHeroCharacter::FinishDying -> GameMode::HeroDied; then Super (Destroy)
 {
   (void)argc; (void)a;
@@ -252,8 +268,11 @@ static struct { const char *cls, *fn; cpp_fn f; } methods[] = {
 };
 int u64_cpp_dispatch(u64_obj *self, const char *fn, int argc, const u64_v *argv, u64_v *ret)
 {
-  for (const char *c = u64_obj_class(self); c; c = u64_parent_of(c))
+  for (const char *c = u64_obj_class(self); c; c = u64_parent_of(c)) {
+    for (int i = 0; i < n_reg_fn; i++)
+      if (!strcmp(reg_fn[i].cls, c) && !strcmp(reg_fn[i].fn, fn)) { *ret = reg_fn[i].f(self, argc, argv); return 1; }
     for (unsigned i = 0; i < sizeof methods / sizeof methods[0]; i++)
       if (!strcmp(methods[i].cls, c) && !strcmp(methods[i].fn, fn)) { *ret = methods[i].f(self, argc, argv); return 1; }
+  }
   return 0;
 }

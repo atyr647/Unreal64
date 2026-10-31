@@ -78,3 +78,22 @@ int u64_ge_register(const u64_ge_def *def);                    // effects create
 void u64_attr_set_base(u64_obj *asc, const char *name, float v);   // the attribute setter (SetHealth etc.)
 void u64_overlap_events_tick(void);
 int u64_sweep_sphere(const float start[3], const float end[3], float radius, u64_obj *ignore, float *t_out);
+
+// Per-project attribute-set rules (the project's UAttributeSet subclasses). Without hooks the GASDocumentation rules apply.
+typedef struct {
+  void (*pre_attribute_change)(u64_obj *asc, const char *name, float *new_value);       // UAttributeSet::PreAttributeChange
+  int (*post_execute)(u64_obj *target_asc, const char *name, u64_obj *source_asc);      // PostGameplayEffectExecute; 1 = handled
+  void (*zero_health)(u64_obj *owner);                                                  // the owner's reaction to Health reaching 0
+} u64_gas_hooks;
+extern const u64_gas_hooks *u64_gas_hooks_active;
+void u64_adjust_for_max_change(u64_obj *asc, const char *affected, const char *maxattr, float new_max);   // AdjustAttributeForMaxChange
+u64_obj *u64_give_ability(u64_obj *asc, const char *cls, int level, const char *input_id, u64_obj *source);
+void u64_clear_ability(u64_obj *asc, u64_obj *ability);
+int u64_asc_abilities(u64_obj *asc, u64_obj **out, int max);
+void u64_tag_add_loose(u64_obj *asc, const char *tag, int delta);
+int u64_tag_count(u64_obj *asc, const char *tag);
+int u64_remove_ge_with_asset_tags(u64_obj *asc, const char *tag);
+void u64_cancel_abilities(u64_obj *asc, const char *tag);
+u64_obj *u64_asc_owner(u64_obj *asc);
+extern const char *u64_game_mode_class;
+void u64_set_player_pawn(u64_obj *pawn);

@@ -6,10 +6,10 @@
 #include <stdio.h>
 
 #define MAX_ASC 160
-#define MAX_ATTR 24
-#define MAX_TAGS 48
-#define MAX_ACTIVE 96
-#define MAX_ABIL 16
+#define MAX_ATTR 48
+#define MAX_TAGS 160
+#define MAX_ACTIVE 192
+#define MAX_ABIL 48
 
 typedef struct { const char *name; float base, cur; } attr_t;
 typedef struct { const char *tag; int n; } tagc_t;
@@ -22,7 +22,7 @@ typedef struct {
 } asc_t;
 typedef struct {
   int live; const u64_ge_def *def; asc_t *target, *source; float level; int stack;
-  float remaining, next_period; int inhibited;
+  float remaining, next_period; int inhibited, exec_pending; u64_obj *spec;
   struct { const char *tag; float v; } sbc[4]; int nsbc;
 } active_t;
 
@@ -113,7 +113,7 @@ static asc_t *asc_from(u64_obj *o)
 static attr_t *attr(asc_t *a, const char *n)
 {
   for (int i = 0; i < a->na; i++) if (!strcmp(a->a[i].name, n)) return &a->a[i];
-  if (a->na >= MAX_ATTR) return &a->a[MAX_ATTR - 1];
+  if (a->na >= MAX_ATTR) { if (!u64_rt_overflows++ && u64_log) u64_log("  [error] attribute list full"); return &a->a[MAX_ATTR - 1]; }
   a->a[a->na] = (attr_t){u64_intern(n), 0, 0};
   return &a->a[a->na++];
 }
@@ -128,7 +128,7 @@ static void tag_add(asc_t *a, const char *tag, int d)
 {
   tagc_t *t = 0;
   for (int i = 0; i < a->nt; i++) if (!strcmp(a->t[i].tag, tag)) { t = &a->t[i]; break; }
-  if (!t) { if (a->nt >= MAX_TAGS) return; t = &a->t[a->nt++]; t->tag = u64_intern(tag); t->n = 0; }
+  if (!t) { if (a->nt >= MAX_TAGS) { if (!u64_rt_overflows++ && u64_log) u64_log("  [error] tag list full"); return; } t = &a->t[a->nt++]; t->tag = u64_intern(tag); t->n = 0; }
   int before = t->n; t->n += d; if (t->n < 0) t->n = 0;
   if (before == 0 && t->n > 0 && !strcmp(tag, "State.Debuff.Stun"))      // AGDMinionCharacter::StunTagChanged
     cancel_abilities(a, "Ability", "Ability.NotCanceledByStun", 0);
@@ -196,9 +196,15 @@ static void adjust_for_max_change(asc_t *a, const char *affected, const char *ma
     attr(a, affected)->base += delta; recompute(a);
   }
 }
+const u64_gas_hooks *u64_gas_hooks_active;                   // a project port replaces the attribute-set rules (default: GDAttributeSetBase)
+void u64_adjust_for_max_change(u64_obj *asc, const char *affected, const char *maxattr, float new_max)
+{
+  asc_t *a = asc_from(asc); if (a) adjust_for_max_change(a, affected, maxattr, new_max);
+}
 // GDAttributeSetBase::PreAttributeChange
 static void pre_attribute_change(asc_t *a, const char *name, float *nv)
 {
+  if (u64_gas_hooks_active && u64_gas_hooks_active->pre_attribute_change) { u64_gas_hooks_active->pre_attribute_change(a->obj, name, nv); return; }
   if (!strcmp(name, "MaxHealth")) adjust_for_max_change(a, "Health", "MaxHealth", *nv);
   else if (!strcmp(name, "MaxMana")) adjust_for_max_change(a, "Mana", "MaxMana", *nv);
   else if (!strcmp(name, "MaxStamina")) adjust_for_max_change(a, "Stamina", "MaxStamina", *nv);
@@ -231,8 +237,10 @@ static void fire_attr_change(asc_t *a, const char *name, float nv, float old)
 {
   u64_v args[3] = {u64_name(name), u64_float(nv), u64_float(old)};
   u64_notify_attribute_tasks(a->obj, 3, args);
-  if (!strcmp(name, "Health") && nv <= 0 && a->owner && !tag_count(a, "State.Dead") && u64_obj_alive(a->owner))
-    u64_die(a->owner);        // AGDMinionCharacter::HealthChanged / AGDPlayerState::HealthChanged: !IsAlive && !Dead -> Die()
+  if (!strcmp(name, "Health") && nv <= 0 && a->owner && !tag_count(a, "State.Dead") && u64_obj_alive(a->owner)) {
+    if (u64_gas_hooks_active && u64_gas_hooks_active->zero_health) u64_gas_hooks_active->zero_health(a->owner);
+    else u64_die(a->owner);        // AGDMinionCharacter::HealthChanged / AGDPlayerState::HealthChanged: !IsAlive && !Dead -> Die()
+  }
 }
 
 // ---------------------------------------------------------------------------------------------------- effects
@@ -370,12 +378,16 @@ int u64_apply_ge(u64_obj *tasc, u64_obj *sasc, const char *ge_name, float level,
     e->inhibited = !requirements_met(tgt, d->ongoing_require, d->ongoing_ignore);
     if (!e->inhibited) grant_tags(tgt, d, 1);
     recompute(tgt);
-    if (d->period > 0 && !e->inhibited) run_modifiers(tgt, src, d, e, spec);       // execute on application
+    // bExecutePeriodicEffectOnApplication: the first execution happens at the next tick (a timer with a ~0 first period), not
+    // inside the Apply call. Otherwise an effect applied from an attribute-change callback re-enters it (GASShooter's KnockDown ->
+    // GE_BleedingOut would kill the hero it just knocked down). Assumption from the shipping game's behaviour; see docs/PLAN.md.
+    if (d->period > 0 && !e->inhibited) { e->exec_pending = 1; e->spec = spec; }
     update_inhibition(tgt);
     u64_notify_stack_tasks(tgt->obj, d->name);
     apply_conditionals(tgt, src, d, level);
     return i + 1;
   }
+  if (!u64_rt_overflows++ && u64_log) u64_log("  [error] active effect list full");
   return 0;
 }
 
@@ -384,6 +396,11 @@ void u64_gas_tick(float dt)
   for (int i = 0; i < MAX_ACTIVE; i++) {
     active_t *e = &active[i];
     if (!e->live) continue;
+    if (e->exec_pending && !e->inhibited) {
+      e->exec_pending = 0; e->next_period = e->def->period + dt;      // (this tick's decrement below then leaves a full period)
+      run_modifiers(e->target, e->source, e->def, e, e->spec);
+      if (!e->live) continue;
+    }
     if (e->def->dur == U64_DUR_HAS_DURATION) { e->remaining -= dt; if (e->remaining <= 0) { remove_active_idx(i); continue; } }
     if (e->def->period > 0 && !e->inhibited) {
       e->next_period -= dt;
@@ -395,6 +412,7 @@ void u64_gas_tick(float dt)
 // ---------------------------------------------------------------------------------------------------- AGDAttributeSetBase::PostGameplayEffectExecute
 static void post_gameplay_effect_execute(asc_t *tgt, const char *name, asc_t *src)
 {
+  if (u64_gas_hooks_active && u64_gas_hooks_active->post_execute && u64_gas_hooks_active->post_execute(tgt->obj, name, src ? src->obj : 0)) return;
   if (!strcmp(name, "Damage")) {
     float local = attr(tgt, "Damage")->cur;
     set_base(tgt, "Damage", 0);
@@ -463,6 +481,13 @@ void u64_kill(u64_obj *o) { u64_die(o); }
 
 void u64_actor_init(u64_obj *actor)
 {
+  if (!actor) return;
+  if (u64_ivar(actor, "cpp_inited")->t == U64_NONE) {                            // the C++ half of spawning, when a project port defines it
+    u64_v r;
+    *u64_ivar(actor, "cpp_inited") = u64_bool(1);
+    u64_cpp_dispatch(actor, "PostInitializeComponents", 0, 0, &r);
+    u64_cpp_dispatch(actor, "BeginPlay", 0, 0, &r);
+  }
   if (!actor || u64_ivar(actor, "DefaultAttributes")->t == U64_NONE) return;
   u64_obj *asc = u64_asc_of(actor); asc_t *a = asc_from(asc);
   if (!a || u64_ivar(actor, "gas_inited")->t != U64_NONE) return;
@@ -470,9 +495,11 @@ void u64_actor_init(u64_obj *actor)
   // InitializeAttributes: DefaultAttributes applied at GetCharacterLevel()
   u64_apply_ge(asc, asc, nm(*u64_ivar(actor, "DefaultAttributes")), attr(a, "CharacterLevel")->cur, 0);
   // Hero respawn path (PossessedBy): SetHealth/Mana/Stamina to max
-  set_base(a, "Health", attr(a, "MaxHealth")->cur);
-  set_base(a, "Mana", attr(a, "MaxMana")->cur);
-  set_base(a, "Stamina", attr(a, "MaxStamina")->cur);
+  if (!u64_gas_hooks_active) {                                                   // (GASDocumentation: Health/Mana/Stamina to max)
+    set_base(a, "Health", attr(a, "MaxHealth")->cur);
+    set_base(a, "Mana", attr(a, "MaxMana")->cur);
+    set_base(a, "Stamina", attr(a, "MaxStamina")->cur);
+  }
   u64_v se = *u64_ivar(actor, "StartupEffects");                                 // AddStartupEffects
   for (int i = 0; i < u64_array_len(se); i++) u64_apply_ge(asc, asc, nm(u64_array_get(se, i)), attr(a, "CharacterLevel")->cur, 0);
   u64_v ca = *u64_ivar(actor, "CharacterAbilities");                             // AddCharacterAbilities
@@ -481,8 +508,39 @@ void u64_actor_init(u64_obj *actor)
     char b[64]; snprintf(b, sizeof b, "%s.%s", u64_obj_name(actor), cls);
     u64_obj *ab = u64_new(u64_intern(b), u64_intern(cls));
     *u64_ivar(ab, "Avatar") = u64_objv(actor); *u64_ivar(ab, "ASC") = u64_objv(asc);
+    *u64_ivar(ab, "SourceObject") = u64_objv(actor);
     a->abil[a->nabil++] = ab;
   }
+}
+u64_obj *u64_asc_owner(u64_obj *asc) { asc_t *a = asc_from(asc); return a ? a->owner : 0; }
+void u64_tag_add_loose(u64_obj *asc, const char *tag, int delta) { asc_t *a = asc_from(asc); if (a) tag_add(a, tag, delta); }   // Add/RemoveLooseGameplayTag(s)
+int u64_tag_count(u64_obj *asc, const char *tag) { asc_t *a = asc_from(asc); return a ? tag_count(a, tag) : 0; }
+// UAbilitySystemComponent::GiveAbility(FGameplayAbilitySpec(Class, Level, InputID, SourceObject)) -> the granted ability instance
+u64_obj *u64_give_ability(u64_obj *asc_obj, const char *cls, int level, const char *input_id, u64_obj *source)
+{
+  asc_t *a = asc_from(asc_obj);
+  if (!a || a->nabil >= MAX_ABIL) { if (a && !u64_rt_overflows++ && u64_log) u64_log("  [error] ability list full"); return 0; }
+  char b[96]; snprintf(b, sizeof b, "%s.%s.%d", a->owner ? u64_obj_name(a->owner) : "asc", strip_c(cls), a->nabil);
+  u64_obj *ab = u64_new(u64_intern(b), u64_intern(strip_c(cls)));
+  *u64_ivar(ab, "Avatar") = u64_objv(a->owner); *u64_ivar(ab, "ASC") = u64_objv(asc_obj);
+  *u64_ivar(ab, "Level") = u64_int(level); *u64_ivar(ab, "SourceObject") = u64_objv(source);
+  if (input_id && *input_id) *u64_ivar(ab, "AbilityInputID") = u64_name(input_id);
+  a->abil[a->nabil++] = ab;
+  return ab;
+}
+void u64_clear_ability(u64_obj *asc_obj, u64_obj *ab)                      // ClearAbility: ends it if running, then removes the spec
+{
+  asc_t *a = asc_from(asc_obj);
+  for (int i = 0; a && i < a->nabil; i++) if (a->abil[i] == ab) {
+    if (u64_true(*u64_ivar(ab, "Active"))) u64_ability_end(ab, 1);
+    a->abil[i] = a->abil[--a->nabil]; u64_obj_destroy(ab); return;
+  }
+}
+int u64_asc_abilities(u64_obj *asc_obj, u64_obj **out, int max)
+{
+  asc_t *a = asc_from(asc_obj); int n = 0;
+  for (int i = 0; a && i < a->nabil && n < max; i++) out[n++] = a->abil[i];
+  return n;
 }
 
 // ---------------------------------------------------------------------------------------------------- abilities
@@ -742,6 +800,20 @@ void u64_remove_ge_class(u64_obj *asc, const char *ge_name)   // RemoveActiveGam
 {
   asc_t *a = asc_from(asc); const u64_ge_def *d = find_ge(ge_name);
   for (int i = 0; a && d && i < MAX_ACTIVE; i++) if (active[i].live && active[i].target == a && active[i].def == d) remove_active_idx(i);
+}
+int u64_remove_ge_with_asset_tags(u64_obj *asc, const char *tag)   // RemoveActiveEffectsWithTags: matches the effect's asset tags
+{
+  asc_t *a = asc_from(asc); int n = 0;
+  for (int i = 0; a && i < MAX_ACTIVE; i++) {
+    if (!active[i].live || active[i].target != a) continue;
+    for (int j = 0; active[i].def->asset_tags && active[i].def->asset_tags[j]; j++)
+      if (tag_match(active[i].def->asset_tags[j], tag)) { remove_active_idx(i); n++; break; }
+  }
+  return n;
+}
+void u64_cancel_abilities(u64_obj *asc, const char *tag)           // CancelAbilities(WithTags) / CancelAllAbilities (tag NULL)
+{
+  asc_t *a = asc_from(asc); if (a) cancel_abilities(a, tag, 0, 0);
 }
 void u64_remove_ge_with_tags(u64_obj *asc, const char *tag)   // RemoveActiveEffectsWithGrantedTags
 {

@@ -34,6 +34,7 @@ struct FGameplayTagContainer {
   FGameplayTag t[16]; int n = 0;
   void AddTagFast(const FGameplayTag &x) { if (n < 16) t[n++] = x; }
   void AddTag(const FGameplayTag &x) { if (!HasTag(x)) AddTagFast(x); }
+  void RemoveTag(const FGameplayTag &x) { for (int i = 0; i < n; i++) if (t[i] == x) { t[i] = t[--n]; return; } }
   void AppendTags(const FGameplayTagContainer &o) { for (int i = 0; i < o.n; i++) AddTag(o.t[i]); }
   bool HasTag(const FGameplayTag &x) const { for (int i = 0; i < n; i++) if (t[i] == x) return true; return false; }
 };

@@ -4,6 +4,7 @@
 #include "Characters/Abilities/AttributeSets/GSAttributeSetBase.h"
 #include "Characters/GSCharacterBase.h"
 #include "Player/GSPlayerController.h"
+#include "Characters/Abilities/GSGA_CharacterJump.h"
 extern "C" {
 #include "u64_gas_core.h"
 }
@@ -114,3 +115,62 @@ extern "C" int u64_cxx_base_pre_change(u64_obj *asc, const char *name, float *nv
   s->set.PreAttributeChange(FGameplayAttribute(FindFieldChecked<FProperty>(nullptr, FName(name))), *nv);
   return 1;
 }
+
+// ---- UGSGA_CharacterJump (non-instanced: one object serves every activation; the runtime ability object is passed through `rt`)
+namespace {
+UGSGA_CharacterJump jump;
+bool commit_hook(void *ab) { return u64_ability_commit((u64_obj *)ab, 1, 1); }
+void end_hook(void *ab, bool cancelled) { u64_ability_end((u64_obj *)ab, cancelled); }
+void char_jump_hook(void *actor, int start) { u64_call((u64_obj *)actor, start ? "Jump" : "StopJumping", 0, 0); }
+bool char_can_jump_hook(void *actor) { return u64_true(u64_call((u64_obj *)actor, "CanJump", 0, 0)); }
+Slot *jump_slot(u64_obj *ab)
+{
+  AbilityCommitHook = commit_hook; AbilityEndHook = end_hook; CharJumpHook = char_jump_hook; CharCanJumpHook = char_can_jump_hook;
+  u64_obj *asc = (u64_obj *)u64_ivar(ab, "ASC")->u.o; Slot *s = slot_for(asc);
+  jump.rt = ab; jump.CurrentActorInfo = s ? &s->info : nullptr;
+  return s;
+}
+}
+extern "C" int u64_cxx_jump_calls;
+int u64_cxx_jump_calls;
+extern "C" void u64_cxx_jump_activate(u64_obj *ab)
+{
+  u64_cxx_jump_calls++;
+  Slot *s = jump_slot(ab); if (!s) return;
+  FGameplayAbilitySpecHandle h; FGameplayAbilityActivationInfo ai;
+  jump.ActivateAbility(h, &s->info, ai, nullptr);
+}
+extern "C" int u64_cxx_jump_can_activate(u64_obj *ab)
+{
+  Slot *s = jump_slot(ab); if (!s) return 0;
+  s->info.AvatarActor.p->rt = u64_asc_owner((u64_obj *)u64_ivar(ab, "ASC")->u.o);
+  FGameplayAbilitySpecHandle h; return jump.CanActivateAbility(h, &s->info);
+}
+extern "C" void u64_cxx_jump_released(u64_obj *ab)
+{
+  Slot *s = jump_slot(ab); if (!s) return;
+  FGameplayAbilitySpecHandle h; FGameplayAbilityActivationInfo ai;
+  jump.InputReleased(h, &s->info, ai);
+}
+
+// ---- UGSGameplayAbility (GSGameplayAbility.cpp is not compiled in this build: it needs prediction keys / replicated target data / effect spec creation).
+// The parts the jump ability reaches through its base class are runtime glue: the runtime has already run the GS activation rules (interacting tag,
+// weapon match, cost, cooldown) before the C++ ability is asked, so the base checks answer "yes" here.
+UGSGameplayAbility::UGSGameplayAbility() {}
+void UGSGameplayAbility::OnAvatarSet(const FGameplayAbilityActorInfo *, const FGameplayAbilitySpec &) {}
+bool UGSGameplayAbility::CanActivateAbility(const FGameplayAbilitySpecHandle, const FGameplayAbilityActorInfo *, const FGameplayTagContainer *, const FGameplayTagContainer *, FGameplayTagContainer *) const { return true; }
+bool UGSGameplayAbility::CheckCost(const FGameplayAbilitySpecHandle, const FGameplayAbilityActorInfo *, FGameplayTagContainer *) const { return true; }
+void UGSGameplayAbility::ApplyCost(const FGameplayAbilitySpecHandle, const FGameplayAbilityActorInfo *, const FGameplayAbilityActivationInfo) const {}
+FGSGameplayEffectContainerSpec UGSGameplayAbility::MakeEffectContainerSpecFromContainer(const FGSGameplayEffectContainer &, const FGameplayEventData &, int32) { return FGSGameplayEffectContainerSpec(); }
+FGSGameplayEffectContainerSpec UGSGameplayAbility::MakeEffectContainerSpec(FGameplayTag, const FGameplayEventData &, int32) { return FGSGameplayEffectContainerSpec(); }
+TArray<FActiveGameplayEffectHandle> UGSGameplayAbility::ApplyEffectContainerSpec(const FGSGameplayEffectContainerSpec &) { return TArray<FActiveGameplayEffectHandle>(); }
+bool UGSGameplayAbility::BatchRPCTryActivateAbility(FGameplayAbilitySpecHandle, bool) { return false; }
+void UGSGameplayAbility::ExternalEndAbility() {}
+FString UGSGameplayAbility::GetCurrentPredictionKeyStatus() { return FString(); }
+bool UGSGameplayAbility::IsPredictionKeyValidForMorePrediction() const { return false; }
+bool UGSGameplayAbility::GSCheckCost_Implementation(const FGameplayAbilitySpecHandle, const FGameplayAbilityActorInfo &) const { return true; }
+void UGSGameplayAbility::SetHUDReticle(TSubclassOf<UGSHUDReticle>) {}
+void UGSGameplayAbility::ResetHUDReticle() {}
+void UGSGameplayAbility::SendTargetDataToServer(const FGameplayAbilityTargetDataHandle &) {}
+bool UGSGameplayAbility::IsInputPressed() const { return false; }
+void UGSGameplayAbility::SetCurrentMontageForMesh(USkeletalMeshComponent *, UAnimMontage *) {}

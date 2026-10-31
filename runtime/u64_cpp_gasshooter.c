@@ -700,6 +700,14 @@ static u64_v tr_confirm(u64_obj *s, int c, const u64_v *a)           // ConfirmT
 static u64_v tr_stop_targeting(u64_obj *s, int c, const u64_v *a) { (void)c; (void)a; *u64_ivar(s, "WaitingTask") = u64_objv(0); return NONE_; }
 
 // ---------------------------------------------------------------------------------------------------- UGSGameplayAbility
+static void ctor_gs_jump(u64_obj *o)                                 // UGSGA_CharacterJump::UGSGA_CharacterJump
+{
+  *u64_ivar(o, "AbilityInputID") = u64_name("EGSAbilityInputID::Jump");
+  tag_push(o, "AbilityTags", "Ability.Jump");
+  u64_v *ow = u64_ivar(o, "ActivationOwnedTags"); u64_v keep = u64_array_of(0, 0);                 // ActivationOwnedTags.RemoveTag(Ability.BlocksInteraction)
+  for (int i = 0; i < u64_array_len(*ow); i++) if (strcmp(nm(u64_array_get(*ow, i)), "Ability.BlocksInteraction")) u64_array_push(&keep, u64_array_get(*ow, i));
+  *ow = keep;
+}
 static void ctor_gs_ability(u64_obj *o)                              // UGSGameplayAbility::UGSGameplayAbility
 {
   *u64_ivar(o, "bActivateAbilityOnGranted") = u64_bool(0); *u64_ivar(o, "bActivateOnInput") = u64_bool(1);
@@ -1120,7 +1128,7 @@ __attribute__((constructor)) static void register_gasshooter(void)
   u64_cpp_register_class("GSHeroCharacter", "GSCharacterBase", ctor_hero);
   u64_cpp_register_class("GSWeapon", 0, ctor_weapon);
   u64_cpp_register_class("GSPickup", 0, ctor_pickup); u64_cpp_register_class("GSASCActorBase", 0, 0);
-  u64_cpp_register_class("GSGameplayAbility", 0, ctor_gs_ability); u64_cpp_register_class("GSPlayerController", 0, 0);
+  u64_cpp_register_class("GSGameplayAbility", 0, ctor_gs_ability); u64_cpp_register_class("GSGA_CharacterJump", "GSGameplayAbility", ctor_gs_jump); u64_cpp_register_class("GSPlayerController", 0, 0);
   u64_cpp_register_class("GSGATA_Trace", 0, ctor_trace); u64_cpp_register_class("GSGATA_LineTrace", "GSGATA_Trace", 0);
   u64_cpp_register_class("GSGATA_SphereTrace", "GSGATA_Trace", ctor_sphere_trace);
   u64_cpp_register_class("GSProjectile", 0, 0);

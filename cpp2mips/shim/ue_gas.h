@@ -37,8 +37,12 @@ public:
 struct USkeletalMeshComponent : UObject {}; struct UAnimMontage : UObject {};
 struct FGameplayAbilityActorInfoFull;
 enum class EGameplayAbilityInstancingPolicy { NonInstanced, InstancedPerActor, InstancedPerExecution };
+struct FPostLockDelegate { template <class... A> static FPostLockDelegate CreateUObject(A...) { return FPostLockDelegate(); } };
+inline bool (*AbilityCommitHook)(void *) = nullptr; inline void (*AbilityEndHook)(void *, bool) = nullptr;         // set by the runtime bridge
 class UGameplayAbility : public UObject {
 public:
+  int32 ScopeLockCount = 0; TArray<FPostLockDelegate> WaitingToExecute;
+  bool HasAuthorityOrPredictionKey(const FGameplayAbilityActorInfo *, const FGameplayAbilityActivationInfo *) const { return true; }
   static UClass *StaticClass() { static UClass c = {"UGameplayAbility"}; return &c; }
   bool InstanceOf(const UClass *c) const override { return c == StaticClass(); }
   FGameplayTagContainer AbilityTags, CancelAbilitiesWithTag, BlockAbilitiesWithTag, ActivationOwnedTags, ActivationRequiredTags, ActivationBlockedTags;
@@ -49,9 +53,9 @@ public:
   virtual bool CheckCost(const FGameplayAbilitySpecHandle, const FGameplayAbilityActorInfo *, OUT FGameplayTagContainer * = nullptr) const { return true; }
   virtual void ApplyCost(const FGameplayAbilitySpecHandle, const FGameplayAbilityActorInfo *, const FGameplayAbilityActivationInfo) const {}
   virtual void ActivateAbility(const FGameplayAbilitySpecHandle, const FGameplayAbilityActorInfo *, const FGameplayAbilityActivationInfo, const FGameplayEventData * = nullptr) {}
-  virtual void EndAbility(const FGameplayAbilitySpecHandle, const FGameplayAbilityActorInfo *, const FGameplayAbilityActivationInfo, bool, bool) {}
-  virtual void CancelAbility(const FGameplayAbilitySpecHandle, const FGameplayAbilityActorInfo *, const FGameplayAbilityActivationInfo, bool) {}
-  virtual bool CommitAbility(const FGameplayAbilitySpecHandle, const FGameplayAbilityActorInfo *, const FGameplayAbilityActivationInfo) { return true; }
+  virtual void EndAbility(const FGameplayAbilitySpecHandle, const FGameplayAbilityActorInfo *, const FGameplayAbilityActivationInfo, bool, bool bWasCancelled) { if (AbilityEndHook) AbilityEndHook(rt, bWasCancelled); }
+  virtual void CancelAbility(const FGameplayAbilitySpecHandle, const FGameplayAbilityActorInfo *, const FGameplayAbilityActivationInfo, bool) { if (AbilityEndHook) AbilityEndHook(rt, true); }
+  virtual bool CommitAbility(const FGameplayAbilitySpecHandle, const FGameplayAbilityActorInfo *, const FGameplayAbilityActivationInfo) { return AbilityCommitHook ? AbilityCommitHook(rt) : true; }
   const FGameplayAbilityActorInfo *GetCurrentActorInfo() const { return CurrentActorInfo; }
   FGameplayAbilitySpecHandle GetCurrentAbilitySpecHandle() const { return CurrentSpecHandle; }
   FGameplayAbilityActivationInfo GetCurrentActivationInfo() const { return CurrentActivationInfo; }

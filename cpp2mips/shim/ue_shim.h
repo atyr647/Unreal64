@@ -68,9 +68,11 @@ struct UObject {
   void *rt = nullptr; struct UWorld *GetWorld() const { return nullptr; }                                                     // the Unreal64 runtime object this one stands for
 };
 template <class T, class U> T *Cast(U *p) { return p && p->InstanceOf(T::StaticClass()) ? static_cast<T *>(p) : nullptr; }
+enum class ECastCheckedType { NullChecked, NullAllowed };
+template <class T, class U> T *CastChecked(U *p, ECastCheckedType = ECastCheckedType::NullChecked) { return Cast<T>(p); }
 template <class T> struct TEnumAsByte { uint8 v = 0; TEnumAsByte() {} TEnumAsByte(T x) : v((uint8)x) {} operator T() const { return (T)v; } };
 template <class T> struct TSubclassOf { UClass *c = nullptr; bool operator!() const { return c == nullptr; } explicit operator bool() const { return c != nullptr; } UClass *Get() const { return c; } };
-template <class T> struct TWeakObjectPtr { T *p = nullptr; TWeakObjectPtr() {} TWeakObjectPtr(T *x) : p(x) {} bool operator==(const TWeakObjectPtr &o) const { return p == o.p; } bool IsValid() const { return p != nullptr; } T *Get() const { return p; } T *operator->() const { return p; } };
+template <class T> struct TWeakObjectPtr { T *p = nullptr; bool operator!=(long v) const { return (long)p != v; } bool operator==(long v) const { return (long)p == v; } TWeakObjectPtr() {} TWeakObjectPtr(T *x) : p(x) {} bool operator==(const TWeakObjectPtr &o) const { return p == o.p; } bool IsValid() const { return p != nullptr; } T *Get() const { return p; } T *operator->() const { return p; } };
 template <class T> struct TSharedPtr { T *p = nullptr; bool IsValid() const { return p != nullptr; } T *Get() const { return p; } T *operator->() const { return p; } T &operator*() const { return *p; } };
 struct UPackage {};
 FORCEINLINE UPackage *GetTransientPackage() { static UPackage p; return &p; }

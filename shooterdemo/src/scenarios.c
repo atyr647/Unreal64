@@ -356,6 +356,20 @@ int u64_run_shooter_scenarios(int verbose)
     CHECK(!u64_tag_has(dasc, "State.KnockedDown") && fabsf(attr("Health") - 25.0f) < 0.01f);
     hero = me;
   }
+  // --- jump (UGSGA_CharacterJump, a C++ ability: Jump() on activation, StopJumping() when the input is released). The hero's JumpZVelocity is the movement asset's.
+  {
+    hero = u64_player_pawn(); u64_obj *me = hero;
+    tick(30);
+    float z0 = u64_ivar(me, "Location")->u.v[2];
+    CHECK(u64_input_press(me, "EGSAbilityInputID::Jump"));
+    CHECK(u64_true(*u64_ivar(me, "bPressedJump")));
+    tick(10);
+    CHECK(u64_ivar(me, "Location")->u.v[2] > z0 + 1.0f);                                                   // left the ground
+    u64_input_release_id(me, "EGSAbilityInputID::Jump");
+    CHECK(!u64_true(*u64_ivar(me, "bPressedJump")));
+    tick(120);
+    CHECK(fabsf(u64_ivar(me, "Location")->u.v[2] - z0) < 0.5f);                                            // landed again
+  }
   // --- placed static meshes: the arena wall Cube at (4930, 0, 1010) scaled (1, 100, 20) (a 100 uu cube: 100 x 10000 x 2000) blocks "Projectile" traces at x = 4930 - 50
   {
     float st[3] = {0, 0, 300}, en[3] = {6000, 0, 300}; u64_world_hit_t h[4];
@@ -379,6 +393,9 @@ int u64_run_shooter_scenarios(int verbose)
   }
 #ifdef U64_CXX_AMMO
   { extern int u64_cxx_ammo_calls; printf("ammo attribute rules run by the project's C++: %d calls\n", u64_cxx_ammo_calls); CHECK(u64_cxx_ammo_calls > 0); }
+#endif
+#ifdef U64_CXX_JUMP
+  { extern int u64_cxx_jump_calls; printf("jump ability run by the project's C++: %d activations\n", u64_cxx_jump_calls); CHECK(u64_cxx_jump_calls > 0); }
 #endif
 #ifdef U64_CXX_BASE
   { extern int u64_cxx_base_calls; printf("damage / health rules run by the project's C++: %d calls\n", u64_cxx_base_calls); CHECK(u64_cxx_base_calls > 0); }

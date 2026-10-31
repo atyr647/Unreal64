@@ -183,7 +183,10 @@ int u64_cpp_ability_activate(u64_obj *ab)
 {
   const char *cls = u64_obj_class(ab);
   if (u64_class_is(cls, "GDGA_FireGun")) { firegun_activate(ab); return 1; }
-  if (u64_class_is(cls, "GDGA_CharacterJump")) {                   // UGDGA_CharacterJump::ActivateAbility
+  #ifdef U64_CXX_JUMP                                                // the project's own UGSGA_CharacterJump (unmodified C++): see cpp2mips/
+  if (u64_class_is(cls, "GSGA_CharacterJump")) { extern void u64_cxx_jump_activate(u64_obj *); u64_cxx_jump_activate(ab); return 1; }
+#endif
+  if (u64_class_is(cls, "GDGA_CharacterJump") || u64_class_is(cls, "GSGA_CharacterJump")) {   // UGDGA_CharacterJump / UGSGA_CharacterJump::ActivateAbility
     if (!u64_ability_commit(ab, 1, 1)) { u64_ability_end(ab, 1); return 1; }
     u64_obj *c = avatar(ab); if (c) u64_call(c, "Jump", 0, 0);
     return 1;
@@ -192,7 +195,10 @@ int u64_cpp_ability_activate(u64_obj *ab)
 }
 int u64_cpp_ability_can_activate(u64_obj *ab)
 {
-  if (u64_class_is(u64_obj_class(ab), "GDGA_CharacterJump")) {     // Character && Character->CanJump()
+#ifdef U64_CXX_JUMP
+  if (u64_class_is(u64_obj_class(ab), "GSGA_CharacterJump")) { extern int u64_cxx_jump_can_activate(u64_obj *); return u64_cxx_jump_can_activate(ab); }
+#endif
+  if (u64_class_is(u64_obj_class(ab), "GDGA_CharacterJump") || u64_class_is(u64_obj_class(ab), "GSGA_CharacterJump")) {     // Character && Character->CanJump()
     u64_obj *c = avatar(ab);
     return c && u64_true(u64_call(c, "CanJump", 0, 0));
   }
@@ -200,7 +206,10 @@ int u64_cpp_ability_can_activate(u64_obj *ab)
 }
 void u64_cpp_ability_input_released(u64_obj *ab)
 {
-  if (u64_class_is(u64_obj_class(ab), "GDGA_CharacterJump")) jump_input_released(ab);
+#ifdef U64_CXX_JUMP
+  if (u64_class_is(u64_obj_class(ab), "GSGA_CharacterJump")) { extern void u64_cxx_jump_released(u64_obj *); u64_cxx_jump_released(ab); return; }
+#endif
+  if (u64_class_is(u64_obj_class(ab), "GDGA_CharacterJump") || u64_class_is(u64_obj_class(ab), "GSGA_CharacterJump")) jump_input_released(ab);
 }
 
 // ---------------------------------------------------------------------------------------------------- game mode + player

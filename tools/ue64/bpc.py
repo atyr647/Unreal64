@@ -29,6 +29,7 @@ def main(content, out):
             if not funcs:
                 continue
             cls = os.path.splitext(fn)[0]
+            codegen.CLASS_FNS[cls] = {codegen.ident(e.name) for e in funcs}
             chunks = ['#include "u64_rt.h"\n']
             for e in funcs:
                 try:

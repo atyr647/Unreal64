@@ -159,6 +159,7 @@ static void tag_add(asc_t *a, const char *tag, int d)
   if (before == 0 && t->n > 0 && !strcmp(tag, "State.Debuff.Stun"))      // AGDMinionCharacter::StunTagChanged
     cancel_abilities(a, "Ability", "Ability.NotCanceledByStun", 0);
   if (!a->in_inhibit_update) update_inhibition(a);
+  u64_notify_tag_change(a->obj);
 }
 
 // ---------------------------------------------------------------------------------------------------- attributes
@@ -322,6 +323,15 @@ static void exec_damage(asc_t *tgt, asc_t *src, u64_obj *spec)
   int found; float sbc = spec_sbc(spec, "Data.Damage", &found);
   damage += sbc > 0 ? sbc : 0;                            // + max(SetByCaller Data.Damage, 0)
   float unmitigated = damage;
+  // UGSDamageExecutionCalc: effects tagged Effect.Damage.CanHeadShot do 1.5x when the context's hit is on bone b_head (the hit
+  // result's BoneName; traces report "None" until body shapes from the physics asset are modelled) and add Effect.Damage.HeadShot.
+  if (u64_gas_hooks_active && spec && u64_ivar(spec, "GEClass")->t != U64_NONE) {
+    const u64_ge_def *gd = find_ge(nm(*u64_ivar(spec, "GEClass")));
+    u64_obj *ctx = u64_ivar(spec, "Context")->t == U64_OBJ ? u64_ivar(spec, "Context")->u.o : 0;
+    u64_obj *hit = ctx && u64_ivar(ctx, "HitResult")->t == U64_OBJ ? u64_ivar(ctx, "HitResult")->u.o : 0;
+    int can = 0; for (int k = 0; gd && gd->asset_tags && gd->asset_tags[k]; k++) if (!strcmp(gd->asset_tags[k], "Effect.Damage.CanHeadShot")) can = 1;
+    if (can && hit && !strcmp(nm(*u64_ivar(hit, "BoneName")), "b_head")) { unmitigated *= 1.5f; *u64_ivar(spec, "HeadShot") = u64_bool(1); }
+  }
   float mitigated = unmitigated * (100.0f / (100.0f + armor));
   if (mitigated > 0.f) execute_mod(tgt, src, "Damage", U64_OP_ADD, mitigated);
   // UGDAbilitySystemComponent::ReceiveDamage -> OnDamage on WaitReceiveDamage tasks
@@ -340,7 +350,7 @@ static void run_modifiers(asc_t *tgt, asc_t *src, const u64_ge_def *d, active_t 
     execute_mod(tgt, src, m->attr, m->op, eval_mag(e, m, tgt, src) * (float)(e->stack ? e->stack : 1));
   }
   for (int i = 0; d->execs && d->execs[i]; i++)
-    if (!strcmp(d->execs[i], "GDDamageExecCalculation")) exec_damage(tgt, src, spec);
+    if (!strcmp(d->execs[i], "GDDamageExecCalculation") || !strcmp(d->execs[i], "GSDamageExecutionCalc")) exec_damage(tgt, src, spec);
     else if (u64_log) u64_log("  [gas] unported execution calculation %s", d->execs[i]);
 }
 
@@ -417,8 +427,10 @@ int u64_apply_ge(u64_obj *tasc, u64_obj *sasc, const char *ge_name, float level,
   return 0;
 }
 
+void u64_tasks_tick_extra(float dt);
 void u64_gas_tick(float dt)
 {
+  u64_tasks_tick_extra(dt);
   for (int i = 0; i < MAX_ACTIVE; i++) {
     active_t *e = &active[i];
     if (!e->live) continue;
@@ -613,9 +625,10 @@ int u64_ability_try_activate(u64_obj *ab)               // UGameplayAbility::Can
   for (int i = 0; i < u64_array_len(required); i++) if (!tag_count(a, tag_i(required, i))) return 0;
   u64_v mytags = *u64_ivar(ab, "AbilityTags");
   for (int i = 0; i < u64_array_len(mytags); i++) { char k[96]; snprintf(k, sizeof k, "blocked:%s", tag_i(mytags, i)); if (tag_count(a, k)) return 0; }
+  if (u64_gas_hooks_active && u64_gas_hooks_active->can_activate && !u64_gas_hooks_active->can_activate(ab)) return 0;
   if (!u64_cpp_ability_can_activate(ab)) return 0;
   if (!cooldown_ok(a, ability_ge(ab, "CooldownGameplayEffectClass"))) return 0;
-  if (!cost_ok(a, ability_ge(ab, "CostGameplayEffectClass"))) return 0;
+  if (!u64_ability_check_cost(ab)) return 0;
   // activate: cancel abilities, grant owned tags, block tags, run the Blueprint
   u64_v cancel = *u64_ivar(ab, "CancelAbilitiesWithTag");
   for (int i = 0; i < u64_array_len(cancel); i++) cancel_abilities(a, tag_i(cancel, i), 0, ab);
@@ -628,14 +641,22 @@ int u64_ability_try_activate(u64_obj *ab)               // UGameplayAbility::Can
   if (!u64_cpp_ability_activate(ab)) u64_call(ab, "K2_ActivateAbility", 0, 0);       // a C++ override, else the Blueprint event
   return 1;
 }
+int u64_ability_check_cost(u64_obj *ab)                  // UGameplayAbility::CheckCost (+ the project's override)
+{
+  asc_t *a = asc_from(u64_ivar(ab, "ASC")->u.o);
+  if (!a) return 1;
+  if (!cost_ok(a, ability_ge(ab, "CostGameplayEffectClass"))) return 0;
+  return !(u64_gas_hooks_active && u64_gas_hooks_active->check_cost) || u64_gas_hooks_active->check_cost(ab);
+}
 int u64_ability_commit(u64_obj *ab, int cost, int cooldown)
 {
   asc_t *a = asc_from(u64_ivar(ab, "ASC")->u.o);
   if (!a) return 1;                                      // an ability without an ASC (not given) cannot be checked
   const u64_ge_def *cd = ability_ge(ab, "CooldownGameplayEffectClass"), *co = ability_ge(ab, "CostGameplayEffectClass");
-  if ((cooldown && !cooldown_ok(a, cd)) || (cost && !cost_ok(a, co))) return 0;
+  if ((cooldown && !cooldown_ok(a, cd)) || (cost && !u64_ability_check_cost(ab))) return 0;
   u64_obj *asc = a->obj;
   if (cooldown && cd) u64_apply_ge(asc, asc, cd->name, 1, 0);
+  if (cost && u64_gas_hooks_active && u64_gas_hooks_active->apply_cost) u64_gas_hooks_active->apply_cost(ab);   // ApplyCost: GSApplyCost first, then Super
   if (cost && co) u64_apply_ge(asc, asc, co->name, 1, 0);
   return 1;
 }
@@ -659,12 +680,21 @@ int u64_input_press(u64_obj *actor, const char *id)
 {
   asc_t *a = asc_from(u64_asc_of(actor));
   for (int i = 0; a && i < a->nabil; i++)
-    if (!strcmp(nm(*u64_ivar(a->abil[i], "AbilityInputID")), id)) return u64_ability_try_activate(a->abil[i]);
+    if (!strcmp(nm(*u64_ivar(a->abil[i], "AbilityInputID")), id)) {
+      u64_obj *ab = a->abil[i];
+      u64_v *act = u64_ivar(ab, "bActivateOnInput");
+      if (act->t != U64_NONE && !u64_true(*act) && !u64_true(*u64_ivar(ab, "Active"))) { *u64_ivar(ab, "InputPressed") = u64_bool(1); continue; }   // UGSGameplayAbility::bActivateOnInput
+      *u64_ivar(ab, "InputPressed") = u64_bool(1);                         // FGameplayAbilitySpec::InputPressed
+      if (u64_true(*u64_ivar(ab, "Active"))) { u64_ability_input_pressed(ab); return 1; }   // AbilitySpecInputPressed on a running ability: the InputPressed event
+      return u64_ability_try_activate(ab);
+    }
   return 0;
 }
 void u64_input_release_id(u64_obj *actor, const char *id)
 {
   asc_t *a = asc_from(u64_asc_of(actor));
+  for (int i = 0; a && i < a->nabil; i++)
+    if (!strcmp(nm(*u64_ivar(a->abil[i], "AbilityInputID")), id)) *u64_ivar(a->abil[i], "InputPressed") = u64_bool(0);
   for (int i = 0; a && i < a->nabil; i++)
     if (!strcmp(nm(*u64_ivar(a->abil[i], "AbilityInputID")), id) && u64_true(*u64_ivar(a->abil[i], "Active"))) { u64_input_release(a->abil[i]); u64_cpp_ability_input_released(a->abil[i]); }
 }
@@ -727,35 +757,36 @@ int u64_overlapping(u64_obj *self, u64_obj **out, int max)       // actors whose
 // ---------------------------------------------------------------------------------------------------- line traces
 static int ray_vcapsule(const float p[3], const float d[3], float cx, float cy, float zlo, float zhi, float r, float *t, float nrm[3])
 {
-  float best = 1e30f; int hit = 0;
-  float ox = p[0] - cx, oy = p[1] - cy;
-  float A = d[0] * d[0] + d[1] * d[1], B = 2 * (ox * d[0] + oy * d[1]), C = ox * ox + oy * oy - r * r;
+  double best = 1e30; int hit = 0;
+  double ox = p[0] - cx, oy = p[1] - cy;
+  double A = d[0] * d[0] + d[1] * d[1], B = 2 * (ox * d[0] + oy * d[1]), C = ox * ox + oy * oy - r * r;
   if (A > 1e-9f) {                                           // side of the cylinder
-    float disc = B * B - 4 * A * C;
-    if (disc >= 0) { float tt = (-B - sqrtf(disc)) / (2 * A); float z = p[2] + tt * d[2];
+    double disc = B * B - 4 * A * C;
+    if (disc >= 0) { double tt = (-B - sqrt(disc)) / (2 * A); double z = p[2] + tt * d[2];
       if (tt >= 0 && tt <= 1 && z >= zlo && z <= zhi && tt < best) { best = tt; hit = 1; nrm[0] = (ox + tt * d[0]) / r; nrm[1] = (oy + tt * d[1]) / r; nrm[2] = 0; } }
   }
   for (int cap = 0; cap < 2; cap++) {                        // the two end spheres
-    float cz = cap ? zhi : zlo, sx = p[0] - cx, sy = p[1] - cy, sz = p[2] - cz;
-    float a = d[0] * d[0] + d[1] * d[1] + d[2] * d[2], b = 2 * (sx * d[0] + sy * d[1] + sz * d[2]), c = sx * sx + sy * sy + sz * sz - r * r;
-    float disc = b * b - 4 * a * c; if (disc < 0 || a < 1e-9f) continue;
-    float tt = (-b - sqrtf(disc)) / (2 * a); float z = p[2] + tt * d[2];
+    double cz = cap ? zhi : zlo, sx = p[0] - cx, sy = p[1] - cy, sz = p[2] - cz;
+    double a = d[0] * d[0] + d[1] * d[1] + d[2] * d[2], b = 2 * (sx * d[0] + sy * d[1] + sz * d[2]), c = sx * sx + sy * sy + sz * sz - r * r;
+    double disc = b * b - 4 * a * c; if (disc < 0 || a < 1e-9f) continue;
+    double tt = (-b - sqrt(disc)) / (2 * a); double z = p[2] + tt * d[2];
     if (tt >= 0 && tt <= 1 && ((cap && z >= zhi) || (!cap && z <= zlo)) && tt < best) {
       best = tt; hit = 1; nrm[0] = (sx + tt * d[0]) / r; nrm[1] = (sy + tt * d[1]) / r; nrm[2] = (sz + tt * d[2]) / r; }
   }
-  if (hit) *t = best;
+  if (hit) *t = (float)best;
   return hit;
 }
-int u64_line_trace(const float start[3], const float end[3], u64_obj *ignore, u64_obj **hits, int max)
+int u64_trace_multi(const float start[3], const float end[3], float radius, u64_obj *ignore, u64_obj **hits, int max)   // radius 0: line trace; else a sphere sweep
 {
   float d[3] = {end[0] - start[0], end[1] - start[1], end[2] - start[2]}, dist = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
   struct { float t; u64_obj *o; float n[3]; } found[16]; int nf = 0;
   for (int i = 0; i < u64_obj_count() && nf < 16; i++) {
     u64_obj *o = u64_obj_at(i); shape_t sh;
     if (o == ignore || !u64_obj_is_actor(o) || !shape_world(o, &sh) || sh.s->kind != 2) continue;     // pawn capsules block object traces
+    if (u64_gas_hooks_active && u64_ivar(o, "CharacterMovement")->t != U64_OBJ) continue;           // (GASShooter: pickups and weapons ignore these channels)
     float seg = sh.b - sh.a; if (seg < 0) seg = 0;
     float t, n[3];
-    if (ray_vcapsule(start, d, sh.cx, sh.cy, sh.cz - seg, sh.cz + seg, sh.a, &t, n)) { found[nf].t = t; found[nf].o = o; memcpy(found[nf].n, n, sizeof n); nf++; }
+    if (ray_vcapsule(start, d, sh.cx, sh.cy, sh.cz - seg, sh.cz + seg, sh.a + radius, &t, n)) {   /* sphere vs capsule = ray vs capsule grown by the radius */ found[nf].t = t; found[nf].o = o; memcpy(found[nf].n, n, sizeof n); nf++; }
   }
   for (int i = 1; i < nf; i++) for (int j = i; j > 0 && found[j].t < found[j - 1].t; j--) { __typeof__(found[0]) tmp = found[j]; found[j] = found[j - 1]; found[j - 1] = tmp; }
   int n = 0;
@@ -771,6 +802,8 @@ int u64_line_trace(const float start[3], const float end[3], u64_obj *ignore, u6
   }
   return n;
 }
+
+int u64_line_trace(const float start[3], const float end[3], u64_obj *ignore, u64_obj **hits, int max) { return u64_trace_multi(start, end, 0.0f, ignore, hits, max); }
 
 // ---------------------------------------------------------------------------------------------------- montage notifies and gameplay events
 void u64_montage_play(u64_obj *actor, const char *name, float rate)      // schedules the montage's AnimNotifies
@@ -827,6 +860,8 @@ void u64_remove_ge_class(u64_obj *asc, const char *ge_name)   // RemoveActiveGam
   asc_t *a = asc_from(asc); const u64_ge_def *d = find_ge(ge_name);
   for (int i = 0; a && d && i < MAX_ACTIVE; i++) if (active[i].live && active[i].target == a && active[i].def == d) remove_active_idx(i);
 }
+int u64_effect_handle_stack(int h) { return h > 0 && h <= MAX_ACTIVE && active[h - 1].live ? active[h - 1].stack : 0; }
+u64_obj *u64_effect_handle_source(int h) { return h > 0 && h <= MAX_ACTIVE && active[h - 1].live && active[h - 1].source ? active[h - 1].source->obj : 0; }
 int u64_remove_ge_with_asset_tags(u64_obj *asc, const char *tag)   // RemoveActiveEffectsWithTags: matches the effect's asset tags
 {
   asc_t *a = asc_from(asc); int n = 0;

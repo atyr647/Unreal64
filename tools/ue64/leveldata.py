@@ -28,6 +28,18 @@ def cval(v, owner="o"):
             return f"u64_name({codegen.cstr(v[1]['TagName'][1])})"                 # 4.26 saves the tag as a struct with TagName
         if v[0] == "struct" and len(v) > 2 and v[2] == "GameplayTagContainer" and isinstance(v[1], dict) and isinstance(v[1].get("GameplayTags"), tuple):
             return cval(("array", v[1]["GameplayTags"][1]) if v[1]["GameplayTags"][0] == "array" else v[1]["GameplayTags"], owner)
+        if v[0] == "map":                                          # flat array: key, value, key, value ... (struct keys/values: see struct_cval)
+            parts = [cval(k, owner) for k, _ in v[1]] and [x for kv in v[1] for x in (cval(kv[0], owner), cval(kv[1], owner))]
+            if all(parts):
+                return f"u64_array_const({next(_ids)}, {len(parts)}, (u64_v[]){{u64_int(0){', ' + ', '.join(parts) if parts else ''}}} + 1)"
+            return None
+        if v[0] == "struct" and len(v) > 2 and v[2] is None and isinstance(v[1], dict):     # an anonymous (map key/value) struct
+            d = v[1]
+            if set(d) == {"TagName"}: return cval(d["TagName"], owner)                 # a GameplayTag key
+            parts = [x for k, fv in d.items() for x in (f"u64_name({codegen.cstr(k)})", cval(fv, owner))]
+            if all(parts):                                                              # flat array: field name, value, ...
+                return f"u64_array_const({next(_ids)}, {len(parts)}, (u64_v[]){{u64_int(0), {', '.join(parts)}}} + 1)"
+            return None
         if v[0] == "tag": return f"u64_name({codegen.cstr(v[1])})"
         if v[0] == "tags":
             items = ", ".join(f"u64_name({codegen.cstr(t)})" for t in v[1])

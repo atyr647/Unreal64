@@ -31,8 +31,14 @@ static inline int   u64_as_int(u64_v v)    { return v.t == U64_FLOAT ? (int)v.u.
 // Object model (implemented by the runtime): instance variables, named-object lookup, and function dispatch.
 u64_v *u64_ivar(u64_obj *o, const char *name);
 u64_obj *u64_find(const char *name);
+u64_v u64_cast(u64_v v, const char *cls);          // Cast<Cls>(obj): the object, or null when it is not of that class (unknown classes pass)
+int u64_cpp_class_registered(const char *cls);
+int u64_class_known(const char *cls);
+int u64_has_bp(u64_obj *self, const char *fn);
 // Calls a native or Blueprint function by name. Unimplemented natives are reported once and return U64_NONE.
 u64_v u64_call(u64_obj *self, const char *fn, int argc, const u64_v *argv);
+u64_v u64_call_super(u64_obj *self, const char *current_class, const char *fn, int argc, const u64_v *argv);   // "Call Parent Function"
+#define U64_CALL_SUPER(cur, fn, ...) u64_call_super(self, (cur), (fn), (int)(sizeof((u64_v[]){u64_int(0), ##__VA_ARGS__}) / sizeof(u64_v)) - 1, ((u64_v[]){u64_int(0), ##__VA_ARGS__}) + 1)
 #define U64_CALL(self, fn, ...) u64_call((self), (fn), (int)(sizeof((u64_v[]){u64_int(0), ##__VA_ARGS__}) / sizeof(u64_v)) - 1, ((u64_v[]){u64_int(0), ##__VA_ARGS__}) + 1)
 
 // Kismet execution-flow stack (PushExecutionFlow / PopExecutionFlow).
@@ -60,6 +66,7 @@ typedef void (*u64_log_fn)(const char *fmt, ...);
 extern const u64_bpfn *u64_bp_table; extern int u64_bp_count;
 extern u64_native_fn u64_native_hook; extern u64_log_fn u64_log;
 u64_obj *u64_new(const char *name, const char *cls);
+u64_obj *u64_obj_clone(u64_obj *src);
 u64_obj *u64_new_copy(const char *name, const char *cls);   // copies the name into the object (for objects created at run time)
 
 // World simulation (u64_natives.c): timers, actor spawning, event dispatch.
@@ -111,6 +118,7 @@ int u64_class_is(const char *cls, const char *ancestor);
 void u64_cpp_construct(u64_obj *o, const char *cls);                         // C++ constructor defaults of exactly this class
 void u64_cpp_register_class(const char *cls, const char *parent, void (*ctor)(u64_obj *));   // a project's C++ class (constructor defaults)
 void u64_cpp_register_method(const char *cls, const char *fn, u64_v (*f)(u64_obj *self, int argc, const u64_v *argv));
+int u64_cpp_dispatch_from(const char *start_class, u64_obj *self, const char *fn, int argc, const u64_v *argv, u64_v *ret);
 int u64_cpp_dispatch(u64_obj *self, const char *fn, int argc, const u64_v *argv, u64_v *ret);   // member functions along the chain
 float u64_world_dt(void);
 void u64_obj_set_alive(u64_obj *o, int v);

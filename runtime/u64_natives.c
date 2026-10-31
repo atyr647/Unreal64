@@ -148,7 +148,7 @@ void u64_world_begin_play(void)
   int n = u64_obj_count();
   for (int i = 0; i < n; i++) {
     u64_obj *o = u64_obj_at(i);
-    if (u64_obj_alive(o)) { u64_actor_init(o); u64_call(o, "ReceiveBeginPlay", 0, 0); }
+    if (u64_obj_alive(o)) { u64_actor_init(o); u64_call(o, "ReceiveBeginPlay", 0, 0); u64_v r; u64_cpp_dispatch(o, "PossessedBy", 0, 0, &r); }   // placed pawns are possessed (AutoPossessAI)
   }
 }
 

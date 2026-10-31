@@ -84,6 +84,9 @@ typedef struct {
   void (*pre_attribute_change)(u64_obj *asc, const char *name, float *new_value);       // UAttributeSet::PreAttributeChange
   int (*post_execute)(u64_obj *target_asc, const char *name, u64_obj *source_asc);      // PostGameplayEffectExecute; 1 = handled
   void (*zero_health)(u64_obj *owner);                                                  // the owner's reaction to Health reaching 0
+  int (*can_activate)(u64_obj *ability);                                                // UGameplayAbility::CanActivateAbility additions; 0 blocks
+  int (*check_cost)(u64_obj *ability);                                                  // CheckCost additions (GSCheckCost)
+  void (*apply_cost)(u64_obj *ability);                                                 // ApplyCost additions (GSApplyCost), run before the cost effect
 } u64_gas_hooks;
 extern const u64_gas_hooks *u64_gas_hooks_active;
 void u64_adjust_for_max_change(u64_obj *asc, const char *affected, const char *maxattr, float new_max);   // AdjustAttributeForMaxChange
@@ -97,3 +100,13 @@ void u64_cancel_abilities(u64_obj *asc, const char *tag);
 u64_obj *u64_asc_owner(u64_obj *asc);
 extern const char *u64_game_mode_class;
 void u64_set_player_pawn(u64_obj *pawn);
+void u64_notify_tag_change(u64_obj *asc);                      // u64_gas_extra.c: RegisterGameplayTagEvent listeners
+void u64_ability_input_pressed(u64_obj *ability);              // an input press for an already running ability
+u64_obj *u64_task_new(const char *cls, u64_obj *ability);
+void u64_task_track(u64_obj *t);
+void u64_task_untrack(u64_obj *t);
+int u64_tasks_snapshot(u64_obj **out, int max);
+int u64_ability_check_cost(u64_obj *ability);
+int u64_effect_handle_stack(int handle);
+u64_obj *u64_effect_handle_source(int handle);
+int u64_trace_multi(const float start[3], const float end[3], float radius, u64_obj *ignore, u64_obj **hits, int max);

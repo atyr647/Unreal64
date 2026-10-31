@@ -155,7 +155,18 @@ def _value(r, ctx, typ, size, sub, inner, start):
                         raise
             return ("array", elems)
         return ("array", [_scalar(r, ctx, inner, 8 if inner in ("NameProperty",) else 0) for _ in range(n)])
-    if typ in ("MapProperty", "SetProperty"):
+    if typ == "MapProperty":
+        ktype, vtype = inner
+        r.i32()                                   # entries to remove (delta serialisation)
+        n = r.i32()
+        items = []
+        for _ in range(n):
+            # struct keys and values are tagged property sets (a GameplayTag key is {TagName: name}); scalars read as usual
+            key = ("struct", read_stream(r, ctx, start + size), None) if ktype == "StructProperty" else _scalar(r, ctx, ktype, 8 if ktype == "NameProperty" else 0)
+            val = ("struct", read_stream(r, ctx, start + size), None) if vtype == "StructProperty" else _scalar(r, ctx, vtype, 8 if vtype == "NameProperty" else 0)
+            items.append((key, val))
+        return ("map", items)
+    if typ == "SetProperty":
         raise ValueError(typ)
     return _scalar(r, ctx, typ, size, sub)
 

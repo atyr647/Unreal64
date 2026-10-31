@@ -32,7 +32,12 @@ def quat_to_rotator(x, y, z, w):
     return (math.degrees(math.asin(2 * test)), math.degrees(math.atan2(yaw_y, yaw_x)), math.degrees(math.atan2(-2 * (w * x + y * z), 1 - 2 * (x * x + y * y))))
 
 
+CLASS_FNS = {}          # class -> names of the functions its Blueprint defines (filled by bpc.py before generating)
+
+
 class Gen:
+    cls = ""
+
     def __init__(self, ubergraph=False):
         self.locals, self.natives, self.unsupported = set(), set(), []
         self.targets = set()
@@ -82,9 +87,12 @@ class Gen:
         if o == "ArrayGetByRef": return f"u64_array_get({self.ex(a[0], s)}, u64_as_int({self.ex(a[1], s)}))"
         if o == "Nothing": return "u64_int(0)"
         if o == "PrimitiveCast": return self.ex(a[1], s)
-        if o in ("MetaCast", "DynamicCast", "ObjToInterfaceCast", "CrossInterfaceCast", "InterfaceToObjCast"): return self.ex(a[1], s)
+        if o == "DynamicCast":                                           # fails (null) when the object is not of that class; classes the runtime does not know pass
+            cname = last(a[0]); cname = cname[:-2] if cname.endswith("_C") else cname
+            return f"u64_cast({self.ex(a[1], s)}, {cstr(cname)})"
+        if o in ("MetaCast", "ObjToInterfaceCast", "CrossInterfaceCast", "InterfaceToObjCast"): return self.ex(a[1], s)
         if o in ("FinalFunction", "CallMath", "LocalFinalFunction"):
-            return self.call(a[0], a[1], s, c)
+            return self.call(a[0], a[1], s, c, final=(o != "CallMath"))
         if o in ("VirtualFunction", "LocalVirtualFunction"):
             return self.call(a[0], a[1], s, c)
         if o in ("Context", "Context_FailSilent", "ClassContext"):
@@ -121,11 +129,17 @@ class Gen:
             return f"u64_ref(&{self.lv(p, s)})"
         return self.ex(p, s)
 
-    def call(self, fn, params, s, c=None):
+    def call(self, fn, params, s, c=None, final=False):
         c = c or s
         name = last(fn)
         self.natives.add(name)
         args = ", ".join(self.arg(p, c, name, i) for i, p in enumerate(params))
+        owner = getattr(fn, "owner", None)
+        owner = owner[:-2] if owner and owner.endswith("_C") else owner
+        # "Call Parent Function": a non-virtual call of an inherited function that this class overrides. It must start the lookup
+        # above this class, otherwise the override calls itself.
+        if final and s == "self" and owner and owner != self.cls and name in CLASS_FNS.get(self.cls, ()):
+            return f"U64_CALL_SUPER({cstr(self.cls)}, {cstr(name)}{', ' + args if args else ''})"
         return f"U64_CALL({s}, {cstr(name)}{', ' + args if args else ''})"
 
     # ---- statements
@@ -182,6 +196,7 @@ def gen_function(cls, fname, stmts, params=()):
     """params: [(name, is_out)] in declaration order. Out/reference parameters are written back to the caller on return."""
     uber = fname.startswith("ExecuteUbergraph")
     g = Gen(uber)
+    g.cls = cls
     body = [(n, g.stmt(n)) for n in stmts]
     starts = [n.mem for n, _ in body]
     cases = " ".join(f"case {m}: goto L_{m};" for m in starts)

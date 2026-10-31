@@ -13,10 +13,14 @@ def decode_function(p, data, e):
     """Returns (stmts, decoder) for the first candidate that decodes and validates, else raises."""
     def resolve(i):
         if i < 0 and -i - 1 < len(p.imports):
-            return p.imports[-i - 1][3]
+            imp = p.imports[-i - 1]
+            owner = None
+            if imp[2] < 0 and -imp[2] - 1 < len(p.imports):          # the import's outer: the class that declares the function
+                owner = str(p.imports[-imp[2] - 1][3])
+            return kismet.Ref(imp[3], owner)
         if i > 0 and i - 1 < len(p.exports):
-            return p.exports[i - 1].name
-        return "None"
+            return kismet.Ref(p.exports[i - 1].name, None)
+        return kismet.Ref("None", None)
     last = None
     for buf, ser, script in uasset.find_scripts(data, e):
         # dialects are tried in turn and confirmed by the in-memory size + jump targets: pointer encoding (object index vs

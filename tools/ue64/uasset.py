@@ -180,8 +180,10 @@ CPF_PARM, CPF_OUT, CPF_RETURN, CPF_REF = 0x80, 0x100, 0x400, 0x8000
 def function_params(p, data, fn_export):
     """[(name, is_out)] parameters of a function in declaration order, excluding the return value.
 
-    Pre-FField packages store each parameter as a property export owned by the function:
-    tagged-properties terminator FName (8) + 4 bytes + ArrayDim (4) + PropertyFlags (8, at +16).
+    Pre-4.25 packages store each parameter as a property export owned by the function: tagged-properties terminator
+    FName (8) + 4 bytes + ArrayDim (4) + PropertyFlags (8, at +16). 4.25+ (FField properties) serialise them inside the
+    function export itself, ahead of the script: FName class ("StructProperty"...), FName name, uint32 flags, uint32 bHasMetaData,
+    int32 ArrayDim, int32 ElementSize, uint64 PropertyFlags.
     """
     owner = fn_export.index + 1
     out = []
@@ -190,6 +192,29 @@ def function_params(p, data, fn_export):
             flags = struct.unpack_from("<Q", data, x.offset + 16)[0]
             if flags & CPF_PARM and not flags & CPF_RETURN:
                 out.append((x.name, bool(flags & (CPF_OUT | CPF_REF))))
+    if out or p.ue4 < 518:
+        return out
+    blob = data[fn_export.offset:fn_export.offset + fn_export.size]
+    hits = find_scripts(data, fn_export)
+    limit = len(blob)
+    if hits:                                   # the properties precede the script: stop at its earliest candidate start
+        for k in range(0, len(blob) - 8):
+            buf, ser = struct.unpack_from("<ii", blob, k)
+            if 0 < buf <= 8 * ser and k + 8 + ser <= len(blob) and blob[k + 8 + ser - 1] == 0x53:
+                limit = k
+                break
+    i = 0
+    while i + 40 <= limit:
+        ci, cn, ni, nn = struct.unpack_from("<iiii", blob, i)
+        if cn == 0 and nn == 0 and 0 <= ci < len(p.names) and p.names[ci].endswith("Property") and 0 <= ni < len(p.names):
+            arraydim, elem = struct.unpack_from("<ii", blob, i + 24)
+            pflags = struct.unpack_from("<Q", blob, i + 32)[0]
+            if 1 <= arraydim <= 64 and 0 < elem <= 4096:
+                if pflags & CPF_PARM and not pflags & CPF_RETURN:
+                    out.append((p.names[ni], bool(pflags & (CPF_OUT | CPF_REF))))
+                i += 40
+                continue
+        i += 1                                 # properties are not 4-aligned (the tail has a u16 and a u8)
     return out
 
 

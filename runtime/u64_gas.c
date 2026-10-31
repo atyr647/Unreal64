@@ -81,8 +81,10 @@ void u64_notify_attribute_tasks(u64_obj *asc, int argc, const u64_v *argv)      
   }
   for (int i = 0; i < n; i++) u64_mc_broadcast(u64_ivar(snap[i], "OnAttributeChanged"), argc, argv);
 }
+void u64_deliver_gameplay_event_extra(u64_obj *asc, const char *tag, int argc, const u64_v *argv);
 void u64_deliver_gameplay_event(u64_obj *asc, const char *tag, int argc, const u64_v *argv)
 {
+  u64_deliver_gameplay_event_extra(asc, tag, argc, argv);
   u64_obj *snap[MAX_TASKS]; int n = 0;
   for (int i = 0; i < ntasks; i++) {
     u64_obj *t = tasks[i];
@@ -128,10 +130,16 @@ static u64_obj *new_task(const char *cls, u64_obj *ability)
   *u64_ivar(t, "Ability") = u64_objv(ability);
   return t;
 }
+u64_obj *u64_task_new(const char *cls, u64_obj *ability) { return new_task(cls, ability); }       // for u64_gas_extra.c
+void u64_task_track(u64_obj *t) { track(t); }
+void u64_task_untrack(u64_obj *t) { untrack(t); }
+int u64_tasks_snapshot(u64_obj **out, int max) { int n = 0; for (int i = 0; i < ntasks && n < max; i++) out[n++] = tasks[i]; return n; }
+int u64_task_activate_extra(u64_obj *t);
 static void activate_task(u64_obj *t)
 {
   const char *c = u64_obj_class(t);
   track(t);
+  if (u64_task_activate_extra(t)) return;
   if (!strcmp(c, "AbilityTask_WaitDelay")) u64_timer_broadcast(F(*u64_ivar(t, "Time")), t, "OnFinish", u64_float(F(*u64_ivar(t, "Time"))));
   else if (!strcmp(c, "AbilityTask_PlayMontageAndWaitForEvent")) {
     // GDAT_PlayMontageAndWaitForEvent: OnBlendOut when the montage starts blending out, OnCompleted when it ends.
@@ -155,9 +163,11 @@ void u64_input_release(u64_obj *ability)
 }
 
 // ---------------------------------------------------------------------------------------------------- natives
+int u64_native_gas_extra(u64_obj *self, const char *fn, int argc, const u64_v *a, u64_v *out);
 u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
 {
   u64_v x = A(argc, a, 0), y = A(argc, a, 1), z = A(argc, a, 2);
+  { u64_v out; if (u64_native_gas_extra(self, fn, argc, a, &out)) return out; }                       // target data, containers, more tasks
   char b1[48], b2[48];
 
   // ---------------- math / text ----------------
@@ -300,8 +310,11 @@ u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
   if (IS("GetAbilitySystemComponent")) return u64_objv(u64_asc_of(x.t == U64_OBJ ? x.u.o : self));
   if (IS("GetActorInfo")) {
     u64_v *av = u64_ivar(self, "Avatar");
-    u64_obj *info = u64_new(u64_intern(key(u64_obj_name(self), ".ActorInfo")), "GameplayAbilityActorInfo");
-    *u64_ivar(info, "AvatarActor") = *av;
+    u64_obj *info = u64_new_copy("ActorInfo", "GameplayAbilityActorInfo");
+    u64_obj *avatar = av->t == U64_OBJ ? av->u.o : 0;
+    *u64_ivar(info, "AvatarActor") = *av; *u64_ivar(info, "OwnerActor") = *av;     // the avatar owns its ability system here
+    *u64_ivar(info, "AbilitySystemComponent") = *u64_ivar(self, "ASC");
+    *u64_ivar(info, "PlayerController") = avatar ? *u64_ivar(avatar, "Controller") : u64_objv(0);
     *u64_ivar(info, "MovementComponent") = *av;                  // movement is modelled on the actor itself
     return u64_objv(info);
   }
@@ -361,7 +374,8 @@ u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
   if (IS("GetTimeSeconds")) return u64_float(u64_world_time());
   if (IS("PrintString")) { if (u64_log) u64_log("  [print] %s", nm(y)); return NONE_; }
   if (IS("IsValidClass")) return u64_bool(*nm(x) != 0);
-  if (IS("IsLocallyControlled") || IS("IsLocalPlayerController")) return u64_bool(self && self == u64_player_pawn());
+  if (IS("IsLocallyControlled")) return u64_bool(self && self == u64_player_pawn());                       // a pawn
+  if (IS("IsLocalPlayerController")) { u64_obj *p = u64_player_pawn(); return u64_bool(self && p && obj_arg(*u64_ivar(p, "Controller")) == self); }   // a controller
   if (IS("GetAbilitySystemComponentFromActorInfo")) return *u64_ivar(self, "ASC");
   if (IS("GetCurrentSourceObject") || IS("K2_GetSourceObject")) return *u64_ivar(self, "SourceObject");
   if (IS("GetFloatAttributeFromAbilitySystemComponent")) {                         // (actor, attribute, out found)
@@ -369,14 +383,14 @@ u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
     return u64_float(asc ? u64_attr_get(asc, nm(y)) : 0.0f);
   }
   if (IS("RemoveActiveGameplayEffect")) { u64_remove_ge(x.u.i); return u64_int(0); }
-  if (IS("FindAbilitySpecHandleForClass") || IS("GetPrimaryAbilityInstanceFromClass")) {   // a spec handle / primary instance is the granted ability object
-    u64_obj *list[64]; int n = u64_asc_abilities(asc_for(self), list, 64);
-    for (int i = 0; i < n; i++) if (u64_class_is(u64_obj_class(list[i]), nm(x))) return u64_objv(list[i]);
+  if (IS("GetPrimaryAbilityInstanceFromClass")) {                                  // (ASC, class): the granted ability object of that class
+    u64_obj *list[64]; int n = u64_asc_abilities(asc_for(obj_arg(x) ? obj_arg(x) : self), list, 64);
+    for (int i = 0; i < n; i++) { char cb[64]; snprintf(cb, sizeof cb, "%s", nm(y)); size_t cl = strlen(cb); if (cl > 2 && !strcmp(cb + cl - 2, "_C")) cb[cl - 2] = 0; if (u64_class_is(u64_obj_class(list[i]), cb)) return u64_objv(list[i]); }
     return u64_objv(0);
   }
-  if (IS("GetPrimaryAbilityInstanceFromHandle")) return x;
+  if (IS("GetPrimaryAbilityInstanceFromHandle")) return y;                         // (ASC, handle): a handle is the ability object
   if (IS("IsAbilitySpecHandleValid")) return u64_bool(obj_arg(x) != 0);
-  if (IS("IsPrimaryAbilityInstanceActive")) return u64_bool(obj_arg(x) && u64_true(*u64_ivar(obj_arg(x), "Active")));
+  if (IS("IsPrimaryAbilityInstanceActive")) return u64_bool(obj_arg(y) && u64_true(*u64_ivar(obj_arg(y), "Active")));    // (ASC, handle)
   if (IS("TryActivateAbilitiesByTag")) {                                           // ASC: activate every ability whose tags match; true if any did
     u64_obj *asc = asc_for(self), *list[64]; int n = u64_asc_abilities(asc, list, 64), any = 0;
     for (int i = 0; i < n; i++) {

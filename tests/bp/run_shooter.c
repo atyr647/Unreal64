@@ -104,6 +104,39 @@ int main(void)
   CHECK(u64_player_pawn() && u64_player_pawn() != hero && u64_obj_alive(u64_player_pawn()));     // respawned after 5 s
   hero = u64_player_pawn(); tick(3);
   CHECK(attr("Health") == 100 && attr("Shield") == 100 && u64_as_int(call(hero, "GetNumWeapons")) == 1);   // a fresh hero with the default inventory
+  // --- firing the rifle (GA_RiflePrimary -> GA_RiflePrimaryInstant -> GSGATA_LineTrace -> GE_RifleDamage)
+  {
+    u64_obj *enemy = u64_find("BP_HeroCharacter2");
+    tick(3);
+    u64_obj *ehero = hero;
+    hero = enemy; float en_shield0 = attr("Shield"), en_health0 = attr("Health"); hero = ehero;
+    CHECK(en_shield0 == 100 && en_health0 == 100 && attr("Armor") == 20);
+    // aim from the first-person camera at the enemy's capsule centre: control rotation = direction camera -> target
+    call(hero, "GetCurrentWeapon");
+    u64_v loc = *u64_ivar(hero, "Location"), el = *u64_ivar(enemy, "Location");
+    u64_obj *cam = u64_comp(hero, "FirstPersonCamera").u.o;
+    u64_v rel = cam ? *u64_ivar(cam, "RelativeLocation") : u64_vec(0, 0, 0);
+    float cx = loc.u.v[0] + rel.u.v[0], cy = loc.u.v[1] + rel.u.v[1], cz = loc.u.v[2] + rel.u.v[2];
+    float dx = el.u.v[0] - cx, dy = el.u.v[1] - cy, dz = el.u.v[2] - cz;
+    *u64_ivar(hero, "ControlRotation") = u64_vec(atan2f(dz, sqrtf(dx * dx + dy * dy)) * 57.29578f, atan2f(dy, dx) * 57.29578f, 0);
+    int clip0 = u64_as_int(call(hero, "GetPrimaryClipAmmo"));
+    CHECK(u64_input_press(hero, "EGSAbilityInputID::PrimaryFire"));
+    for (int i = 0; i < 30 && u64_as_int(call(hero, "GetPrimaryClipAmmo")) == clip0; i++) tick(1);       // until the first round is fired
+    u64_input_release_id(hero, "EGSAbilityInputID::PrimaryFire");
+    tick(20);
+    CHECK(u64_as_int(call(hero, "GetPrimaryClipAmmo")) == clip0 - 1);                // AmmoCost 1 per shot, one shot (released at once)
+    hero = enemy;
+    // BulletDamage 10 (set by caller) * 100 / (100 + Armor 20) = 8.3333 to the shield first (100 -> 91.6667), health untouched
+    CHECK(fabsf(attr("Shield") - (100 - 10.0f * 100.0f / 120.0f)) < 0.01f && attr("Health") == 100);
+    hero = ehero;
+    // --- reload (GA_RifleReload): the clip is topped up from the reserve; clip + reserve is conserved
+    int clip1 = u64_as_int(call(hero, "GetPrimaryClipAmmo")), res1 = u64_as_int(call(hero, "GetPrimaryReserveAmmo"));
+    CHECK(clip1 == 29 && res1 == 60);
+    CHECK(u64_input_press(hero, "EGSAbilityInputID::Reload"));
+    tick(150);                                                                          // the reload montage plays out
+    int clip2 = u64_as_int(call(hero, "GetPrimaryClipAmmo")), res2 = u64_as_int(call(hero, "GetPrimaryReserveAmmo"));
+    CHECK(clip2 == 30 && clip2 + res2 == clip1 + res1);
+  }
   // --- garbage collection: 3000 spawn/destroy cycles (plus arrays and temporaries) would exhaust the 1024-object pool without it
   {
     int live0 = u64_gc_live();

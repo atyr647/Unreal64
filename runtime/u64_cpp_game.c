@@ -63,6 +63,12 @@ void u64_cpp_register_method(const char *cls, const char *fn, u64_v (*f)(u64_obj
 {
   if (n_reg_fn < MAX_REG) reg_fn[n_reg_fn++] = (typeof(reg_fn[0])){cls, fn, f};
 }
+int u64_cpp_class_registered(const char *cls)
+{
+  for (int i = 0; i < n_reg_cls; i++) if (!strcmp(reg_cls[i].cls, cls)) return 1;
+  for (unsigned i = 0; i < sizeof cpp_classes / sizeof cpp_classes[0]; i++) if (!strcmp(cpp_classes[i].cls, cls)) return 1;
+  return 0;
+}
 const char *u64_parent_of(const char *cls)
 {
   for (int i = 0; i < n_reg_cls; i++) if (!strcmp(reg_cls[i].cls, cls)) return reg_cls[i].parent;
@@ -215,7 +221,7 @@ static u64_obj *spawn_hero_at(u64_obj *start)
 void u64_game_start(void)                                          // GameMode::RestartPlayer: the hero starts at the PlayerStart
 {
   u64_obj *hero = spawn_hero_at(find_class("PlayerStart"));
-  if (hero) { *u64_ivar(hero, "IsPlayer") = u64_bool(1); player_pawn_ = hero; }
+  if (hero) { *u64_ivar(hero, "IsPlayer") = u64_bool(1); player_pawn_ = hero; u64_v r; u64_cpp_dispatch(hero, "PossessedBy", 0, 0, &r); }
 }
 static u64_v respawn_hero(u64_obj *self, int argc, const u64_v *a)  // AGASDocumentationGameMode::RespawnHero(Controller)
 {
@@ -267,9 +273,9 @@ static struct { const char *cls, *fn; cpp_fn f; } methods[] = {
   {"GDHeroCharacter", "FinishDying", fn_finish_dying},
   {"GASDocumentationGameMode", "RespawnHero", respawn_hero},
 };
-int u64_cpp_dispatch(u64_obj *self, const char *fn, int argc, const u64_v *argv, u64_v *ret)
+int u64_cpp_dispatch_from(const char *start, u64_obj *self, const char *fn, int argc, const u64_v *argv, u64_v *ret)
 {
-  for (const char *c = u64_obj_class(self); c; c = u64_parent_of(c)) {
+  for (const char *c = start; c; c = u64_parent_of(c)) {
     for (int i = 0; i < n_reg_fn; i++)
       if (!strcmp(reg_fn[i].cls, c) && !strcmp(reg_fn[i].fn, fn)) { *ret = reg_fn[i].f(self, argc, argv); return 1; }
     for (unsigned i = 0; i < sizeof methods / sizeof methods[0]; i++)
@@ -283,3 +289,4 @@ void u64_gc_roots_cpp(void)
   for (int i = 0; i < 16; i++) u64_gc_mark_obj(ring[i]);
   u64_gc_mark_obj(game_mode); u64_gc_mark_obj(player_pawn_);
 }
+int u64_cpp_dispatch(u64_obj *self, const char *fn, int argc, const u64_v *argv, u64_v *ret) { return u64_cpp_dispatch_from(u64_obj_class(self), self, fn, argc, argv, ret); }

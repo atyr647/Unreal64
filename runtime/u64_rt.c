@@ -81,7 +81,39 @@ static u64_v *vars_get(vars_t *t, const char *k)
 
 u64_v *u64_ivar(u64_obj *o, const char *name)   { if (!o) o = &null_obj; return vars_get(&o->iv, name); }
 u64_v *u64_pframe(u64_obj *o, const char *name) { if (!o) o = &null_obj; return vars_get(&o->pf, name); }
-u64_v *u64_member(u64_v *s, const char *name)   { static u64_v scratch[8]; static int i; if (s && s->t == U64_OBJ && s->u.o) return u64_ivar(s->u.o, name); return &scratch[i++ & 7]; }
+// Struct members: a struct variable is an object; an unset (default-constructed) struct variable becomes an empty one on first access.
+u64_v *u64_member(u64_v *s, const char *name)
+{
+  if (s && s->t == U64_NONE) { u64_obj *o = u64_new("Struct", "Struct"); *s = u64_objv(o); }
+  if (s && s->t == U64_OBJ && s->u.o) return u64_ivar(s->u.o, name);
+  static u64_v scratch[8]; static int i; return &scratch[i++ & 7];
+}
+u64_obj *u64_obj_clone(u64_obj *src)                         // struct / spec copy: same class, every variable copied (arrays and objects shared)
+{
+  if (!src) return 0;
+  u64_obj *o = u64_new_copy(src->name, src->cls);
+  for (slot_t *sl = src->iv.head; sl; sl = sl->next) *u64_ivar(o, sl->k) = sl->v;
+  return o;
+}
+
+int u64_class_known(const char *cls)                      // a Blueprint class or a registered C++ class: its ancestry is modelled, so a cast to it can fail
+{
+  if (u64_parent_of(cls)) return 1;
+  for (int i = 0; i < u64_bp_count; i++) if (!strcmp(u64_bp_table[i].cls, cls)) return 1;
+  return u64_cpp_class_registered(cls);
+}
+u64_v u64_cast(u64_v v, const char *cls)
+{
+  if (v.t != U64_OBJ || !v.u.o) return v.t == U64_NONE ? v : u64_objv(0);
+  if (!strcmp(v.u.o->cls, "Component") || !u64_class_known(cls) || u64_class_is(v.u.o->cls, cls)) return v;     // components are not typed here
+  return u64_objv(0);
+}
+int u64_has_bp(u64_obj *self, const char *fn)          // does a compiled Blueprint function of this name exist on the class chain?
+{
+  for (const char *c = self ? self->cls : 0; c; c = u64_parent_of(c))
+    for (int i = 0; i < u64_bp_count; i++) if (!strcmp(u64_bp_table[i].fn, fn) && !strcmp(u64_bp_table[i].cls, c)) return 1;
+  return 0;
+}
 
 u64_obj *u64_find(const char *name)
 {
@@ -137,6 +169,22 @@ u64_v u64_call(u64_obj *self, const char *fn, int argc, const u64_v *argv)
   u64_v r = u64_native(self, fn, argc, argv);
   if (r.t == U64_NONE && u64_native_hook) return u64_native_hook(self, fn, argc, argv);
   return r;
+}
+
+// Parent call: the lookup starts at the parent of `current_class`, then the C++ ports above it, then the natives.
+u64_v u64_call_super(u64_obj *self, const char *cur, const char *fn, int argc, const u64_v *argv)
+{
+  if (!self) self = &null_obj;
+  for (const char *c = u64_parent_of(cur); c; c = u64_parent_of(c))
+    for (int i = 0; i < u64_bp_count; i++)
+      if (!strcmp(u64_bp_table[i].fn, fn) && !strcmp(u64_bp_table[i].cls, c)) {
+        last_return = (u64_v){U64_NONE};
+        u64_bp_table[i].impl(self, argv, argc);
+        u64_v r = last_return; last_return = (u64_v){U64_NONE};
+        return r;
+      }
+  { u64_v cr; if (u64_cpp_dispatch_from(u64_parent_of(cur), self, fn, argc, argv, &cr)) return cr; }
+  return u64_native(self, fn, argc, argv);
 }
 
 u64_v u64_comp(u64_obj *owner, const char *name)

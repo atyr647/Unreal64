@@ -486,6 +486,7 @@ static void game_mode_hero_died(u64_obj *hero)                     // AGASShoote
   u64_timer_call(fv(*u64_ivar(gm, "RespawnDelay")), gm, "RespawnHero", u64_bool(u64_true(*u64_ivar(hero, "IsPlayer"))));
 }
 
+static u64_v h_possessed_by(u64_obj *s, int c, const u64_v *a);
 static u64_obj *find_named(const char *name) { for (int i = 0; i < u64_obj_count(); i++) { u64_obj *o = u64_obj_at(i); if (u64_obj_alive(o) && !strcmp(u64_obj_name(o), name)) return o; } return 0; }
 static u64_obj *find_class_loc(const char *cls) { for (int i = 0; i < u64_obj_count(); i++) { u64_obj *o = u64_obj_at(i); if (u64_obj_alive(o) && !strcmp(u64_obj_class(o), cls)) return o; } return 0; }
 static u64_v gm_respawn_hero(u64_obj *gm, int c, const u64_v *a)    // AGASShooterGameModeBase::RespawnHero(Controller): at the PlayerStart / EnemyHeroSpawn
@@ -499,7 +500,270 @@ static u64_v gm_respawn_hero(u64_obj *gm, int c, const u64_v *a)    // AGASShoot
   u64_actor_init(hero); u64_call(hero, "ReceiveBeginPlay", 0, 0);
   *u64_ivar(hero, "IsPlayer") = u64_bool(is_player);
   if (is_player) u64_set_player_pawn(hero);
+  h_possessed_by(hero, 0, 0);
   if (u64_log) u64_log("  [respawn] %s", u64_obj_name(hero));
+  return NONE_;
+}
+
+// ---------------------------------------------------------------------------------------------------- AGSGATA_Trace / LineTrace / SphereTrace
+// The reusable trace target actor the weapons' abilities configure and hand to WaitTargetDataWithReusableActor.
+extern void u64_target_data_ready(u64_obj *target_actor, u64_v handle);
+extern u64_v u64_td_handle_from_hits(u64_v hits);
+static void ctor_trace(u64_obj *o)                                  // AGSGATA_Trace::AGSGATA_Trace
+{
+  *u64_ivar(o, "MaxHitResultsPerTrace") = u64_int(1); *u64_ivar(o, "NumberOfTraces") = u64_int(1);
+  *u64_ivar(o, "bIgnoreBlockingHits") = u64_bool(0); *u64_ivar(o, "bTraceAffectsAimPitch") = u64_bool(1);
+  *u64_ivar(o, "bTraceFromPlayerViewPoint") = u64_bool(0); *u64_ivar(o, "MaxRange") = u64_float(999999.0f);
+  *u64_ivar(o, "bUseAimingSpreadMod") = u64_bool(0);
+  static const char *const zeros[] = {"BaseSpread", "AimingSpreadMod", "TargetingSpreadIncrement", "TargetingSpreadMax", "CurrentTargetingSpread"};
+  for (int i = 0; i < 5; i++) *u64_ivar(o, zeros[i]) = u64_float(0.0f);
+  *u64_ivar(o, "bUsePersistentHitResults") = u64_bool(0);
+}
+static void ctor_sphere_trace(u64_obj *o) { *u64_ivar(o, "TraceSphereRadius") = u64_float(100.0f); }
+static u64_v tr_configure(u64_obj *s, int c, const u64_v *a)         // Configure(...): the line version has 21 parameters, the sphere version adds the radius after MaxRange
+{
+  static const char *const line_names[] = {"StartLocation", "AimingTag", "AimingRemovalTag", "TraceProfile", "Filter", "ReticleClass", "ReticleParams",
+    "bIgnoreBlockingHits", "ShouldProduceTargetDataOnServer", "bUsePersistentHitResults", "bDebug", "bTraceAffectsAimPitch", "bTraceFromPlayerViewPoint",
+    "bUseAimingSpreadMod", "MaxRange", "BaseSpread", "AimingSpreadMod", "TargetingSpreadIncrement", "TargetingSpreadMax", "MaxHitResultsPerTrace", "NumberOfTraces"};
+  static const char *const sphere_names[] = {"StartLocation", "AimingTag", "AimingRemovalTag", "TraceProfile", "Filter", "ReticleClass", "ReticleParams",
+    "bIgnoreBlockingHits", "ShouldProduceTargetDataOnServer", "bUsePersistentHitResults", "bDebug", "bTraceAffectsAimPitch", "bTraceFromPlayerViewPoint",
+    "bUseAimingSpreadMod", "MaxRange", "TraceSphereRadius", "BaseSpread", "AimingSpreadMod", "TargetingSpreadIncrement", "TargetingSpreadMax", "MaxHitResultsPerTrace", "NumberOfTraces"};
+  int sphere = is_class(s, "GSGATA_SphereTrace");
+  const char *const *names = sphere ? sphere_names : line_names;
+  int n = sphere ? 22 : 21;
+  for (int i = 0; i < n && i < c; i++) *u64_ivar(s, names[i]) = a[i];
+  if (u64_true(*u64_ivar(s, "bUsePersistentHitResults"))) *u64_ivar(s, "NumberOfTraces") = u64_int(1);
+  return NONE_;
+}
+static u64_v tr_reset_spread(u64_obj *s, int c, const u64_v *a)
+{
+  (void)c; (void)a;
+  *u64_ivar(s, "bUseAimingSpreadMod") = u64_bool(0);
+  static const char *const zeros[] = {"BaseSpread", "AimingSpreadMod", "TargetingSpreadIncrement", "TargetingSpreadMax", "CurrentTargetingSpread"};
+  for (int i = 0; i < 5; i++) *u64_ivar(s, zeros[i]) = u64_float(0.0f);
+  return NONE_;
+}
+typedef struct { float x, y, z; } v3;
+static v3 v3_of(u64_v v) { return v.t == U64_VEC ? (v3){v.u.v[0], v.u.v[1], v.u.v[2]} : (v3){0, 0, 0}; }
+static v3 v3_add(v3 a, v3 b) { return (v3){a.x + b.x, a.y + b.y, a.z + b.z}; }
+static v3 v3_sub(v3 a, v3 b) { return (v3){a.x - b.x, a.y - b.y, a.z - b.z}; }
+static v3 v3_mul(v3 a, float k) { return (v3){a.x * k, a.y * k, a.z * k}; }
+static float v3_dot(v3 a, v3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+static v3 v3_norm(v3 a) { float l = sqrtf(v3_dot(a, a)); return l > 1e-6f ? v3_mul(a, 1.0f / l) : (v3){0, 0, 0}; }
+static u64_v vv(v3 a) { return u64_vec(a.x, a.y, a.z); }
+static v3 dir_of(v3 rot)                                             // FRotator::Vector
+{
+  float p = rot.x * 0.017453292f, y = rot.y * 0.017453292f;
+  return (v3){cosf(p) * cosf(y), cosf(p) * sinf(y), sinf(p)};
+}
+static v3 rot_of_dir(v3 d)                                           // FVector::Rotation (pitch, yaw, 0)
+{
+  return (v3){atan2f(d.z, sqrtf(d.x * d.x + d.y * d.y)) * 57.29577951f, atan2f(d.y, d.x) * 57.29577951f, 0};
+}
+static v3 rotate_yaw(float yaw_deg, v3 v) { float y = yaw_deg * 0.017453292f, c = cosf(y), s = sinf(y); return (v3){v.x * c - v.y * s, v.x * s + v.y * c, v.z}; }
+// AController::GetPlayerViewPoint for a hero: the active camera's world location and the control rotation. First person: the
+// first-person camera (attached to the root, so actor location + its relative offset rotated by the actor's yaw); third person: the
+// camera boom pivot pulled back along the view direction by TargetArmLength (no collision probe: there is no world geometry yet).
+static void player_view(u64_obj *hero, v3 *loc, v3 *rot)
+{
+  v3 base = v3_of(*u64_ivar(hero, "Location")), ctrl = v3_of(*u64_ivar(hero, "ControlRotation")), arot = v3_of(*u64_ivar(hero, "Rotation"));
+  *rot = ctrl;
+  if (u64_true(*u64_ivar(hero, "bIsFirstPersonPerspective"))) {
+    u64_obj *cam = O(u64_comp(hero, "FirstPersonCamera"));
+    *loc = v3_add(base, rotate_yaw(arot.y, cam ? v3_of(*u64_ivar(cam, "RelativeLocation")) : (v3){0, 0, 0}));
+  } else {
+    u64_obj *boom = O(u64_comp(hero, "CameraBoom"));
+    v3 pivot = v3_add(base, rotate_yaw(arot.y, boom ? v3_of(*u64_ivar(boom, "RelativeLocation")) : (v3){0, 0, 0}));
+    float arm = boom && u64_ivar(boom, "TargetArmLength")->t == U64_FLOAT ? u64_ivar(boom, "TargetArmLength")->u.f : 300.0f;
+    *loc = v3_sub(pivot, v3_mul(dir_of(ctrl), arm));
+  }
+}
+// FGameplayAbilityTargetingLocationInfo::GetTargetingTransform().GetLocation(): literal transform, the source actor, or a socket on a
+// component. Sockets need the animated skeleton pose, which is not evaluated yet: the component's owner location stands in.
+static v3 targeting_location(u64_v info, u64_obj *source_actor)
+{
+  u64_obj *io = O(info);
+  if (!io) return v3_of(source_actor ? *u64_ivar(source_actor, "Location") : NONE_);
+  int type = u64_as_int(*u64_ivar(io, "LocationType"));
+  if (type == 0) { u64_obj *lt = O(*u64_ivar(io, "LiteralTransform")); return lt ? v3_of(*u64_ivar(lt, "Location")) : (v3){0, 0, 0}; }
+  if (type == 2) {
+    u64_obj *comp = O(*u64_ivar(io, "SourceComponent")), *owner = comp ? O(*u64_ivar(comp, "Owner")) : 0;
+    u64_obj *wc = owner ? O(*u64_ivar(owner, "OwningCharacter")) : 0;           // a carried weapon is attached to its character
+    if (wc) owner = wc;
+    if (owner) return v3_of(*u64_ivar(owner, "Location"));
+  }
+  return v3_of(source_actor ? *u64_ivar(source_actor, "Location") : NONE_);
+}
+static uint32_t gs_rng = 0x1234567u;
+static float frand(void) { gs_rng = gs_rng * 1664525u + 1013904223u; return (float)(gs_rng >> 8) / 16777216.0f; }
+static v3 rand_cone(v3 dir, float half)                              // FRandomStream::VRandCone with equal half angles: uniform over the cone's solid angle
+{
+  if (half <= 0) return dir;
+  float u = frand(), v = frand(), theta = 6.2831853f * u, cz = 1.0f - v * (1.0f - cosf(half)), sz = sqrtf(1.0f - cz * cz);
+  v3 up = fabsf(dir.z) < 0.999f ? (v3){0, 0, 1} : (v3){1, 0, 0};
+  v3 sx = v3_norm((v3){dir.y * up.z - dir.z * up.y, dir.z * up.x - dir.x * up.z, dir.x * up.y - dir.y * up.x}), sy = (v3){dir.y * sx.z - dir.z * sx.y, dir.z * sx.x - dir.x * sx.z, dir.x * sx.y - dir.y * sx.x};
+  return v3_norm(v3_add(v3_mul(dir, cz), v3_add(v3_mul(sx, sz * cosf(theta)), v3_mul(sy, sz * sinf(theta)))));
+}
+static float current_spread(u64_obj *s)                              // AGSGATA_Trace::GetCurrentSpread
+{
+  float f = fv(*u64_ivar(s, "BaseSpread")) + fv(*u64_ivar(s, "CurrentTargetingSpread"));
+  u64_obj *ab = O(*u64_ivar(s, "OwningAbility")), *asc = ab ? O(*u64_ivar(ab, "ASC")) : 0;
+  const char *at = nm(*u64_ivar(s, "AimingTag")), *rt = nm(*u64_ivar(s, "AimingRemovalTag"));
+  if (u64_true(*u64_ivar(s, "bUseAimingSpreadMod")) && *at && *rt && asc && u64_tag_count(asc, at) > u64_tag_count(rt ? asc : 0, rt)) f *= fv(*u64_ivar(s, "AimingSpreadMod"));
+  return f;
+}
+// One trace of AGSGATA_Trace::PerformTrace. Returns the number of hit results (objects in hits[]).
+static int one_trace(u64_obj *s, u64_obj *source, v3 trace_start, u64_obj **hits, int max)
+{
+  float range = fv(*u64_ivar(s, "MaxRange"));
+  v3 view_start = trace_start, view_rot = rot_of_dir((v3){1, 0, 0});
+  u64_obj *hero = is_class(source, "GSHeroCharacter") ? source : 0;
+  if (hero && u64_player_pawn() == hero) player_view(hero, &view_start, &view_rot);   // MasterPC->GetPlayerViewPoint
+  else if (hero) view_rot = v3_of(*u64_ivar(hero, "ControlRotation"));
+  v3 view_dir = dir_of(view_rot), view_end = v3_add(view_start, v3_mul(view_dir, range));
+  { // ClipCameraRayToAbilityRange: when the camera is inside the ability's range sphere, end the view ray on the sphere
+    v3 to_center = v3_sub(trace_start, view_start); float dot = v3_dot(to_center, view_dir);
+    if (dot >= 0) { float d2 = v3_dot(to_center, to_center) - dot * dot, r2 = range * range;
+      if (d2 <= r2) view_end = v3_add(view_start, v3_mul(view_dir, dot + sqrtf(r2 - d2))); }
+  }
+  u64_obj *probe[16]; float vs[3] = {view_start.x, view_start.y, view_start.z}, ve[3] = {view_end.x, view_end.y, view_end.z};
+  int pn = u64_trace_multi(vs, ve, 0.0f, source, probe, 16);
+  float inc = fv(*u64_ivar(s, "TargetingSpreadIncrement")), mx = fv(*u64_ivar(s, "TargetingSpreadMax")), cur = fv(*u64_ivar(s, "CurrentTargetingSpread"));
+  *u64_ivar(s, "CurrentTargetingSpread") = u64_float(cur + inc < mx ? cur + inc : mx);
+  int use = 0; v3 adj_end = view_end;
+  if (pn > 0) { v3 hl = v3_of(*u64_ivar(probe[0], "Location")); v3 dd = v3_sub(trace_start, hl); if (v3_dot(dd, dd) <= range * range) { use = 1; adj_end = hl; } }
+  v3 aim = v3_norm(v3_sub(adj_end, trace_start));
+  if (aim.x == 0 && aim.y == 0 && aim.z == 0) aim = view_dir;
+  if (!u64_true(*u64_ivar(s, "bTraceAffectsAimPitch")) && use) {
+    v3 orig = v3_norm(v3_sub(view_end, trace_start));
+    if (orig.x != 0 || orig.y != 0 || orig.z != 0) { v3 ar = rot_of_dir(aim), orr = rot_of_dir(orig); ar.x = orr.x; aim = dir_of(ar); }
+  }
+  float half = current_spread(s) * 0.5f * 0.017453292f;
+  v3 shoot = rand_cone(aim, half), end = v3_add(trace_start, v3_mul(shoot, range));
+  *u64_ivar(s, "CurrentTraceEnd") = vv(end);
+  float ts[3] = {trace_start.x, trace_start.y, trace_start.z}, te[3] = {end.x, end.y, end.z};
+  float radius = is_class(s, "GSGATA_SphereTrace") ? fv(*u64_ivar(s, "TraceSphereRadius")) : 0.0f;
+  int n = u64_trace_multi(ts, te, radius, source, hits, max);                            // DoTrace + the filter: TraceStart / TraceEnd are recorded on each hit
+  for (int i = 0; i < n; i++) { *u64_ivar(hits[i], "TraceStart") = vv(trace_start); *u64_ivar(hits[i], "TraceEnd") = vv(end); }
+  return n;
+}
+static u64_v tr_perform_trace(u64_obj *s, int c, const u64_v *a)    // PerformTrace(SourceActor) -> hit results (array)
+{
+  u64_obj *source = O(A(c, a, 0)); if (!source) source = O(*u64_ivar(s, "SourceActor"));
+  u64_v out = u64_array_of(0, 0);
+  v3 start = targeting_location(*u64_ivar(s, "StartLocation"), source);
+  u64_obj *hero = is_class(source, "GSHeroCharacter") ? source : 0;
+  if (hero && u64_player_pawn() == hero && u64_true(*u64_ivar(s, "bTraceFromPlayerViewPoint"))) { v3 vl, vr; player_view(hero, &vl, &vr); start = vl; }
+  int traces = u64_as_int(*u64_ivar(s, "NumberOfTraces")), per = u64_as_int(*u64_ivar(s, "MaxHitResultsPerTrace"));
+  for (int t = 0; t < traces; t++) {
+    u64_obj *hits[16];
+    int n = one_trace(s, source, start, hits, 16);
+    for (int j = 0; j < n; j++) { if (per >= 0 && j + 1 > per) continue; u64_array_push(&out, u64_objv(hits[j])); }     // MaxHitResultsPerTrace
+  }
+  return out;
+}
+static u64_v tr_start_targeting(u64_obj *s, int c, const u64_v *a)  // StartTargeting(Ability)
+{
+  u64_obj *ab = O(A(c, a, 0));
+  *u64_ivar(s, "OwningAbility") = u64_objv(ab); *u64_ivar(s, "SourceActor") = u64_objv(ab ? O(*u64_ivar(ab, "Avatar")) : 0);
+  return NONE_;
+}
+static u64_v tr_confirm(u64_obj *s, int c, const u64_v *a)           // ConfirmTargetingAndContinue: trace, MakeTargetData, TargetDataReadyDelegate
+{
+  (void)c; (void)a;
+  u64_obj *source = O(*u64_ivar(s, "SourceActor"));
+  if (!source) return NONE_;
+  u64_v hits = tr_perform_trace(s, 0, 0), handle = u64_td_handle_from_hits(hits);
+  u64_target_data_ready(s, handle);
+  return NONE_;
+}
+static u64_v tr_stop_targeting(u64_obj *s, int c, const u64_v *a) { (void)c; (void)a; *u64_ivar(s, "WaitingTask") = u64_objv(0); return NONE_; }
+
+// ---------------------------------------------------------------------------------------------------- UGSGameplayAbility
+static void ctor_gs_ability(u64_obj *o)                              // UGSGameplayAbility::UGSGameplayAbility
+{
+  *u64_ivar(o, "bActivateAbilityOnGranted") = u64_bool(0); *u64_ivar(o, "bActivateOnInput") = u64_bool(1);
+  *u64_ivar(o, "bSourceObjectMustEqualCurrentWeaponToActivate") = u64_bool(0); *u64_ivar(o, "bCannotActivateWhileInteracting") = u64_bool(1);
+  tag_push(o, "ActivationBlockedTags", "State.Dead"); tag_push(o, "ActivationBlockedTags", "State.KnockedDown");
+  tag_push(o, "ActivationOwnedTags", "Ability.BlocksInteraction");
+  *u64_ivar(o, "InteractingTag") = u64_name("State.Interacting"); *u64_ivar(o, "InteractingRemovalTag") = u64_name("State.InteractingRemoval");
+}
+static int gs_can_activate(u64_obj *ab)                              // UGSGameplayAbility::CanActivateAbility (before Super)
+{
+  if (!is_class(ab, "GSGameplayAbility")) return 1;
+  u64_obj *asc = O(*u64_ivar(ab, "ASC"));
+  if (u64_true(*u64_ivar(ab, "bCannotActivateWhileInteracting")) && u64_tag_count(asc, "State.Interacting") > u64_tag_count(asc, "State.InteractingRemoval")) return 0;
+  if (u64_true(*u64_ivar(ab, "bSourceObjectMustEqualCurrentWeaponToActivate"))) {
+    u64_obj *hero = O(*u64_ivar(ab, "Avatar"));
+    u64_obj *w = is_class(hero, "GSHeroCharacter") ? O(*u64_ivar(hero, "CurrentWeapon")) : 0;
+    return w && w == O(*u64_ivar(ab, "SourceObject"));
+  }
+  return 1;
+}
+static int gs_check_cost(u64_obj *ab)                                // CheckCost: Super && GSCheckCost (Blueprint event, default true)
+{
+  if (!is_class(ab, "GSGameplayAbility") || !u64_has_bp(ab, "GSCheckCost")) return 1;
+  u64_v r = u64_call(ab, "GSCheckCost", 0, 0);
+  return r.t == U64_NONE ? 1 : u64_true(r);
+}
+static void gs_apply_cost(u64_obj *ab)                               // ApplyCost: GSApplyCost first, then Super (the cost effect)
+{
+  if (is_class(ab, "GSGameplayAbility") && u64_has_bp(ab, "GSApplyCost")) u64_call(ab, "GSApplyCost", 0, 0);
+}
+static u64_v ga_make_container_spec(u64_obj *ab, int c, const u64_v *a)   // MakeEffectContainerSpec(ContainerTag, EventData, OverrideGameplayLevel)
+{
+  const char *tag = nm(A(c, a, 0));
+  u64_obj *spec = u64_new("EffectContainerSpec", "GSGameplayEffectContainerSpec");
+  *u64_ivar(spec, "TargetData") = u64_array_of(0, 0); *u64_ivar(spec, "TargetGameplayEffectSpecs") = u64_array_of(0, 0);
+  u64_v map = *u64_ivar(ab, "EffectContainerMap"), container = NONE_;
+  for (int i = 0; i + 1 < u64_array_len(map); i += 2) if (!strcmp(nm(u64_array_get(map, i)), tag)) { container = u64_array_get(map, i + 1); break; }
+  if (container.t != U64_ARRAY) return u64_objv(spec);                  // not found: an empty spec
+  u64_v target_type = NONE_, effects = NONE_;
+  for (int i = 0; i + 1 < u64_array_len(container); i += 2) {
+    const char *k = nm(u64_array_get(container, i));
+    if (!strcmp(k, "TargetType")) target_type = u64_array_get(container, i + 1);
+    else if (!strcmp(k, "TargetGameplayEffectClasses")) effects = u64_array_get(container, i + 1);
+  }
+  u64_obj *hero = O(*u64_ivar(ab, "Avatar"));
+  if (strcmp(nm(target_type), "None") && *nm(target_type)) {                // TargetTypeCDO->GetTargets(...)
+    u64_v hits = u64_array_of(0, 0), actors = u64_array_of(0, 0);
+    const char *tt = nm(target_type);
+    if (!strcmp(tt, "GSTargetType_UseOwner")) u64_array_push(&actors, u64_objv(hero));                       // OutActors.Add(TargetingCharacter)
+    else if (!strcmp(tt, "GSTargetType_UseEventData")) {
+      u64_obj *ev = O(A(c, a, 1)), *ctx = ev ? O(*u64_ivar(ev, "ContextHandle")) : 0, *hit = ctx ? O(*u64_ivar(ctx, "HitResult")) : 0;
+      if (hit) u64_array_push(&hits, u64_objv(hit)); else if (ev && O(*u64_ivar(ev, "Target"))) u64_array_push(&actors, *u64_ivar(ev, "Target"));
+    }
+    u64_call(ab, "AddTargetsToEffectContainerSpec", 4, (u64_v[]){u64_objv(spec), u64_array_of(0, 0), hits, actors});
+  }
+  int level = A(c, a, 2).t == U64_NONE ? -1 : u64_as_int(A(c, a, 2));
+  if (level == -1) level = u64_ivar(ab, "Level")->t == U64_NONE ? 1 : u64_as_int(*u64_ivar(ab, "Level"));
+  u64_v *specs = u64_ivar(spec, "TargetGameplayEffectSpecs");
+  for (int i = 0; i < u64_array_len(effects); i++) {
+    u64_v s = u64_call(ab, "MakeOutgoingGameplayEffectSpec", 2, (u64_v[]){u64_array_get(effects, i), u64_int(level)});
+    u64_array_push(specs, s);
+  }
+  return u64_objv(spec);
+}
+static u64_v ga_gs_check_cost_default(u64_obj *ab, int c, const u64_v *a) { (void)ab; (void)c; (void)a; return u64_bool(1); }   // GSCheckCost_Implementation
+static u64_v ga_noop(u64_obj *ab, int c, const u64_v *a) { (void)ab; (void)c; (void)a; return NONE_; }                          // GSApplyCost_Implementation
+static u64_v ga_on_avatar_set(u64_obj *ab, int c, const u64_v *a)      // UGSGameplayAbility::OnAvatarSet: passive abilities activate when granted
+{
+  (void)c; (void)a;
+  if (u64_true(*u64_ivar(ab, "bActivateAbilityOnGranted"))) u64_ability_try_activate(ab);
+  return NONE_;
+}
+
+// ---------------------------------------------------------------------------------------------------- controllers and possession
+// A controller object per pawn: the player controller (PlayerController class from the game mode's BP) or an AI controller.
+static u64_v h_possessed_by(u64_obj *s, int c, const u64_v *a)         // AGSHeroCharacter::PossessedBy (the parts that matter without a PlayerState)
+{
+  (void)c; (void)a;
+  int player = u64_true(*u64_ivar(s, "IsPlayer"));
+  u64_obj *pc = u64_new_copy(player ? "PlayerController" : "AIController", player ? "BP_PlayerController" : "GSHeroAIController");
+  *u64_ivar(pc, "Pawn") = u64_objv(s); *u64_ivar(s, "Controller") = u64_objv(pc);
+  u64_obj *asc = u64_asc_of(s);
+  if (asc) u64_remove_ge_with_tags(asc, "State.Dead");                // RemoveActiveEffectsWithGrantedTags(DeadTag)
+  if (player) *u64_ivar(s, "bIsFirstPersonPerspective") = *u64_ivar(s, "bStartInFirstPersonPerspective");     // SetupStartupPerspective
   return NONE_;
 }
 
@@ -531,8 +795,13 @@ static const m_t methods[] = {
   {"GSHeroCharacter", "CurrentWeaponPrimaryClipAmmoChanged", h_ammo_noop}, {"GSHeroCharacter", "CurrentWeaponSecondaryClipAmmoChanged", h_ammo_noop},
   {"GSHeroCharacter", "KnockDown", h_knock_down}, {"GSHeroCharacter", "FinishDying", h_finish_dying},
   {"GASShooterGameModeBase", "RespawnHero", gm_respawn_hero},
+  {"GSGATA_Trace", "Configure", tr_configure}, {"GSGATA_Trace", "ResetSpread", tr_reset_spread}, {"GSGATA_Trace", "PerformTrace", tr_perform_trace},
+  {"GSGATA_Trace", "StartTargeting", tr_start_targeting}, {"GSGATA_Trace", "ConfirmTargetingAndContinue", tr_confirm}, {"GSGATA_Trace", "StopTargeting", tr_stop_targeting},
+  {"GSGameplayAbility", "MakeEffectContainerSpec", ga_make_container_spec}, {"GSGameplayAbility", "OnAvatarSet", ga_on_avatar_set},
+  {"GSHeroCharacter", "PossessedBy", h_possessed_by},
+  {"GSGameplayAbility", "GSCheckCost", ga_gs_check_cost_default}, {"GSGameplayAbility", "GSApplyCost", ga_noop},
 };
-static const u64_gas_hooks gs_hooks = {gs_pre_attribute_change, gs_post_execute, gs_zero_health};
+static const u64_gas_hooks gs_hooks = {gs_pre_attribute_change, gs_post_execute, gs_zero_health, gs_can_activate, gs_check_cost, gs_apply_cost};
 
 __attribute__((constructor)) static void register_gasshooter(void)
 {
@@ -540,7 +809,9 @@ __attribute__((constructor)) static void register_gasshooter(void)
   u64_cpp_register_class("GSHeroCharacter", "GSCharacterBase", ctor_hero);
   u64_cpp_register_class("GSWeapon", 0, ctor_weapon);
   u64_cpp_register_class("GSPickup", 0, 0); u64_cpp_register_class("GSASCActorBase", 0, 0);
-  u64_cpp_register_class("GSGameplayAbility", 0, 0); u64_cpp_register_class("GSPlayerController", 0, 0);
+  u64_cpp_register_class("GSGameplayAbility", 0, ctor_gs_ability); u64_cpp_register_class("GSPlayerController", 0, 0);
+  u64_cpp_register_class("GSGATA_Trace", 0, ctor_trace); u64_cpp_register_class("GSGATA_LineTrace", "GSGATA_Trace", 0);
+  u64_cpp_register_class("GSGATA_SphereTrace", "GSGATA_Trace", ctor_sphere_trace);
   u64_cpp_register_class("GSProjectile", 0, 0);
   u64_cpp_register_class("GASShooterGameModeBase", 0, ctor_gamemode);
   for (unsigned i = 0; i < sizeof methods / sizeof methods[0]; i++) u64_cpp_register_method(methods[i].cls, methods[i].fn, methods[i].f);

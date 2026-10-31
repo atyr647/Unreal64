@@ -43,6 +43,14 @@ class Node:
     args: list = field(default_factory=list)
 
 
+class Ref(str):
+    """A resolved object reference: its name, plus the declaring class for imported functions (None when it is in this package)."""
+    def __new__(cls, name, owner=None):
+        o = super().__new__(cls, name)
+        o.owner = owner
+        return o
+
+
 class Decoder:
     def __init__(self, script: bytes, names, resolve, ue4=517, ue5=0, field_path=None, old_let=False, owner=None):
         self.b, self.p, self.mem = script, 0, 0

@@ -1,9 +1,8 @@
 functions compiled: 385 in 48 files
 unsupported constructs: {}
 skipped (undecodable): []
-native coverage: 244/248 engine functions implemented in runtime/ (22 of them presentation-only: accepted and ignored)
+native coverage: 245/248 engine functions implemented in runtime/ (22 of them presentation-only: accepted and ignored)
 missing (the runtime work queue):
   Create
   CreatePlayMontageAndWaitProxy
-  GetInstanceAssetPlayerTimeFromEnd
   GetSocketLocation

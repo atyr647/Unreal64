@@ -177,8 +177,12 @@ a real map, 91 Blueprints and ~8k lines of C++. Run its tests with `tools/run_sh
 * World geometry: the map's four arena walls are `Cube` static mesh actors and the floor is `/Engine/Maps/Templates/SM_Template_Map_Floor`
   (engine content: not in the project, so it comes with the editor export); BSP brushes (`Model` / `Polys`) are not parsed. The floor is
   still the spawn height. Placed meshes with project data (the four wall cubes) take part in trace queries (`u64_world_meshes`); the floor is skipped until its mesh is available.
-* Animation: sequences, AnimBP state machines, sockets (the muzzle and the weapon attach point use the owner's location; the physics bodies are in
-  the reference pose, not the animated one).
+* Animation, done: AnimSequence raw tracks (`tools/ue64/animation.py`), the compiled first-person AnimBP (`animgraph.py` -> `runtime/u64_anim.c`: sequence players,
+  BlendListByBool / ByEnum, the Locomotion state machine with its crossfades, rules from the compiled transition functions and property-access copies,
+  layered blend without filters), the weapon muzzle through camera -> mesh -> animated `b_RightWeapon` -> equipped offset -> mesh socket. The idle pose and the muzzle
+  position are checked against an independent Python evaluation.
+  Animation, not done: montage slots (fire / reload poses pass the pose through), the third-person AnimBP (`ABP_Hero3P`: blend spaces, aim offset, Fabrik IK, cached poses,
+  layered blends with bone filters), so the physics bodies (headshots) of heroes stay in the reference pose; AnimNotifies from sequences.
 * HUD / player controller widgets (ignored), audio, networking, AI behaviour of the placed heroes.
 * Unverified engine assumption: the first execution of a periodic effect happens on the next tick (see below).
 

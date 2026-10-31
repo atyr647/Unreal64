@@ -144,20 +144,51 @@ expressions of a `Context` call must run in the caller's frame (fixed earlier).
 
 ## Second project: GASShooter (tranek/GASShooter, UE 4.26)
 
-Chosen because it has what the first project lacks: animations and AnimBPs (AnimGraph nodes are readable data), skeletal meshes,
-a real map, 91 Blueprints and ~8k lines of C++. Status:
+Chosen because it has what the first project lacks: animations and AnimBPs (the AnimGraph nodes are readable data), skeletal meshes,
+a real map, 91 Blueprints and ~8k lines of C++. Run its tests with `tools/run_shooter_tests.sh <GASShooter>/Content`.
 
-* Bytecode: 385/385 functions decode (4.26 field paths carry an owner index in some saves; the decoder tries each dialect and
-  confirms it by in-memory size and jump targets).
-* Ported from the C++ so far (`runtime/u64_cpp_gasshooter.c`, test `tests/bp/run_shooter.c`, run `tools/run_shooter_tests.sh`):
-  `UGSAttributeSetBase`/`UGSAmmoAttributeSet` rules (shield absorbs damage, clamps, MoveSpeed range, bounty), `AGSWeapon`
-  (ammo, abilities, drop), `AGSHeroCharacter` inventory (add/equip/next/previous/remove-all with the ring drop), ammo pickup
-  effects, KnockDown / FinishDying and the game mode respawn. Expected values come from the assets and the C++.
-* Not yet ported: see the "missing" list in the generated compat_report.txt (54 of 248 calls): effect containers and target data, target actors, ability tasks, timelines, widget creation, interaction, pickups, projectile, damage execution (`GSDamageExecutionCalc`).
-  sphere trace), ability tasks (montage-for-mesh, wait-interactable, wait-input, FOV, move-relative-location), pickups,
-  interaction, player controller / HUD, projectile, damage execution (`GSDamageExecutionCalc`).
-* Runtime limits found and fixed by this project: the interned-string pool (8 KB) silently turned names into "?"; attribute,
-  tag, active-effect and ability tables were too small and also failed silently. All are larger and now report overflow.
-* Unverified assumption: the first execution of a periodic effect (`bExecutePeriodicEffectOnApplication`) happens on the next
-  tick rather than inside the Apply call. Executing inside the call makes GASShooter's KnockDown apply GE_BleedingOut while Health
-  is 0, which would kill the hero it just knocked down; the shipping game doesn't do that. Check against the engine source.
+**Verified end to end on the host (exact values from the assets and the C++, GC after every tick, ASan/UBSan):**
+
+* 385/385 Blueprint functions decode; 242/248 engine calls implemented (22 of those are audio / UI / cue visuals, accepted and ignored).
+* Hero spawn and attributes, default inventory, weapons (add / equip / next / previous / drop ring / duplicate pickup ammo),
+  shield-then-health damage, knock down -> finish dying -> respawn (and picking its dropped weapons up again).
+* Firing: rifle (aim from the camera, 1 deg spread, 10 damage x 100/120 armor), shotgun (8 pellets x 6), rocket launcher (projectile,
+  sphere explosion radius 200, 60 damage), reload (clip + reserve conserved), aim down sights (FOV task 90 -> 60 -> 90, aiming tags),
+  sprint / ADS movement speed (x1.4 / x0.8), ammo / health pickups with respawn.
+* Engine layer written for this: target data handles, effect contexts with hit results, effect containers, per-frame ability tasks
+  (FOV, move component, repeat, delay-one-frame, wait input / event / tag / target data), RegisterGameplayTagEvent listeners,
+  timelines (curve keys parsed from the assets), parent-function calls, dynamic casts, 4.26 function parameters, a garbage collector.
+
+**Not done (honest list):**
+
+* Interaction: chests, doors and reviving. `GSAT_WaitInteractableTarget` traces against *components* with the interactable channel set to
+  overlap, which needs static-mesh collision (the assets carry convex hulls in `BodySetup`; not parsed yet) and per-component collision
+  responses. Same blocker for hit components, line traces against world geometry and the camera boom probe.
+* World geometry: BSP brushes and static-mesh actors of the map (the floor is still the spawn height).
+* Animation: sequences, AnimBP state machines, sockets (the muzzle and the weapon attach point use the owner's location), bone hit
+  detection (headshots need the physics asset's body shapes).
+* HUD / player controller widgets (ignored), audio, networking, AI behaviour of the placed heroes.
+* Unverified engine assumption: the first execution of a periodic effect happens on the next tick (see below).
+
+## Toward an Unreal Engine export target
+
+What the two projects taught about the shape of the thing:
+
+1. **Three layers.** (a) *Engine layer*, project independent: `u64_rt` (objects, GC), `u64_natives`, `u64_math`, `u64_gas*`
+   (ability system, target data, tasks, timelines), movement and collision. (b) *Generated data and code* from the project's assets
+   (`bpc.py`): Blueprint functions as C, class defaults, level actors, effect / montage / timeline / shape tables. (c) *Project
+   ports* of the project's own C++ (`u64_cpp_*.c`), registered through `u64_cpp_register_class / method` and the `u64_gas_hooks`.
+2. **The C++ is the unscalable part.** Both ports were translated by hand (about 2k lines for 1.2k lines of GASDocumentation C++, and a
+   comparable effort per GASShooter subsystem). An editor export target has the project's C++ and its reflection data available, so
+   the realistic route is a C++ -> C translation step for gameplay classes (UCLASS / UFUNCTION surface, TArray / FString / delegates /
+   GAS calls mapped onto the engine layer) with the hand ports as the reference implementation and the scenario tests as the oracle.
+3. **Assets come from the editor, not from parsing.** The package parser here exists because no editor is available; an exporter
+   plugin would write the same tables (components with collision responses, static-mesh collision, skeleton poses, animation tracks,
+   level placement, curves, tags) directly from live objects and avoid version-specific serialisation (4.24 vs 4.26 vs 5.x dialects,
+   field paths, tagged-property layouts all cost real time here).
+4. **Runtime limits that bit:** pools sized for one demo (strings, attributes, tags, abilities, timers, effects) silently corrupted
+   state; they are now larger and loud, objects / arrays / variable slots are collected between ticks. A target needs per-project
+   pool sizing in the exported data and the overflow counter as a build-time and test-time gate.
+5. **Testing discipline that paid off:** exact-value scenarios derived from assets and source, host vs ares state traces (found a
+   fast-math divergence), GC after every tick, ASan/UBSan. The export target should generate scenario skeletons from the project's
+   own gameplay assets (abilities, effects, pickups) the same way.

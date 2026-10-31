@@ -394,8 +394,8 @@ int u64_apply_ge(u64_obj *tasc, u64_obj *sasc, const char *ge_name, float level,
   for (int k = 0; d->remove_tags && d->remove_tags[k]; k++)
     for (int i = 0; i < MAX_ACTIVE; i++)
       if (active[i].live && active[i].target == tgt) {
-        for (int j = 0; active[i].def->asset_tags && active[i].def->asset_tags[j]; j++)
-          if (tag_match(active[i].def->asset_tags[j], d->remove_tags[k])) { remove_active_idx(i); break; }
+        for (int j = 0; active[i].def->granted && active[i].def->granted[j]; j++)             // RemoveGameplayEffectsWithTags: an owning-tags query, matched against the tags the effect grants
+          if (tag_match(active[i].def->granted[j], d->remove_tags[k])) { remove_active_idx(i); break; }
       }
   if (d->dur == U64_DUR_INSTANT) { run_modifiers(tgt, src, d, 0, spec); apply_conditionals(tgt, src, d, level); return 0; }
   // stacking
@@ -854,6 +854,13 @@ int u64_trace_multi(const float start[3], const float end[3], float radius, u64_
   return n;
 }
 
+int u64_ray_pawn_capsule(u64_obj *o, const float s[3], const float e[3], float *t, float n[3])   // a character's collision capsule against a segment
+{
+  shape_t sh;
+  if (!is_pawn(o) || !shape_world(o, &sh) || sh.s->kind != 2) return 0;
+  float d[3] = {e[0] - s[0], e[1] - s[1], e[2] - s[2]}, seg = sh.b - sh.a; if (seg < 0) seg = 0;
+  return ray_vcapsule(s, d, sh.cx, sh.cy, sh.cz - seg, sh.cz + seg, sh.a, t, n);
+}
 int u64_line_trace(const float start[3], const float end[3], u64_obj *ignore, u64_obj **hits, int max) { return u64_trace_multi(start, end, 0.0f, ignore, hits, max); }
 
 // ---------------------------------------------------------------------------------------------------- montage notifies and gameplay events

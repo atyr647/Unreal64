@@ -11,6 +11,15 @@ static int verbose_ = 1;
 static void tick(int n) { for (int i = 0; i < n; i++) u64_world_tick(1.0f / 30.0f); }
 static void err_log(const char *f, ...) { va_list a; va_start(a, f); if (strstr(f, "error")) { vprintf(f, a); putchar('\n'); } va_end(a); }
 static u64_obj *hero;
+// World z of a physics body of a character's mesh in the reference pose: actor z + the Mesh component's relative z + the body's z (HeroTPP_Physics / b_Hips ...).
+static float body_z(u64_obj *a, const char *bone)
+{
+  const u64_skel_comp_def *sd = u64_skel_comps;
+  for (; sd->cls; sd++) if (!strcmp(sd->comp, "Mesh") && u64_class_is(u64_obj_class(a), sd->cls)) break;
+  for (const u64_phys_mesh *m = u64_phys_meshes; sd->cls && m->name; m++)
+    if (!strcmp(m->name, sd->mesh)) for (int i = 0; i < m->n; i++) if (!strcmp(m->bodies[i].bone, bone)) return u64_ivar(a, "Location")->u.v[2] + sd->loc[2] + m->bodies[i].t[2];
+  return u64_ivar(a, "Location")->u.v[2];
+}
 static float attr(const char *n) { return u64_attr_get(u64_asc_of(hero), n); }
 static const char *s(u64_v v) { return v.u.s ? v.u.s : ""; }
 static u64_obj *asc_of_hero(void) { return u64_asc_of(hero); }
@@ -121,13 +130,13 @@ int u64_run_shooter_scenarios(int verbose)
     u64_obj *ehero = hero;
     hero = enemy; float en_shield0 = attr("Shield"), en_health0 = attr("Health"); hero = ehero;
     CHECK(en_shield0 == 100 && en_health0 == 100 && attr("Armor") == 20);
-    // aim from the first-person camera at the enemy's capsule centre: control rotation = direction camera -> target
+    // aim from the first-person camera at the enemy's hips (the capsule ignores the Ability / Projectile channels; the mesh's physics bodies are hit and the middle of the capsule is air between the thighs): control rotation = direction camera -> target
     call(hero, "GetCurrentWeapon");
     u64_v loc = *u64_ivar(hero, "Location"), el = *u64_ivar(enemy, "Location");
     u64_obj *cam = u64_comp(hero, "FirstPersonCamera").u.o;
     u64_v rel = cam ? *u64_ivar(cam, "RelativeLocation") : u64_vec(0, 0, 0);
     float cx = loc.u.v[0] + rel.u.v[0], cy = loc.u.v[1] + rel.u.v[1], cz = loc.u.v[2] + rel.u.v[2];
-    float dx = el.u.v[0] - cx, dy = el.u.v[1] - cy, dz = el.u.v[2] - cz;
+    float dx = el.u.v[0] - cx, dy = el.u.v[1] - cy, dz = body_z(enemy, "b_Hips") - cz;
     *u64_ivar(hero, "ControlRotation") = u64_vec(atan2f(dz, sqrtf(dx * dx + dy * dy)) * 57.29578f, atan2f(dy, dx) * 57.29578f, 0);
     int clip0 = u64_as_int(call(hero, "GetPrimaryClipAmmo"));
     CHECK(u64_input_press(hero, "EGSAbilityInputID::PrimaryFire"));
@@ -147,6 +156,28 @@ int u64_run_shooter_scenarios(int verbose)
     int clip2 = u64_as_int(call(hero, "GetPrimaryClipAmmo")), res2 = u64_as_int(call(hero, "GetPrimaryReserveAmmo"));
     CHECK(clip2 == 30 && clip2 + res2 == clip1 + res1);
   }
+  // --- headshot: the line trace hits the mesh's b_head body (HeroTPP_Physics: a sphyl, radius 9.7); GSDamageExecutionCalc: Effect.Damage.CanHeadShot
+  // (GE_RifleDamage) and BoneName == b_head -> x1.5 and Effect.Damage.HeadShot is added: 10 * 1.5 * 100/120 = 12.5
+  {
+    u64_obj *enemy = u64_find("BP_HeroCharacter2"), *me = hero;
+    tick(40);                                                                                              // the weapon is ready again
+    u64_v el = *u64_ivar(enemy, "Location");
+    *u64_ivar(me, "Location") = u64_vec(el.u.v[0] - 300.0f, el.u.v[1], 112.0f);                            // 300 units away: 1 degree of spread is +-2.6 units, the head body has radius 9.7
+    u64_v loc = *u64_ivar(me, "Location");
+    u64_v rel = *u64_ivar(u64_comp(me, "FirstPersonCamera").u.o, "RelativeLocation");
+    float cx = loc.u.v[0] + rel.u.v[0], cy = loc.u.v[1] + rel.u.v[1], cz = loc.u.v[2] + rel.u.v[2];
+    float dx = el.u.v[0] - cx, dy = el.u.v[1] - cy, dz = body_z(enemy, "b_head") - cz;
+    *u64_ivar(me, "ControlRotation") = u64_vec(atan2f(dz, sqrtf(dx * dx + dy * dy)) * 57.29578f, atan2f(dy, dx) * 57.29578f, 0);
+    hero = enemy; float sh0 = attr("Shield"); hero = me;
+    int clip0 = u64_as_int(call(me, "GetPrimaryClipAmmo"));
+    CHECK(u64_input_press(me, "EGSAbilityInputID::PrimaryFire"));
+    for (int i = 0; i < 30 && u64_as_int(call(me, "GetPrimaryClipAmmo")) == clip0; i++) tick(1);
+    u64_input_release_id(me, "EGSAbilityInputID::PrimaryFire");
+    tick(20);
+    hero = enemy;
+    CHECK(fabsf((sh0 - attr("Shield")) - 10.0f * 1.5f * 100.0f / 120.0f) < 0.01f);
+    hero = me;
+  }
   // --- shotgun (GA_ShotgunPrimaryInstant): 8 pellets at 6 damage each, 12 degrees of spread
   {
     u64_obj *enemy = u64_find("BP_HeroCharacter2"), *me = hero;
@@ -154,10 +185,10 @@ int u64_run_shooter_scenarios(int verbose)
     for (int i = 0; i < u64_as_int(call(me, "GetNumWeapons")); i++) { call(me, "NextWeapon"); if (!strcmp(u64_obj_class(call(me, "GetCurrentWeapon").u.o), "BP_Shotgun")) { sg = call(me, "GetCurrentWeapon").u.o; break; } }
     CHECK(sg && call(me, "GetCurrentWeapon").u.o == sg && u64_as_int(call(me, "GetPrimaryClipAmmo")) == 6);
     u64_v el = *u64_ivar(enemy, "Location");
-    *u64_ivar(me, "Location") = u64_vec(el.u.v[0] - 120.0f, el.u.v[1], 112.0f);                           // 120 units in front: the whole cone (radius 12.6) is inside the capsule
+    *u64_ivar(me, "Location") = u64_vec(el.u.v[0] - 120.0f, el.u.v[1], 112.0f);                           // 120 units in front: the whole cone (radius 12.6) is inside the hips box (37.8 x 26.2 seen from the front)
     u64_v cam = *u64_ivar(u64_comp(me, "FirstPersonCamera").u.o, "RelativeLocation");
     float cx = el.u.v[0] - 120.0f + cam.u.v[0], cy = el.u.v[1] + cam.u.v[1], cz = 112.0f + cam.u.v[2];
-    float dx = el.u.v[0] - cx, dy = el.u.v[1] - cy, dz = el.u.v[2] - cz;
+    float dx = el.u.v[0] - cx, dy = el.u.v[1] - cy, dz = body_z(enemy, "b_Hips") - cz;
     *u64_ivar(me, "ControlRotation") = u64_vec(atan2f(dz, sqrtf(dx * dx + dy * dy)) * 57.29578f, atan2f(dy, dx) * 57.29578f, 0);
     tick(60);                                                                                              // let the weapon-change block and the enemy's shield settle
     hero = enemy; float sh0 = attr("Shield"); hero = me;
@@ -214,10 +245,10 @@ int u64_run_shooter_scenarios(int verbose)
     *u64_ivar(me, "Location") = u64_vec(el.u.v[0] - 500.0f, el.u.v[1], 112.0f);
     u64_v cam = *u64_ivar(u64_comp(me, "FirstPersonCamera").u.o, "RelativeLocation");
     float cx = el.u.v[0] - 500.0f + cam.u.v[0], cy = el.u.v[1] + cam.u.v[1], cz = 112.0f + cam.u.v[2];
-    float dx = el.u.v[0] - cx, dy = el.u.v[1] - cy, dz = el.u.v[2] - cz;
+    float dx = el.u.v[0] - cx, dy = el.u.v[1] - cy, dz = body_z(enemy, "b_Hips") - cz;
     *u64_ivar(me, "ControlRotation") = u64_vec(atan2f(dz, sqrtf(dx * dx + dy * dy)) * 57.29578f, atan2f(dy, dx) * 57.29578f, 0);
     tick(60);
-    hero = enemy; float sh0 = attr("Shield"); hero = me;
+    hero = enemy; u64_attr_set_base(asc_of_hero(), "Shield", 100.0f); float sh0 = attr("Shield"); hero = me;   // the earlier shots took the shield down: restore it so 50 fits
     CHECK(u64_input_press(me, "EGSAbilityInputID::PrimaryFire"));
     for (int i = 0; i < 30 && u64_as_int(call(me, "GetPrimaryClipAmmo")) == 3; i++) tick(1);
     u64_input_release_id(me, "EGSAbilityInputID::PrimaryFire");
@@ -298,6 +329,32 @@ int u64_run_shooter_scenarios(int verbose)
     tick(18);
     u64_comp_world(door, "Door", p1);
     CHECK(!u64_tag_has(u64_asc_of(door), "Object.Door.State.Open") && fabsf(p1[0] + 144) < 0.05f);
+  }
+  // --- revive: a knocked down hero is interactable through its Mesh (the Mesh responds Overlap to Interactable, GSHeroCharacter ctor / CharacterMesh0).
+  // AGSHeroCharacter: IsAvailableForInteraction (KnockedDown), GetInteractionDuration = ReviveDuration (4 s), PreInteract starts the Revive ability,
+  // PostInteract applies GE_Revive: Health := 0.25 * MaxHealth (AttributeBased, override) and the KnockedDown effect is removed.
+  {
+    u64_obj *down = u64_find("BP_HeroCharacter3"), *me = hero;
+    u64_v dl = *u64_ivar(down, "Location");
+    hero = down; u64_obj *dasc = asc_of_hero();
+    dm[0].value = 500.0f; u64_apply_ge(dasc, dasc, "TestDamage", 1, 0);                                    // lethal damage: KnockDown (health back to full, KnockedDown tag)
+    CHECK(u64_tag_has(dasc, "State.KnockedDown") && attr("Health") == 100);
+    hero = me;
+    float zc = body_z(down, "b_Spine");
+    *u64_ivar(me, "Location") = u64_vec(dl.u.v[0] - 150.0f, dl.u.v[1], 112.0f);
+    u64_v rel = *u64_ivar(u64_comp(me, "FirstPersonCamera").u.o, "RelativeLocation");
+    float cx = dl.u.v[0] - 150.0f + rel.u.v[0], cy = dl.u.v[1] + rel.u.v[1], cz = 112.0f + rel.u.v[2], dx = dl.u.v[0] - cx, dy = dl.u.v[1] - cy, dz = zc - cz;
+    *u64_ivar(me, "ControlRotation") = u64_vec(atan2f(dz, sqrtf(dx * dx + dy * dy)) * 57.29578f, atan2f(dy, dx) * 57.29578f, 0);
+    tick(12);
+    u64_input_press(me, "EGSAbilityInputID::Interact");
+    tick(2 * 30);
+    CHECK(u64_tag_has(asc_of_hero(), "State.Interacting") && u64_tag_has(dasc, "State.KnockedDown"));       // still holding after 2 s
+    tick(2 * 30 + 6);                                                                                      // ReviveDuration 4 s
+    u64_input_release_id(me, "EGSAbilityInputID::Interact");
+    tick(3);
+    hero = down;
+    CHECK(!u64_tag_has(dasc, "State.KnockedDown") && fabsf(attr("Health") - 25.0f) < 0.01f);
+    hero = me;
   }
   // --- garbage collection: 3000 spawn/destroy cycles (plus arrays and temporaries) would exhaust the 1024-object pool without it
   {

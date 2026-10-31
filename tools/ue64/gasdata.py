@@ -120,7 +120,10 @@ def ge_definition(p, data, export):
 
 COMPONENTS = []      # static-mesh components of Blueprints: dicts (class, comp, mesh, parent, transform, collision responses)
 CHANNELS = {}        # project collision channel -> default response (Config/DefaultEngine.ini)
-PROFILES = {}        # project collision profile -> object type
+PROFILES = {}        # project collision profile -> (object type, [(channel, response)])
+PHYS = {}            # physics asset name -> [(bone, kind, center, rotation(pitch,yaw,roll), dims)]; kind 0 box (full extents), 1 sphere (radius), 2 sphyl (radius, length)
+SKELMESHES = {}      # skeletal mesh name -> bodies in mesh space [(bone, kind, t(3), r(3x3 row-major), a, b, c)]: box half extents, sphere radius, sphyl radius + half cylinder length
+SKELCOMPS = []       # skeletal mesh components (the character Mesh) of Blueprints: dicts (class, comp, mesh, transform, collision responses)
 MESHES = {}          # static mesh name -> [hull planes]; hull = [(nx, ny, nz, d)] with n.x <= d inside
 
 TIMELINES = []      # [(class, template dict, [(property name, [keys])])] filled by collect(), emitted by emit_gas_data_c
@@ -228,6 +231,60 @@ def _body_hulls(p, data, e):
     return hulls
 
 
+def _physics_bodies(p, data, e):
+    """[(bone, kind, center, rotation, dims)] of a PhysicsAsset export: its SkeletalBodySetups' simple shapes."""
+    o = props.read_object(p, data, e)
+    out = []
+    for ref in o.get("SkeletalBodySetups", ("array", []))[1]:
+        if ref[0] != "obj" or ref[2] <= 0:
+            continue
+        b = props.read_object(p, data, p.exports[ref[2] - 1])
+        bone = b.get("BoneName", ("name", ""))[1]
+        ag = b.get("AggGeom", ("struct", {}, None))[1]
+        g = lambda d, k, dflt: tuple(d[k][1]) if k in d and d[k][0] == "vec" else dflt
+        for el in ag.get("BoxElems", ("array", []))[1]:
+            d = el[1]
+            out.append((bone, 0, g(d, "Center", (0, 0, 0)), g(d, "Rotation", (0, 0, 0)), (float(d.get("X", 0)), float(d.get("Y", 0)), float(d.get("Z", 0)))))
+        for el in ag.get("SphereElems", ("array", []))[1]:
+            d = el[1]
+            out.append((bone, 1, g(d, "Center", (0, 0, 0)), (0, 0, 0), (float(d.get("Radius", 0)), 0.0, 0.0)))
+        for el in ag.get("SphylElems", ("array", []))[1]:
+            d = el[1]
+            out.append((bone, 2, g(d, "Center", (0, 0, 0)), g(d, "Rotation", (0, 0, 0)), (float(d.get("Radius", 0)), float(d.get("Length", 0)), 0.0)))
+    return out
+
+
+def _quat_matrix(q):
+    x, y, z, w = q
+    return [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w),
+            2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w),
+            2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]
+
+
+def _skeletal_bodies(bones, bodies):
+    """Physics bodies placed in mesh space by the reference pose: bone transform * element transform."""
+    import skeleton
+    cs = skeleton.component_space(bones)
+    index = {b[0]: i for i, b in enumerate(bones)}
+    out = []
+    for bone, kind, c, rot, dims in bodies:
+        if bone not in index:
+            continue
+        bt, bq = cs[index[bone]]
+        eq = skeleton.euler_to_quat(*rot)
+        q = skeleton.quat_mul(bq, eq)
+        t = skeleton.quat_rot(bq, c)
+        t = (bt[0] + t[0], bt[1] + t[1], bt[2] + t[2])
+        if kind == 0:
+            a = (dims[0] / 2, dims[1] / 2, dims[2] / 2)
+        elif kind == 1:
+            a = (dims[0], 0.0, 0.0)
+        else:
+            a = (dims[0], dims[1] / 2, 0.0)
+        out.append((bone, kind, t, _quat_matrix(q), a[0], a[1], a[2]))
+    return out
+
+
 def _curve_keys(p, data, idx):
     """Keys of the CurveFloat export at package index idx (1-based): [(time, value, interp, arrive, leave)]."""
     if idx <= 0 or idx > len(p.exports):
@@ -244,17 +301,20 @@ def collect(content_root):
     """Walk a project; return ({ge name: def}, {montage: length}, {class: {box: (x,y,z), capsule: (r, hh)}})."""
     import glob
     ges, montages, shapes, moves, projs, parents, bound = {}, {}, {}, {}, {}, {}, []
-    TIMELINES.clear(); COMPONENTS.clear(); MESHES.clear(); CHANNELS.clear(); PROFILES.clear()
+    TIMELINES.clear(); COMPONENTS.clear(); PHYS.clear(); SKELMESHES.clear(); SKELCOMPS.clear(); MESHES.clear(); CHANNELS.clear(); PROFILES.clear()
     ini = os.path.join(content_root, "..", "Config", "DefaultEngine.ini")
     if os.path.exists(ini):
         import re as _re
         for m in _re.finditer(r'DefaultChannelResponses=\(Channel=\w+,DefaultResponse=ECR_(\w+),[^)]*Name="(\w+)"', open(ini, errors="ignore").read()):
             CHANNELS[m.group(2)] = {"Ignore": 0, "Overlap": 1, "Block": 2}[m.group(1)]
-        for m in _re.finditer(r'\+Profiles=\(Name="(\w+)",[^\n]*?ObjectTypeName="(\w+)"', open(ini, errors="ignore").read()):
-            PROFILES[m.group(1)] = m.group(2)
+        for m in _re.finditer(r'\+Profiles=\(Name="(\w+)",[^\n]*?ObjectTypeName="(\w+)",CustomResponses=\((.*?)\),HelpMessage', open(ini, errors="ignore").read()):
+            rs = [(c.group(1), {"Ignore": 0, "Overlap": 1, "Block": 2}[(c.group(2) or "Block")]) for c in _re.finditer(r'\(Channel="(\w+)"(?:,Response=ECR_(\w+))?\)', m.group(3))]
+            PROFILES[m.group(1)] = (m.group(2), rs)
     import math as _m
     MESHES["Cylinder"] = [[(_m.cos(2 * _m.pi * i / 32), _m.sin(2 * _m.pi * i / 32), 0, 50 * _m.cos(_m.pi / 32)) for i in range(32)] + [(0, 0, 1, 50), (0, 0, -1, 50)]]   # /Engine/BasicShapes/Cylinder (r 50, h 100)
     MESHES["Cube"] = [[(1, 0, 0, 50), (-1, 0, 0, 50), (0, 1, 0, 50), (0, -1, 0, 50), (0, 0, 1, 50), (0, 0, -1, 50)]]      # /Engine/BasicShapes/Cube (100 uu)
+    import skeleton as skeleton_mod
+    pending_skel = []
     for f in glob.glob(content_root + "/**/*.uasset", recursive=True):
         try:
             p = uasset.parse_tables(f)
@@ -265,6 +325,54 @@ def collect(content_root):
             _collect_components(p, data, os.path.splitext(os.path.basename(f))[0])
         for e in p.exports:
             cn = uasset.class_name(p, e.cls)
+            if cn == "PhysicsAsset":
+                try:
+                    PHYS[e.name] = _physics_bodies(p, data, e)
+                except Exception:
+                    pass
+            elif cn == "SkeletalMesh":
+                try:
+                    pa = props.read_object(p, data, e).get("PhysicsAsset")
+                    bones = skeleton_mod.ref_skeleton(p, data, e)
+                    if pa and pa[0] == "obj" and bones:
+                        pending_skel.append((e.name, pa[1], bones))
+                except Exception:
+                    pass
+            elif cn == "CapsuleComponent" and e.name == "CollisionCylinder":
+                owner = next((x.name for x in p.exports if uasset.class_name(p, x.cls) == "BlueprintGeneratedClass"), None)
+                try:
+                    c = props.read_object(p, data, e)
+                    responses, enabled = [], 2
+                    bi = c.get("BodyInstance")
+                    if owner and isinstance(bi, tuple) and bi[0] == "struct":
+                        cr = bi[1].get("CollisionResponses")
+                        if isinstance(cr, tuple) and cr[0] == "struct":
+                            for r in cr[1].get("ResponseArray", ("array", []))[1]:
+                                responses.append((r[1]["Channel"][1], {"ECR_Ignore": 0, "ECR_Overlap": 1, "ECR_Block": 2}.get(str(r[1]["Response"][1]), 2)))
+                        SKELCOMPS.append({"cls": owner.removesuffix("_C"), "comp": "CapsuleComponent", "mesh": "", "loc": (0, 0, 0), "rot": (0, 0, 0), "scale": (1, 1, 1), "enabled": enabled, "responses": responses})
+                except Exception:
+                    pass
+            elif cn == "SkeletalMeshComponent" and e.name == "CharacterMesh0" and not e.name.endswith("_GEN_VARIABLE"):
+                owner = next((x.name for x in p.exports if uasset.class_name(p, x.cls) == "BlueprintGeneratedClass"), None)
+                try:
+                    c = props.read_object(p, data, e)
+                    mesh = c.get("SkeletalMesh")
+                    if owner and isinstance(mesh, tuple) and mesh[0] == "obj":
+                        responses, enabled = [], 2
+                        bi = c.get("BodyInstance")
+                        if isinstance(bi, tuple) and bi[0] == "struct":
+                            ce = bi[1].get("CollisionEnabled")
+                            if isinstance(ce, tuple):
+                                enabled = {"NoCollision": 0, "QueryOnly": 1, "PhysicsOnly": 3, "QueryAndPhysics": 2}.get(str(ce[1]).split("::")[-1], 2)
+                            cr = bi[1].get("CollisionResponses")
+                            if isinstance(cr, tuple) and cr[0] == "struct":
+                                for r in cr[1].get("ResponseArray", ("array", []))[1]:
+                                    responses.append((r[1]["Channel"][1], {"ECR_Ignore": 0, "ECR_Overlap": 1, "ECR_Block": 2}.get(str(r[1]["Response"][1]), 2)))
+                        vec = lambda k, d: tuple(c[k][1]) if k in c and c[k][0] == "vec" else d
+                        SKELCOMPS.append({"cls": owner.removesuffix("_C"), "comp": "Mesh", "mesh": mesh[1], "loc": vec("RelativeLocation", (0, 0, 0)),
+                                          "rot": vec("RelativeRotation", (0, 0, 0)), "scale": vec("RelativeScale3D", (1, 1, 1)), "enabled": enabled, "responses": responses})
+                except Exception:
+                    pass
             if cn == "StaticMesh":                                  # the mesh's simple collision (a BodySetup export of the same package)
                 try:
                     for x in p.exports:
@@ -388,6 +496,9 @@ def collect(content_root):
                     ges[e.name[len("Default__"):-2]] = ge_definition(p, data, e)
                 except Exception as ex:
                     ges[e.name[len("Default__"):-2]] = dict(name=e.name[len("Default__"):-2], error=str(ex))
+    for mname, pname, bones in pending_skel:                        # physics bodies of skeletal meshes, placed by the reference pose
+        if pname in PHYS and PHYS[pname]:
+            SKELMESHES[mname] = _skeletal_bodies(bones, PHYS[pname])
     return ges, montages, shapes, moves, projs, parents, bound
 
 
@@ -483,7 +594,23 @@ def emit_gas_data_c(ges, montages, shapes, moves=None, projs=None, parents=None,
         comps.append("{%s, %s, %s, %s, {%s}, {%s}, {%s}, %d, %d, cr_%d}" % (
             _cs(c["cls"]), _cs(c["comp"]), _cs(c["mesh"]), _cs(c["parent"]), ", ".join(_f(v) for v in c["loc"]), ", ".join(_f(v) for v in c["rot"]),
             ", ".join(_f(v) for v in c["scale"]), c["enabled"], len(c["responses"]), ci))
-    out.append("const u64_profile_def u64_profiles[] = {%s%s{0}};" % (", ".join("{%s, %s}" % (_cs(k), _cs(v)) for k, v in sorted(PROFILES.items())), ", " if PROFILES else ""))
+    pms = []                                                                            # physics bodies of skeletal meshes and the character Mesh components
+    for mi, (mname, bodies) in enumerate(sorted(SKELMESHES.items())):
+        rows = ", ".join("{%s, %d, {%s}, {%s}, %s, %s, %s}" % (_cs(b[0]), b[1], ", ".join(_f(v) for v in b[2]), ", ".join(_f(v) for v in b[3]), _f(b[4]), _f(b[5]), _f(b[6])) for b in bodies)
+        out.append("static const u64_phys_body pb_%d[] = {%s%s{0}};" % (mi, rows, ", " if rows else ""))
+        pms.append("{%s, %d, pb_%d}" % (_cs(mname), len(bodies), mi))
+    out.append("const u64_phys_mesh u64_phys_meshes[] = {%s%s{0}};" % (", ".join(pms), ", " if pms else ""))
+    scs = []
+    for ci, c in enumerate(SKELCOMPS):
+        out.append("static const u64_resp sr_%d[] = {%s%s{0}};" % (ci, ", ".join("{%s, %d}" % (_cs(k), v) for k, v in c["responses"]), ", " if c["responses"] else ""))
+        scs.append("{%s, %s, %s, {%s}, {%s}, {%s}, %d, %d, sr_%d}" % (_cs(c["cls"]), _cs(c["comp"]), _cs(c["mesh"]), ", ".join(_f(v) for v in c["loc"]), ", ".join(_f(v) for v in c["rot"]),
+                                                                    ", ".join(_f(v) for v in c["scale"]), c["enabled"], len(c["responses"]), ci))
+    out.append("const u64_skel_comp_def u64_skel_comps[] = {%s%s{0}};" % (", ".join(scs), ", " if scs else ""))
+    pdefs = []
+    for pi, (k, (ot, rs)) in enumerate(sorted(PROFILES.items())):
+        out.append("static const u64_resp pr_%d[] = {%s%s{0}};" % (pi, ", ".join("{%s, %d}" % (_cs(c), r) for c, r in rs), ", " if rs else ""))
+        pdefs.append("{%s, %s, %d, pr_%d}" % (_cs(k), _cs(ot), len(rs), pi))
+    out.append("const u64_profile_def u64_profiles[] = {%s%s{0}};" % (", ".join(pdefs), ", " if pdefs else ""))
     out.append("const u64_resp u64_channel_defaults[] = {%s%s{0}};" % (", ".join("{%s, %d}" % (_cs(k), v) for k, v in sorted(CHANNELS.items())), ", " if CHANNELS else ""))
     out.append("const u64_comp_def u64_comp_defs[] = {%s%s{0}};" % (", ".join(comps), ", " if comps else ""))
     out.append("const u64_timeline_def u64_timelines[] = {%s%s{0}};" % (", ".join(tl), ", " if tl else ""))

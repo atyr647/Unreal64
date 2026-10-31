@@ -210,7 +210,7 @@ u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
     u64_out(A(argc, a, 9), u64_int(0)); u64_out(A(argc, a, 10), actor);
     u64_v hc = *u64_ivar(h, "HitComponent");                                         // the traced component, else the pawn capsule
     u64_out(A(argc, a, 11), hc.t == U64_OBJ ? hc : actor.t == U64_OBJ ? u64_comp(actor.u.o, "CapsuleComponent") : u64_int(0));
-    u64_out(A(argc, a, 12), u64_name("None")); u64_out(A(argc, a, 13), u64_int(0)); u64_out(A(argc, a, 14), u64_int(0));
+    u64_out(A(argc, a, 12), u64_ivar(h, "BoneName")->t == U64_NAME ? *u64_ivar(h, "BoneName") : u64_name("None")); u64_out(A(argc, a, 13), u64_int(0)); u64_out(A(argc, a, 14), u64_int(0));
     u64_out(A(argc, a, 15), *u64_ivar(h, "TraceStart")); u64_out(A(argc, a, 16), *u64_ivar(h, "TraceEnd"));
     return NONE_;
   }

@@ -45,6 +45,11 @@ static u64_obj *spawn(u64_v cls, u64_v xform)
 {
   u64_v rot = u64_vec(0, 0, 0);
   if (xform.t == U64_OBJ && xform.u.o) { rot = *u64_ivar(xform.u.o, "Rotation"); xform = *u64_ivar(xform.u.o, "Location"); }   // a transform carries rotation
+  if (cls.t == U64_OBJ && cls.u.o) {                                         // a class constant referenced as an object ("Name_C")
+    const char *cn = u64_obj_name(cls.u.o); size_t n = strlen(cn);
+    static char cb[64]; snprintf(cb, sizeof cb, "%.*s", (int)(n > 2 && !strcmp(cn + n - 2, "_C") ? n - 2 : n), cn);
+    cls = u64_cls(u64_intern(cb));
+  }
   if (cls.t != U64_CLASS) return 0;
   char nm[40];
   snprintf(nm, sizeof nm, "%.30s_%d", cls.u.s, ++spawn_serial);

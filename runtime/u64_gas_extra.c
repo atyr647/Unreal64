@@ -110,6 +110,58 @@ void u64_notify_tag_change(u64_obj *asc)
   }
 }
 
+// ---------------------------------------------------------------------------------------------------- timelines
+// UTimelineComponent for the Timeline nodes of Blueprints: float tracks of curve keys; each evaluation writes the track variables on
+// the owner, sets the direction variable and calls the generated <Name>__UpdateFunc; reaching the end calls <Name>__FinishedFunc.
+float u64_curve_eval(const u64_curve_key *k, int n, float t)                  // FRichCurve::Eval
+{
+  if (n <= 0) return 0;
+  if (t <= k[0].time) return k[0].value;
+  if (t >= k[n - 1].time) return k[n - 1].value;
+  int i = 0; while (i + 1 < n && t >= k[i + 1].time) i++;
+  float dt = k[i + 1].time - k[i].time, a = dt > 0 ? (t - k[i].time) / dt : 0;
+  if (k[i].interp == 1) return k[i].value;                                    // constant
+  if (k[i].interp == 2) {                                                     // cubic (Hermite with the keys' tangents)
+    float a2 = a * a, a3 = a2 * a, t0 = k[i].leave * dt, t1 = k[i + 1].arrive * dt;
+    return (2 * a3 - 3 * a2 + 1) * k[i].value + (a3 - 2 * a2 + a) * t0 + (a3 - a2) * t1 + (-2 * a3 + 3 * a2) * k[i + 1].value;
+  }
+  return k[i].value + (k[i + 1].value - k[i].value) * a;
+}
+static u64_obj *tls[32]; static int ntls;
+void u64_gc_roots_extra(void) { for (int i = 0; i < ntls; i++) u64_gc_mark_obj(tls[i]); }
+static const u64_timeline_def *tl_def(u64_obj *comp)
+{
+  u64_obj *owner = O(*u64_ivar(comp, "Owner"));
+  const char *full = u64_obj_name(comp), *var = strrchr(full, '.'); var = var ? var + 1 : full;
+  for (const u64_timeline_def *d = u64_timelines; owner && d->cls; d++) if (!strcmp(d->var, var) && u64_class_is(u64_obj_class(owner), d->cls)) return d;
+  return 0;
+}
+static void tl_apply(u64_obj *comp, const u64_timeline_def *d, int fire_update)
+{
+  u64_obj *owner = O(*u64_ivar(comp, "Owner"));
+  float pos = F(*u64_ivar(comp, "tl_pos"));
+  for (int i = 0; i < d->ntracks; i++) *u64_ivar(owner, d->tracks[i].prop) = u64_float(u64_curve_eval(d->tracks[i].keys, d->tracks[i].nkeys, pos));
+  *u64_ivar(owner, d->direction) = u64_int(u64_true(*u64_ivar(comp, "tl_rev")) ? 1 : 0);        // ETimelineDirection
+  if (fire_update) u64_call(owner, d->update, 0, 0);
+}
+static void tl_track(u64_obj *comp) { for (int i = 0; i < ntls; i++) if (tls[i] == comp) return; if (ntls < 32) tls[ntls++] = comp; }
+static void tl_tick(float dt)
+{
+  for (int i = 0; i < ntls; ) {
+    u64_obj *c = tls[i]; const u64_timeline_def *d = u64_obj_alive(c) ? tl_def(c) : 0;
+    if (!d || !u64_true(*u64_ivar(c, "tl_playing"))) { tls[i] = tls[--ntls]; continue; }
+    int rev = u64_true(*u64_ivar(c, "tl_rev")), finished = 0;
+    float pos = F(*u64_ivar(c, "tl_pos")) + (rev ? -dt : dt);
+    if (rev && pos <= 0) { if (d->loop) pos += d->length; else { pos = 0; finished = 1; } }
+    else if (!rev && pos >= d->length) { if (d->loop) pos -= d->length; else { pos = d->length; finished = 1; } }
+    *u64_ivar(c, "tl_pos") = u64_float(pos);
+    if (finished) *u64_ivar(c, "tl_playing") = u64_bool(0);
+    tl_apply(c, d, 1);
+    if (finished) u64_call(O(*u64_ivar(c, "Owner")), d->finished, 0, 0);
+    i++;
+  }
+}
+
 // ---------------------------------------------------------------------------------------------------- tasks
 // Tasks keep their own timing in the world clock: StartTime / Duration / Period are seconds of u64_world_time().
 static void finish(u64_obj *t) { u64_task_untrack(t); }
@@ -121,7 +173,7 @@ static u64_v curve_value(u64_v curve, float x)                       // UCurveFl
 static void set_rel_loc(u64_obj *comp, u64_v v) { if (comp) *u64_ivar(comp, "RelativeLocation") = v; }
 void u64_tasks_tick_extra(float dt)
 {
-  (void)dt;
+  tl_tick(dt);
   u64_obj *snap[96]; int n = u64_tasks_snapshot(snap, 96);
   float now = u64_world_time();
   for (int i = 0; i < n; i++) {
@@ -345,9 +397,34 @@ int u64_native_gas_extra(u64_obj *self, const char *fn, int argc, const u64_v *a
   if (IS("IsInputPressed")) { *out = u64_bool(u64_true(*u64_ivar(self, "InputPressed"))); return 1; }
   if (IS("GetActiveGameplayEffectStackCount")) { *out = u64_int(u64_effect_handle_stack(x.u.i)); return 1; }
   if (IS("SendGameplayEvent")) { u64_send_gameplay_event(avatar_of(self), nm(x), y); return 1; }
+  // --- timelines (self is the timeline component)
+  if ((IS("Play") || IS("PlayFromStart") || IS("Reverse") || IS("ReverseFromEnd") || IS("Stop") || IS("SetNewTime") || IS("IsPlaying")) && self && tl_def(self)) {
+    const u64_timeline_def *d = tl_def(self);
+    if (IS("IsPlaying")) { *out = u64_bool(u64_true(*u64_ivar(self, "tl_playing"))); return 1; }
+    if (IS("Stop")) { *u64_ivar(self, "tl_playing") = u64_bool(0); return 1; }
+    if (IS("SetNewTime")) { float t = F(x); *u64_ivar(self, "tl_pos") = u64_float(t < 0 ? 0 : t > d->length ? d->length : t); tl_apply(self, d, 1); return 1; }
+    int rev = IS("Reverse") || IS("ReverseFromEnd");
+    if (IS("PlayFromStart")) *u64_ivar(self, "tl_pos") = u64_float(0);
+    if (IS("ReverseFromEnd")) *u64_ivar(self, "tl_pos") = u64_float(d->length);
+    *u64_ivar(self, "tl_rev") = u64_bool(rev); *u64_ivar(self, "tl_playing") = u64_bool(1);
+    tl_track(self); return 1;
+  }
+  if (IS("GetPlayLength") && self && tl_def(self)) { *out = u64_float(tl_def(self)->length); return 1; }
+  if (IS("GetPlayLength")) { float len = u64_montage_length(nm(x.t == U64_NONE ? NONE_ : x), 0); *out = u64_float(len < 0 ? 0.0f : len); return 1; }    // an animation asset's length
+  if (IS("SphereTraceMultiForObjects")) {                                  // (World, Start, End, Radius, ObjectTypes, bComplex, ActorsToIgnore, DrawDebug, &OutHits, bIgnoreSelf, ...) -> bHit
+    u64_v st = A(argc, a, 1), en = A(argc, a, 2); float radius = F(A(argc, a, 3));
+    u64_v ign = deref(A(argc, a, 6)); u64_obj *hits[16];
+    float s3[3] = {st.u.v[0], st.u.v[1], st.u.v[2]}, e3[3] = {en.u.v[0], en.u.v[1], en.u.v[2]};
+    int n = u64_trace_multi(s3, e3, radius, u64_array_len(ign) ? O(u64_array_get(ign, 0)) : 0, hits, 16);
+    u64_v arr = u64_array_of(0, 0); for (int i = 0; i < n; i++) u64_array_push(&arr, u64_objv(hits[i]));
+    u64_out(A(argc, a, 8), arr); *out = u64_bool(n > 0); return 1;
+  }
   // --- scene component setters used by the tasks and abilities
   if (IS("SetFieldOfView")) { if (self) *u64_ivar(self, "FieldOfView") = x; return 1; }
-  if (IS("SetBoolPropertyByName")) { if (O(x)) *u64_ivar(O(x), nm(y)) = z; return 1; }
+  if (IS("SetBoolPropertyByName") || IS("SetObjectPropertyByName") || IS("SetStructurePropertyByName") || IS("SetFloatPropertyByName") || IS("SetIntPropertyByName")) {
+    if (O(x)) *u64_ivar(O(x), u64_intern(nm(y))) = z;                       // KismetSystemLibrary::Set*PropertyByName: the variable of that name on the object
+    return 1;
+  }
   if (IS("SetUpdatedComponent")) { if (self) *u64_ivar(self, "UpdatedComponent") = x; return 1; }
   if (IS("StopMovementImmediately")) { if (self) *u64_ivar(self, "Velocity") = u64_vec(0, 0, 0); return 1; }
   // --- ability task factories

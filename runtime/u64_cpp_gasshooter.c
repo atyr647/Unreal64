@@ -102,6 +102,8 @@ static void ctor_weapon(u64_obj *o)                                // AGSWeapon:
   *u64_ivar(o, "WeaponIsFiringTag") = u64_name("Weapon.IsFiring");
   *u64_ivar(o, "FireMode") = u64_name("Weapon.FireMode.None");
   tag_push(o, "RestrictedPickupTags", "State.Dead"); tag_push(o, "RestrictedPickupTags", "State.KnockedDown");
+  u64_obj *c = O(u64_comp(o, "CollisionComponent"));                  // CollisionComp->InitCapsuleSize(40, 50)
+  if (c) { *u64_ivar(c, "CapsuleRadius") = u64_float(40.0f); *u64_ivar(c, "CapsuleHalfHeight") = u64_float(50.0f); }
 }
 static u64_v w_get_ivar(u64_obj *s, const char *n) { return *u64_ivar(s, n); }
 static u64_v w_get_primary_clip(u64_obj *s, int c, const u64_v *a) { (void)c; (void)a; return w_get_ivar(s, "PrimaryClipAmmo"); }
@@ -767,6 +769,104 @@ static u64_v h_possessed_by(u64_obj *s, int c, const u64_v *a)         // AGSHer
   return NONE_;
 }
 
+// ---------------------------------------------------------------------------------------------------- AGSPickup and weapons lying in the world
+extern void u64_gc_roots_project_extra(void);
+static void ctor_pickup(u64_obj *o)                                  // AGSPickup::AGSPickup
+{
+  *u64_ivar(o, "bIsActive") = u64_bool(1); *u64_ivar(o, "bCanRespawn") = u64_bool(1); *u64_ivar(o, "RespawnTime") = u64_float(5.0f);
+  u64_obj *c = O(u64_comp(o, "CollisionComp"));                       // CollisionComp->InitCapsuleSize(40, 50)
+  if (c) { *u64_ivar(c, "CapsuleRadius") = u64_float(40.0f); *u64_ivar(c, "CapsuleHalfHeight") = u64_float(50.0f); }
+  tag_push(o, "RestrictedPickupTags", "State.Dead"); tag_push(o, "RestrictedPickupTags", "State.KnockedDown");
+}
+static int has_any_tag(u64_obj *asc, u64_v tags) { for (int i = 0; i < u64_array_len(tags); i++) if (u64_tag_count(asc, nm(u64_array_get(tags, i)))) return 1; return 0; }
+static int can_be_picked_up(u64_obj *pk, u64_obj *ch)                // AGSPickup::CanBePickedUp
+{
+  if (!u64_true(*u64_ivar(pk, "bIsActive")) || !ch || !is_alive(ch) || !u64_obj_alive(pk)) return 0;
+  if (has_any_tag(u64_asc_of(ch), *u64_ivar(pk, "RestrictedPickupTags"))) return 0;
+  if (u64_has_bp(pk, "K2_CanBePickedUp")) { u64_v r = u64_call(pk, "K2_CanBePickedUp", 1, (u64_v[]){u64_objv(ch)}); return r.t == U64_NONE || u64_true(r); }
+  return 1;
+}
+static void give_pickup_to(u64_obj *pk, u64_obj *ch)                 // AGSPickup::GivePickupTo: abilities (activated once), then effects at the character's level
+{
+  u64_obj *asc = u64_asc_of(ch);
+  if (!asc) return;
+  u64_v abil = *u64_ivar(pk, "AbilityClasses"), effects = *u64_ivar(pk, "EffectClasses");
+  for (int i = 0; i < u64_array_len(abil); i++) {
+    const char *cls = nm(u64_array_get(abil, i));
+    if (!*cls) continue;
+    u64_obj *def = class_default(cls);
+    u64_obj *ab = u64_give_ability(asc, cls, 1, def ? nm(*u64_ivar(def, "AbilityInputID")) : "", pk);
+    if (ab) { *u64_ivar(ab, "ClearOnEnd") = u64_bool(1); u64_ability_try_activate(ab); }
+  }
+  float level = u64_attr_get(asc, "CharacterLevel");
+  for (int i = 0; i < u64_array_len(effects); i++) { const char *ge = nm(u64_array_get(effects, i)); if (*ge) u64_apply_ge(asc, asc, ge, level, 0); }
+}
+static u64_v pk_pickup_on_touch(u64_obj *pk, int c, const u64_v *a)  // AGSPickup::PickupOnTouch(Pawn)
+{
+  u64_obj *ch = O(A(c, a, 0));
+  if (!can_be_picked_up(pk, ch)) return NONE_;
+  give_pickup_to(pk, ch);
+  *u64_ivar(pk, "PickedUpBy") = u64_objv(ch); *u64_ivar(pk, "bIsActive") = u64_bool(0);
+  if (u64_has_bp(pk, "K2_OnPickedUp")) u64_call(pk, "K2_OnPickedUp", 0, 0);                    // OnPickedUp: the Blueprint hides the mesh; the sound is presentation
+  if (u64_true(*u64_ivar(pk, "bCanRespawn")) && fv(*u64_ivar(pk, "RespawnTime")) > 0) u64_timer_call(fv(*u64_ivar(pk, "RespawnTime")), pk, "RespawnPickup", NONE_);
+  else u64_obj_destroy(pk);
+  return NONE_;
+}
+static u64_v pk_on_overlap(u64_obj *pk, int c, const u64_v *a)       // AGSPickup::NotifyActorBeginOverlap (the server)
+{
+  u64_obj *other = O(A(c, a, 0));
+  if (other && other != pk) pk_pickup_on_touch(pk, 1, (u64_v[]){u64_objv(other)});
+  return NONE_;
+}
+static int capsules_overlap(u64_obj *a, u64_obj *b)                  // two vertical capsules: segment distance <= radius sum (exact)
+{
+  float ax, ay, az, ar, ah, bx, by, bz, br, bh;
+  if (!u64_actor_capsule(a, &ax, &ay, &az, &ar, &ah) || !u64_actor_capsule(b, &bx, &by, &bz, &br, &bh)) return 0;
+  float sa = ah - ar, sb = bh - br; if (sa < 0) sa = 0; if (sb < 0) sb = 0;
+  float gap = fmaxf(0.f, fmaxf((bz - sb) - (az + sa), (az - sa) - (bz + sb))), dh2 = (ax - bx) * (ax - bx) + (ay - by) * (ay - by), rr = ar + br;
+  return dh2 + gap * gap <= rr * rr;
+}
+static u64_v pk_respawn(u64_obj *pk, int c, const u64_v *a)          // AGSPickup::RespawnPickup: active again; whoever is standing on it picks it up
+{
+  (void)c; (void)a;
+  *u64_ivar(pk, "bIsActive") = u64_bool(1); *u64_ivar(pk, "PickedUpBy") = u64_objv(0);
+  if (u64_has_bp(pk, "K2_OnRespawned")) u64_call(pk, "K2_OnRespawned", 0, 0);
+  for (int i = 0; i < u64_obj_count(); i++) { u64_obj *p = u64_obj_at(i); if (u64_obj_is_actor(p) && u64_actor_is_pawn(p) && capsules_overlap(pk, p)) pk_pickup_on_touch(pk, 1, (u64_v[]){u64_objv(p)}); }
+  return NONE_;
+}
+// AGSWeapon::NotifyActorBeginOverlap / PickUpOnTouch for a weapon lying in the world
+static u64_v w_pickup_on_touch(u64_obj *w, int c, const u64_v *a)
+{
+  u64_obj *ch = O(A(c, a, 0));
+  if (!ch || !is_class(ch, "GSHeroCharacter") || !is_alive(ch) || !u64_asc_of(ch) || has_any_tag(u64_asc_of(ch), *u64_ivar(w, "RestrictedPickupTags"))) return NONE_;
+  u64_v r = u64_call(ch, "AddWeaponToInventory", 2, (u64_v[]){u64_objv(w), u64_bool(1)});
+  (void)r;
+  return NONE_;
+}
+// Begin-overlap notifications between pickup-mode actors and pawns, tracked per pair so each fires once on entering.
+#define MAX_TOUCH 96
+static struct { u64_obj *a, *b; } touching[MAX_TOUCH]; static int ntouch;
+static int touch_find(u64_obj *a, u64_obj *b) { for (int i = 0; i < ntouch; i++) if (touching[i].a == a && touching[i].b == b) return i; return -1; }
+static void gs_world_tick(float dt)
+{
+  (void)dt;
+  for (int i = 0; i < u64_obj_count(); i++) {
+    u64_obj *o = u64_obj_at(i);
+    if (!u64_obj_is_actor(o)) continue;
+    int pickup = is_class(o, "GSPickup"), weapon = is_class(o, "GSWeapon") && !O(*u64_ivar(o, "OwningCharacter")) && u64_true(*u64_ivar(o, "PickupEnabled"));
+    if (!pickup && !weapon) continue;
+    for (int j = 0; j < u64_obj_count(); j++) {
+      u64_obj *p = u64_obj_at(j);
+      if (!u64_obj_is_actor(p) || !u64_actor_is_pawn(p)) continue;
+      int now = capsules_overlap(o, p), idx = touch_find(o, p);
+      if (now && idx < 0 && ntouch < MAX_TOUCH) { touching[ntouch].a = o; touching[ntouch++].b = p; if (pickup) pk_on_overlap(o, 1, (u64_v[]){u64_objv(p)}); else w_pickup_on_touch(o, 1, (u64_v[]){u64_objv(p)}); }
+      else if (!now && idx >= 0) touching[idx] = touching[--ntouch];
+      if (!u64_obj_alive(o)) break;
+    }
+  }
+  for (int i = 0; i < ntouch; ) { if (!u64_obj_alive(touching[i].a) || !u64_obj_alive(touching[i].b)) touching[i] = touching[--ntouch]; else i++; }
+}
+
 // ---------------------------------------------------------------------------------------------------- registration
 typedef struct { const char *cls, *fn; u64_v (*f)(u64_obj *, int, const u64_v *); } m_t;
 static const m_t methods[] = {
@@ -799,16 +899,17 @@ static const m_t methods[] = {
   {"GSGATA_Trace", "StartTargeting", tr_start_targeting}, {"GSGATA_Trace", "ConfirmTargetingAndContinue", tr_confirm}, {"GSGATA_Trace", "StopTargeting", tr_stop_targeting},
   {"GSGameplayAbility", "MakeEffectContainerSpec", ga_make_container_spec}, {"GSGameplayAbility", "OnAvatarSet", ga_on_avatar_set},
   {"GSHeroCharacter", "PossessedBy", h_possessed_by},
+  {"GSPickup", "PickupOnTouch", pk_pickup_on_touch}, {"GSPickup", "RespawnPickup", pk_respawn}, {"GSWeapon", "PickUpOnTouch", w_pickup_on_touch},
   {"GSGameplayAbility", "GSCheckCost", ga_gs_check_cost_default}, {"GSGameplayAbility", "GSApplyCost", ga_noop},
 };
-static const u64_gas_hooks gs_hooks = {gs_pre_attribute_change, gs_post_execute, gs_zero_health, gs_can_activate, gs_check_cost, gs_apply_cost};
+static const u64_gas_hooks gs_hooks = {gs_pre_attribute_change, gs_post_execute, gs_zero_health, gs_can_activate, gs_check_cost, gs_apply_cost, gs_world_tick};
 
 __attribute__((constructor)) static void register_gasshooter(void)
 {
   u64_cpp_register_class("GSCharacterBase", 0, 0);
   u64_cpp_register_class("GSHeroCharacter", "GSCharacterBase", ctor_hero);
   u64_cpp_register_class("GSWeapon", 0, ctor_weapon);
-  u64_cpp_register_class("GSPickup", 0, 0); u64_cpp_register_class("GSASCActorBase", 0, 0);
+  u64_cpp_register_class("GSPickup", 0, ctor_pickup); u64_cpp_register_class("GSASCActorBase", 0, 0);
   u64_cpp_register_class("GSGameplayAbility", 0, ctor_gs_ability); u64_cpp_register_class("GSPlayerController", 0, 0);
   u64_cpp_register_class("GSGATA_Trace", 0, ctor_trace); u64_cpp_register_class("GSGATA_LineTrace", "GSGATA_Trace", 0);
   u64_cpp_register_class("GSGATA_SphereTrace", "GSGATA_Trace", ctor_sphere_trace);
@@ -819,4 +920,4 @@ __attribute__((constructor)) static void register_gasshooter(void)
   u64_game_mode_class = "BP_GameMode";
 }
 
-void u64_gc_roots_project(void) { for (int i = 0; i < cdo_n; i++) u64_gc_mark_obj(cdo_cache[i].o); }
+void u64_gc_roots_project(void) { for (int i = 0; i < cdo_n; i++) u64_gc_mark_obj(cdo_cache[i].o); for (int i = 0; i < ntouch; i++) { u64_gc_mark_obj(touching[i].a); u64_gc_mark_obj(touching[i].b); } }

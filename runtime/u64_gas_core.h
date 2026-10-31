@@ -25,6 +25,11 @@ typedef struct { const char *cls; float max_accel, braking, friction, jump_z, gr
 extern const u64_movement_def u64_movements[];
 typedef struct { const char *cls; float initial_speed, max_speed, gravity_scale; } u64_projectile_def;
 extern const u64_projectile_def u64_projectiles[];
+typedef struct { float time, value, arrive, leave; int interp; } u64_curve_key;           // interp: 0 linear, 1 constant, 2 cubic
+typedef struct { const char *prop; int nkeys; const u64_curve_key *keys; } u64_tl_track;
+typedef struct { const char *cls, *var; float length; int loop, autoplay; const char *update, *finished, *direction; int ntracks; const u64_tl_track *tracks; } u64_timeline_def;
+extern const u64_timeline_def u64_timelines[];                             // Timeline nodes: terminated by a null class
+float u64_curve_eval(const u64_curve_key *keys, int n, float t);
 typedef struct { const char *cls, *parent; } u64_class_parent_def;
 extern const u64_class_parent_def u64_class_parents[];
 extern const u64_ge_def u64_ge_defs[]; extern const int u64_ge_count;      // generated: u64_gas_data.c
@@ -87,6 +92,7 @@ typedef struct {
   int (*can_activate)(u64_obj *ability);                                                // UGameplayAbility::CanActivateAbility additions; 0 blocks
   int (*check_cost)(u64_obj *ability);                                                  // CheckCost additions (GSCheckCost)
   void (*apply_cost)(u64_obj *ability);                                                 // ApplyCost additions (GSApplyCost), run before the cost effect
+  void (*world_tick)(float dt);                                                         // per-frame project code (actor overlap notifications, ...)
 } u64_gas_hooks;
 extern const u64_gas_hooks *u64_gas_hooks_active;
 void u64_adjust_for_max_change(u64_obj *asc, const char *affected, const char *maxattr, float new_max);   // AdjustAttributeForMaxChange
@@ -110,3 +116,5 @@ int u64_ability_check_cost(u64_obj *ability);
 int u64_effect_handle_stack(int handle);
 u64_obj *u64_effect_handle_source(int handle);
 int u64_trace_multi(const float start[3], const float end[3], float radius, u64_obj *ignore, u64_obj **hits, int max);
+int u64_actor_capsule(u64_obj *o, float *cx, float *cy, float *cz, float *r, float *hh);
+int u64_actor_is_pawn(u64_obj *o);

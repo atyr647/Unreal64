@@ -10,6 +10,7 @@ static void tick(int n) { for (int i = 0; i < n; i++) u64_world_tick(1.0f / 30.0
 static u64_obj *hero;
 static float attr(const char *n) { return u64_attr_get(u64_asc_of(hero), n); }
 static const char *s(u64_v v) { return v.u.s ? v.u.s : ""; }
+static u64_obj *asc_of_hero(void) { return u64_asc_of(hero); }
 static u64_v call(u64_obj *o, const char *fn) { return u64_call(o, fn, 0, 0); }
 
 int main(void)
@@ -103,7 +104,13 @@ int main(void)
   tick(2 * 30);
   CHECK(u64_player_pawn() && u64_player_pawn() != hero && u64_obj_alive(u64_player_pawn()));     // respawned after 5 s
   hero = u64_player_pawn(); tick(3);
-  CHECK(attr("Health") == 100 && attr("Shield") == 100 && u64_as_int(call(hero, "GetNumWeapons")) == 1);   // a fresh hero with the default inventory
+  // The new hero starts among the weapons its previous life dropped (ring of radius 50 around the death spot, pickup capsule 40 + hero 34):
+  // it picks them up on touch: the dropped rifle is a duplicate (its 30 rounds go to the reserve), the shotgun and rocket launcher join.
+  CHECK(attr("Health") == 100 && attr("Shield") == 100 && u64_as_int(call(hero, "GetNumWeapons")) == 3);
+  CHECK(attr("RifleReserveAmmo") == 90);                                              // 60 + 30
+  for (int i = 0; i < 3 && strcmp(u64_obj_class(call(hero, "GetCurrentWeapon").u.o), "BP_Rifle"); i++) call(hero, "NextWeapon");
+  CHECK(!strcmp(u64_obj_class(call(hero, "GetCurrentWeapon").u.o), "BP_Rifle"));
+  rifle = call(hero, "GetCurrentWeapon").u.o;
   // --- firing the rifle (GA_RiflePrimary -> GA_RiflePrimaryInstant -> GSGATA_LineTrace -> GE_RifleDamage)
   {
     u64_obj *enemy = u64_find("BP_HeroCharacter2");
@@ -131,11 +138,53 @@ int main(void)
     hero = ehero;
     // --- reload (GA_RifleReload): the clip is topped up from the reserve; clip + reserve is conserved
     int clip1 = u64_as_int(call(hero, "GetPrimaryClipAmmo")), res1 = u64_as_int(call(hero, "GetPrimaryReserveAmmo"));
-    CHECK(clip1 == 29 && res1 == 60);
+    CHECK(clip1 == 29 && res1 == 90);
     CHECK(u64_input_press(hero, "EGSAbilityInputID::Reload"));
     tick(150);                                                                          // the reload montage plays out
     int clip2 = u64_as_int(call(hero, "GetPrimaryClipAmmo")), res2 = u64_as_int(call(hero, "GetPrimaryReserveAmmo"));
     CHECK(clip2 == 30 && clip2 + res2 == clip1 + res1);
+  }
+  // --- shotgun (GA_ShotgunPrimaryInstant): 8 pellets at 6 damage each, 12 degrees of spread
+  {
+    u64_obj *enemy = u64_find("BP_HeroCharacter2"), *me = hero;
+    u64_obj *sg = 0;                                                                                       // the shotgun picked up above
+    for (int i = 0; i < u64_as_int(call(me, "GetNumWeapons")); i++) { call(me, "NextWeapon"); if (!strcmp(u64_obj_class(call(me, "GetCurrentWeapon").u.o), "BP_Shotgun")) { sg = call(me, "GetCurrentWeapon").u.o; break; } }
+    CHECK(sg && call(me, "GetCurrentWeapon").u.o == sg && u64_as_int(call(me, "GetPrimaryClipAmmo")) == 6);
+    u64_v el = *u64_ivar(enemy, "Location");
+    *u64_ivar(me, "Location") = u64_vec(el.u.v[0] - 120.0f, el.u.v[1], 112.0f);                           // 120 units in front: the whole cone (radius 12.6) is inside the capsule
+    u64_v cam = *u64_ivar(u64_comp(me, "FirstPersonCamera").u.o, "RelativeLocation");
+    float cx = el.u.v[0] - 120.0f + cam.u.v[0], cy = el.u.v[1] + cam.u.v[1], cz = 112.0f + cam.u.v[2];
+    float dx = el.u.v[0] - cx, dy = el.u.v[1] - cy, dz = el.u.v[2] - cz;
+    *u64_ivar(me, "ControlRotation") = u64_vec(atan2f(dz, sqrtf(dx * dx + dy * dy)) * 57.29578f, atan2f(dy, dx) * 57.29578f, 0);
+    tick(60);                                                                                              // let the weapon-change block and the enemy's shield settle
+    hero = enemy; float sh0 = attr("Shield"); hero = me;
+    CHECK(u64_input_press(me, "EGSAbilityInputID::PrimaryFire"));
+    for (int i = 0; i < 30 && u64_as_int(call(me, "GetPrimaryClipAmmo")) == 6; i++) tick(1);
+    u64_input_release_id(me, "EGSAbilityInputID::PrimaryFire");
+    tick(30);
+    hero = enemy;
+    printf("DBG shotgun shield %f -> %f\n", sh0, attr("Shield"));
+    CHECK(fabsf((sh0 - attr("Shield")) - 8 * (6.0f * 100.0f / 120.0f)) < 0.01f);                         // 8 pellets * 6 * 100/120
+    hero = me;
+  }
+  // --- pickups (AGSPickup): standing on one applies its effects; it respawns after RespawnTime (5 s) and, with the hero still on it, is taken again
+  {
+    u64_obj *hp = u64_find("BP_Pickup_Health_2"), *ap = u64_find("BP_Pickup_AmmoRifle_2");
+    u64_v pl = *u64_ivar(hp, "Location");
+    u64_remove_ge_class(asc_of_hero(), "GE_HealthRegen");                                   // so the health changes are only the pickup's
+    u64_attr_set_base(asc_of_hero(), "Health", 50.0f);
+    *u64_ivar(hero, "Location") = u64_vec(pl.u.v[0], pl.u.v[1], 112.0f);
+    tick(2);
+    CHECK(attr("Health") == 70 && !u64_true(*u64_ivar(hp, "bIsActive")));                 // GE_Pickup_Health: +20; the pickup is inactive
+    tick(4 * 30);
+    CHECK(attr("Health") == 70);                                                          // 4.07 s after the pickup: still waiting
+    tick(1 * 30);
+    CHECK(attr("Health") == 90 && !u64_true(*u64_ivar(hp, "bIsActive")));                 // respawned at 5 s and taken again by the hero standing on it
+    u64_v al = *u64_ivar(ap, "Location");
+    u64_attr_set_base(asc_of_hero(), "RifleReserveAmmo", 100.0f);
+    *u64_ivar(hero, "Location") = u64_vec(al.u.v[0], al.u.v[1], 112.0f);
+    tick(2);
+    CHECK(attr("RifleReserveAmmo") == 130);                                               // GE_Pickup_AmmoRifle: +30
   }
   // --- garbage collection: 3000 spawn/destroy cycles (plus arrays and temporaries) would exhaust the 1024-object pool without it
   {

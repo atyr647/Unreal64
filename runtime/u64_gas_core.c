@@ -431,6 +431,7 @@ void u64_tasks_tick_extra(float dt);
 void u64_gas_tick(float dt)
 {
   u64_tasks_tick_extra(dt);
+  if (u64_gas_hooks_active && u64_gas_hooks_active->world_tick) u64_gas_hooks_active->world_tick(dt);
   for (int i = 0; i < MAX_ACTIVE; i++) {
     active_t *e = &active[i];
     if (!e->live) continue;
@@ -675,20 +676,22 @@ void u64_ability_end(u64_obj *ab, int cancelled)
   u64_timers_cancel_for(ab);
   u64_tasks_end_for(ab);
   u64_call(ab, "K2_OnEndAbility", 0, 0);
+  if (u64_true(*u64_ivar(ab, "ClearOnEnd")) && a) u64_clear_ability(a->obj, ab);          // GiveAbilityAndActivateOnce: the spec goes away when the ability ends
 }
-int u64_input_press(u64_obj *actor, const char *id)
+int u64_input_press(u64_obj *actor, const char *id)          // AbilityLocalInputPressed: every ability bound to the input is considered; 1 if any reacted
 {
-  asc_t *a = asc_from(u64_asc_of(actor));
-  for (int i = 0; a && i < a->nabil; i++)
-    if (!strcmp(nm(*u64_ivar(a->abil[i], "AbilityInputID")), id)) {
-      u64_obj *ab = a->abil[i];
-      u64_v *act = u64_ivar(ab, "bActivateOnInput");
-      if (act->t != U64_NONE && !u64_true(*act) && !u64_true(*u64_ivar(ab, "Active"))) { *u64_ivar(ab, "InputPressed") = u64_bool(1); continue; }   // UGSGameplayAbility::bActivateOnInput
-      *u64_ivar(ab, "InputPressed") = u64_bool(1);                         // FGameplayAbilitySpec::InputPressed
-      if (u64_true(*u64_ivar(ab, "Active"))) { u64_ability_input_pressed(ab); return 1; }   // AbilitySpecInputPressed on a running ability: the InputPressed event
-      return u64_ability_try_activate(ab);
-    }
-  return 0;
+  asc_t *a = asc_from(u64_asc_of(actor)); int any = 0;
+  u64_obj *snap[MAX_ABIL]; int n = 0;
+  for (int i = 0; a && i < a->nabil; i++) if (!strcmp(nm(*u64_ivar(a->abil[i], "AbilityInputID")), id)) snap[n++] = a->abil[i];
+  for (int i = 0; i < n; i++) {
+    u64_obj *ab = snap[i];
+    u64_v *act = u64_ivar(ab, "bActivateOnInput");
+    *u64_ivar(ab, "InputPressed") = u64_bool(1);                           // FGameplayAbilitySpec::InputPressed
+    if (u64_true(*u64_ivar(ab, "Active"))) { u64_ability_input_pressed(ab); any = 1; continue; }   // AbilitySpecInputPressed on a running ability: the InputPressed event
+    if (act->t != U64_NONE && !u64_true(*act)) continue;                   // UGSGameplayAbility::bActivateOnInput
+    any |= u64_ability_try_activate(ab);
+  }
+  return any;
 }
 void u64_input_release_id(u64_obj *actor, const char *id)
 {
@@ -726,8 +729,22 @@ static int shape_world(u64_obj *o, shape_t *out)
   out->s = s; out->yaw = yaw + s->ryaw * 0.0174533f;
   out->cx = loc.x + rx * cy - ry * sy; out->cy = loc.y + rx * sy + ry * cy; out->cz = loc.z + s->rz * sc.z;
   out->a = s->a * sc.x; out->b = s->kind == 1 ? s->b * sc.y : (s->kind == 3 ? 0 : s->b * sc.z); out->c = s->kind == 1 ? s->c * sc.z : 0;
+  if (s->kind == 2) {                                           // a capsule's size can come from C++ (InitCapsuleSize) or the Blueprint: the component's own values win
+    u64_obj *comp = u64_comp(o, s->comp).u.o;
+    u64_v *r = comp ? u64_ivar(comp, "CapsuleRadius") : 0, *h = comp ? u64_ivar(comp, "CapsuleHalfHeight") : 0;
+    if (r && r->t == U64_FLOAT) out->a = r->u.f * sc.x;
+    if (h && h->t == U64_FLOAT) out->b = h->u.f * sc.z;
+  }
   return 1;
 }
+int u64_actor_capsule(u64_obj *o, float *cx, float *cy, float *cz, float *r, float *hh)   // the actor's collision capsule in the world; 0 if it has none
+{
+  shape_t sh;
+  if (!shape_world(o, &sh) || sh.s->kind != 2) return 0;
+  *cx = sh.cx; *cy = sh.cy; *cz = sh.cz; *r = sh.a; *hh = sh.b; return 1;
+}
+int u64_actor_is_pawn(u64_obj *o);
+static int is_pawn(u64_obj *o) { return u64_ivar(o, "CharacterMovement")->t == U64_OBJ; }   // only characters' capsules block traces / sweeps / trigger overlaps
 // vertical capsule (centre, radius r, half height hh) against a yawed box: exact in the box's local frame
 static int capsule_box(const shape_t *cap, const shape_t *box)
 {
@@ -748,7 +765,7 @@ int u64_overlapping(u64_obj *self, u64_obj **out, int max)       // actors whose
   int n = 0;
   for (int i = 0; i < u64_obj_count() && n < max; i++) {
     u64_obj *o = u64_obj_at(i); shape_t other;
-    if (o == self || !u64_obj_is_actor(o) || !shape_world(o, &other) || other.s->kind != 2) continue;   // characters (capsules)
+    if (o == self || !u64_obj_is_actor(o) || !is_pawn(o) || !shape_world(o, &other) || other.s->kind != 2) continue;   // characters (capsules)
     if (capsule_box(&other, &me)) out[n++] = o;
   }
   return n;
@@ -783,7 +800,7 @@ int u64_trace_multi(const float start[3], const float end[3], float radius, u64_
   for (int i = 0; i < u64_obj_count() && nf < 16; i++) {
     u64_obj *o = u64_obj_at(i); shape_t sh;
     if (o == ignore || !u64_obj_is_actor(o) || !shape_world(o, &sh) || sh.s->kind != 2) continue;     // pawn capsules block object traces
-    if (u64_gas_hooks_active && u64_ivar(o, "CharacterMovement")->t != U64_OBJ) continue;           // (GASShooter: pickups and weapons ignore these channels)
+    if (!is_pawn(o)) continue;                                                                      // pickups and weapons ignore these channels
     float seg = sh.b - sh.a; if (seg < 0) seg = 0;
     float t, n[3];
     if (ray_vcapsule(start, d, sh.cx, sh.cy, sh.cz - seg, sh.cz + seg, sh.a + radius, &t, n)) {   /* sphere vs capsule = ray vs capsule grown by the radius */ found[nf].t = t; found[nf].o = o; memcpy(found[nf].n, n, sizeof n); nf++; }
@@ -944,7 +961,7 @@ void u64_overlap_events_tick(void)             // OnComponentBeginOverlap / EndO
       shape_t me; world_shape_of(o, def, &me);
       for (int j = 0; j < u64_obj_count(); j++) {
         u64_obj *oo = u64_obj_at(j); shape_t other;
-        if (oo == o || !u64_obj_is_actor(oo) || !shape_world(oo, &other) || other.s->kind != 2) continue;
+        if (oo == o || !u64_obj_is_actor(oo) || !is_pawn(oo) || !shape_world(oo, &other) || other.s->kind != 2) continue;
         int now = comp_overlaps_capsule(&me, &other), pi = pair_find(o, d->comp, oo);
         if (now == (pi >= 0)) continue;
         if (now && npairs < MAX_PAIRS) { pairs[npairs].o = o; pairs[npairs].other = oo; pairs[npairs++].comp = d->comp; }
@@ -966,7 +983,7 @@ int u64_sweep_sphere(const float start[3], const float end[3], float radius, u64
   float d[3] = {end[0] - start[0], end[1] - start[1], end[2] - start[2]}, best = 2; int hit = 0;
   for (int i = 0; i < u64_obj_count(); i++) {
     u64_obj *o = u64_obj_at(i); shape_t sh;
-    if (o == ignore || !u64_obj_is_actor(o) || !shape_world(o, &sh) || sh.s->kind != 2) continue;
+    if (o == ignore || !u64_obj_is_actor(o) || !is_pawn(o) || !shape_world(o, &sh) || sh.s->kind != 2) continue;
     float seg = sh.b - sh.a; if (seg < 0) seg = 0;
     float t, n[3];
     if (ray_vcapsule(start, d, sh.cx, sh.cy, sh.cz - seg, sh.cz + seg, sh.a + radius, &t, n) && t < best) { best = t; hit = 1; }
@@ -975,6 +992,7 @@ int u64_sweep_sphere(const float start[3], const float end[3], float radius, u64
   return hit;
 }
 
+int u64_actor_is_pawn(u64_obj *o) { return is_pawn(o); }
 // GC roots: every ability system whose avatar lives, its abilities, active effects (their specs and sources), overlap pairs and the
 // constant arrays. A destroyed actor's ability system and effects are released here so their slots can be reused.
 void u64_gc_roots_core(void)

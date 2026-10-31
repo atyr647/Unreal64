@@ -5,6 +5,7 @@ Unreal only saves properties that differ from their defaults, so every field bel
 """
 from __future__ import annotations
 
+import os
 import props
 import uasset
 
@@ -117,10 +118,26 @@ def ge_definition(p, data, export):
     return ge
 
 
+TIMELINES = []      # [(class, template dict, [(property name, [keys])])] filled by collect(), emitted by emit_gas_data_c
+
+
+def _curve_keys(p, data, idx):
+    """Keys of the CurveFloat export at package index idx (1-based): [(time, value, interp, arrive, leave)]."""
+    if idx <= 0 or idx > len(p.exports):
+        return []
+    try:
+        o = props.read_object(p, data, p.exports[idx - 1])
+        keys = o["FloatCurve"][1]["Keys"][1]
+        return [(k[1]["time"], k[1]["value"], k[1]["interp"], k[1]["arrive"], k[1]["leave"]) for k in keys]
+    except Exception:
+        return []
+
+
 def collect(content_root):
     """Walk a project; return ({ge name: def}, {montage: length}, {class: {box: (x,y,z), capsule: (r, hh)}})."""
     import glob
     ges, montages, shapes, moves, projs, parents, bound = {}, {}, {}, {}, {}, {}, []
+    TIMELINES.clear()
     for f in glob.glob(content_root + "/**/*.uasset", recursive=True):
         try:
             p = uasset.parse_tables(f)
@@ -129,6 +146,20 @@ def collect(content_root):
             continue
         for e in p.exports:
             cn = uasset.class_name(p, e.cls)
+            if cn == "TimelineTemplate":                      # a Timeline node's template: length, curve tracks, update / finished functions
+                try:
+                    t = props.read_object(p, data, e)
+                    tracks = []
+                    for tr in (t.get("FloatTracks", ("array", []))[1]):
+                        d = tr[1]
+                        tracks.append((d["PropertyName"][1], _curve_keys(p, data, d["CurveFloat"][2] if d["CurveFloat"][0] == "obj" else 0)))
+                    g = lambda k, dflt="": t[k][1] if k in t and isinstance(t[k], tuple) else dflt
+                    TIMELINES.append((os.path.splitext(os.path.basename(f))[0], {
+                        "var": g("VariableName"), "length": float(t.get("TimelineLength", 5.0)), "loop": bool(t.get("bLoop", False)),
+                        "autoplay": bool(t.get("bAutoPlay", False)), "update": g("UpdateFunctionName"), "finished": g("FinishedFunctionName"),
+                        "direction": g("DirectionPropertyName")}, tracks))
+                except Exception:
+                    pass
             if cn == "BlueprintGeneratedClass" and e.super != 0:
                 sup = uasset.class_name(p, e.super)
                 if sup and sup != "None":
@@ -162,6 +193,13 @@ def collect(content_root):
                                     pass
                             notifies.append((max(t, 0.0), name.removesuffix("_C"), tag))
                         montages[e.name] = (length, blend, sorted(notifies))
+                except Exception:
+                    pass
+            elif cn == "AnimSequence":                         # GetPlayLength of a plain animation (no montage sections / notifies kept)
+                try:
+                    o = props.read_object(p, data, e)
+                    if "SequenceLength" in o and e.name not in montages:
+                        montages[e.name] = (float(o["SequenceLength"]), 0.0, [])
                 except Exception:
                     pass
             elif cn == "ProjectileMovementComponent":
@@ -241,6 +279,15 @@ STACK = {"None": 0, "AggregateByTarget": 1, "AggregateBySource": 2}
 
 def emit_gas_data_c(ges, montages, shapes, moves=None, projs=None, parents=None, bound=None):
     out = ['#include "u64_gas_core.h"']
+    tl = []
+    for i, (cls, t, tracks) in enumerate(TIMELINES):                                  # timelines: tracks of curve keys evaluated by u64_gas_extra.c
+        for j, (prop, keys) in enumerate(tracks):
+            ks = ", ".join("{%rf, %rf, %rf, %rf, %d}" % (k[0], k[1], k[3], k[4], k[2]) for k in keys)
+            out.append(f"static const u64_curve_key tlk_{i}_{j}[] = {{{ks}{', ' if ks else ''}{{0}}}};")
+        tr = ", ".join("{%s, %d, tlk_%d_%d}" % (_cs(prop), len(keys), i, j) for j, (prop, keys) in enumerate(tracks))
+        out.append(f"static const u64_tl_track tlt_{i}[] = {{{tr}{', ' if tr else ''}{{0}}}};")
+        tl.append("{%s, %s, %rf, %d, %d, %s, %s, %s, %d, tlt_%d}" % (_cs(cls), _cs(t["var"]), t["length"], int(t["loop"]), int(t["autoplay"]), _cs(t["update"]), _cs(t["finished"]), _cs(t["direction"]), len(tracks), i))
+    out.append("const u64_timeline_def u64_timelines[] = {%s%s{0}};" % (", ".join(tl), ", " if tl else ""))
     defs = []
     for n in sorted(ges):
         g = ges[n]

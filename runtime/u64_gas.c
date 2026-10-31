@@ -462,4 +462,5 @@ u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
   return NONE_;
 }
 
-void u64_gc_roots_gas(void) { for (int i = 0; i < ntasks; i++) u64_gc_mark_obj(tasks[i]); }
+void u64_gc_roots_extra(void);
+void u64_gc_roots_gas(void) { for (int i = 0; i < ntasks; i++) u64_gc_mark_obj(tasks[i]); u64_gc_roots_extra(); }

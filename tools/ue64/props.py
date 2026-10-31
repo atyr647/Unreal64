@@ -13,6 +13,7 @@ from uasset import R, fname, class_name
 BINARY_STRUCTS = {  # structs serialised as plain bytes instead of a tag stream
     "Vector": None, "Vector3f": 12, "Vector3d": 24, "Rotator": None, "Quat": None, "Transform": None, "Vector2D": None,
     "LinearColor": 16, "Color": 4, "Guid": 16, "IntPoint": 8, "Box": None, "DateTime": 8, "Timespan": 8,
+    "RichCurveKey": 27,
 }
 
 
@@ -102,6 +103,10 @@ def _struct(r, ctx, name, size, start):
     if name in ("Vector", "Rotator") and size in (12, 24):
         v = struct.unpack_from("<3f" if size == 12 else "<3d", r.b, r.p); r.p += size
         return ("vec", v)
+    if name == "RichCurveKey" and size == 27:       # InterpMode, TangentMode, TangentWeightMode (u8), then Time, Value, ArriveTangent, ArriveWeight, LeaveTangent, LeaveWeight
+        im, tm, tw = struct.unpack_from("<BBB", r.b, r.p)
+        t, v, at, aw, lt, lw = struct.unpack_from("<6f", r.b, r.p + 3); r.p += 27
+        return ("key", {"interp": im, "time": t, "value": v, "arrive": at, "leave": lt})
     if name in BINARY_STRUCTS and BINARY_STRUCTS[name] in (None, size):
         raw = bytes(r.b[r.p:r.p + size]); r.p += size
         return ("raw", raw)
@@ -144,7 +149,7 @@ def _value(r, ctx, typ, size, sub, inner, start):
             end_all = r.p + h[2]
             for _ in range(n):
                 if sname in BINARY_STRUCTS or sname == "GameplayTag":
-                    k = BINARY_STRUCTS.get(sname) or 8
+                    k = BINARY_STRUCTS.get(sname) or 8     # (RichCurveKey: 27)
                     elems.append(_struct(r, ctx, sname, k, r.p))
                 else:
                     save = r.p

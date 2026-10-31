@@ -60,3 +60,11 @@ the character / controller types as runtime-backed proxies (`IsAlive` reads the 
 `GSPlayerController` members that this build does not compile defined as runtime glue (`bridge_base.cpp`). Two bugs the suite caught in my own shim:
 a property table that recycled entries (attribute identity broke after 256 lookups) and proxies cached by runtime object slot (slots are reused).
 Not mirrored: the spec's dynamic asset tags (damage-number UI only).
+
+## Compile coverage (measured, `g++ -fsyntax-only` against the shim)
+
+2 of the 45 `.cpp` files compile unmodified (`GSAmmoAttributeSet`, `GSAttributeSetBase`). Every other file stops at its first missing engine header; the
+most common ones are `Abilities/Tasks/AbilityTask.h` (9 files: the ability tasks), `Abilities/GameplayAbility.h` / `GameplayAbilityTargetActor.h` / `GameplayAbilityTypes.h`
+(the GAS plugin core, 6 files), `GameFramework/*` movement / game mode / player state, `AbilitySystemGlobals.h`, `Blueprint/UserWidget.h`. Peeling the tiny files
+(`GSAbilityTypes`, `GSTargetType`, `GSASCActorBase`) shows the next layer is the same: `FGameplayAbilityTargetDataHandle`, effect contexts, `UGameplayAbility`.
+So the work is one well-defined chunk, the GAS plugin core on top of `runtime/u64_gas_core.c`, after which most of the 45 files unblock together.

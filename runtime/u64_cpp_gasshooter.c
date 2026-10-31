@@ -134,15 +134,15 @@ static u64_v w_set_owning_character(u64_obj *s, int c, const u64_v *a)   // SetO
 }
 static u64_v w_equip(u64_obj *s, int c, const u64_v *a) { (void)c; (void)a; if (!O(*u64_ivar(s, "OwningCharacter"))) return NONE_; return NONE_; }   // mesh attach/visibility only
 static u64_v w_unequip(u64_obj *s, int c, const u64_v *a) { (void)s; (void)c; (void)a; return NONE_; }
+static struct { const char *cls; u64_obj *o; } cdo_cache[64]; static int cdo_n;
 static u64_obj *class_default(const char *cls)                    // GetDefaultObject(): one cached, inert instance per class
 {
-  static struct { const char *cls; u64_obj *o; } cache[64]; static int n;
-  for (int i = 0; i < n; i++) if (!strcmp(cache[i].cls, cls)) return cache[i].o;
-  if (n >= 64) return 0;
+  for (int i = 0; i < cdo_n; i++) if (!strcmp(cdo_cache[i].cls, cls)) return cdo_cache[i].o;
+  if (cdo_n >= 64) return 0;
   char b[80]; snprintf(b, sizeof b, "Default__%s", cls);
   u64_obj *o = u64_new(u64_intern(b), u64_intern(cls));
   u64_obj_set_alive(o, 0);
-  cache[n].cls = u64_intern(cls); cache[n++].o = o;
+  cdo_cache[cdo_n].cls = u64_intern(cls); cdo_cache[cdo_n++].o = o;
   return o;
 }
 static u64_v w_add_abilities(u64_obj *s, int c, const u64_v *a)    // AddAbilities: GiveAbility(Spec(Class, level 1, InputID, this)) for every listed ability
@@ -547,3 +547,5 @@ __attribute__((constructor)) static void register_gasshooter(void)
   u64_gas_hooks_active = &gs_hooks;
   u64_game_mode_class = "BP_GameMode";
 }
+
+void u64_gc_roots_project(void) { for (int i = 0; i < cdo_n; i++) u64_gc_mark_obj(cdo_cache[i].o); }

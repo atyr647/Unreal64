@@ -105,9 +105,10 @@ static u64_v forward_of(u64_v rot)
 }
 
 // ---------------------------------------------------------------------------------------------------- transforms with rotation
+static u64_obj *ring[16];                                         // recycled transform objects
 u64_v u64_xform_new(u64_v loc, u64_v rot)
 {
-  static u64_obj *ring[16]; static int next;
+  static int next;
   int i = next++ & 15;
   if (!ring[i]) ring[i] = u64_new(u64_intern("Transform"), "Transform");
   *u64_ivar(ring[i], "Location") = loc.t == U64_VEC ? loc : u64_vec(0, 0, 0);
@@ -275,4 +276,10 @@ int u64_cpp_dispatch(u64_obj *self, const char *fn, int argc, const u64_v *argv,
       if (!strcmp(methods[i].cls, c) && !strcmp(methods[i].fn, fn)) { *ret = methods[i].f(self, argc, argv); return 1; }
   }
   return 0;
+}
+
+void u64_gc_roots_cpp(void)
+{
+  for (int i = 0; i < 16; i++) u64_gc_mark_obj(ring[i]);
+  u64_gc_mark_obj(game_mode); u64_gc_mark_obj(player_pawn_);
 }

@@ -6,9 +6,10 @@
 void u64_mc_broadcast(u64_v *m, int argc, const u64_v *argv);
 void u64_obj_destroy(u64_obj *o);
 
-#define MAX_TIMERS 96
+#define MAX_TIMERS 256
 typedef struct { int live; u64_v dg; float t, period; u64_obj *bt; const char *bname; u64_v barg; u64_obj *co; const char *cfn; } timer_t_;
 static timer_t_ timers[MAX_TIMERS];
+static void timers_full(void) { if (!u64_rt_overflows++ && u64_log) u64_log("  [error] timer table full"); }
 static float now_;
 static int spawn_serial;
 static char names[64][24];
@@ -36,6 +37,7 @@ static u64_v set_timer(int argc, const u64_v *a)
     if (!u64_true(arg(argc, a, 2))) timers[i].period = 0;
     return u64_int(i + 1);
   }
+  timers_full();
   return u64_int(0);
 }
 
@@ -44,9 +46,9 @@ static u64_obj *spawn(u64_v cls, u64_v xform)
   u64_v rot = u64_vec(0, 0, 0);
   if (xform.t == U64_OBJ && xform.u.o) { rot = *u64_ivar(xform.u.o, "Rotation"); xform = *u64_ivar(xform.u.o, "Location"); }   // a transform carries rotation
   if (cls.t != U64_CLASS) return 0;
-  char *nm = names[nnames++ & 63];
-  snprintf(nm, 24, "%.14s_%d", cls.u.s, ++spawn_serial);
-  u64_obj *o = u64_new(nm, cls.u.s);
+  char nm[40];
+  snprintf(nm, sizeof nm, "%.30s_%d", cls.u.s, ++spawn_serial);
+  u64_obj *o = u64_new_copy(nm, cls.u.s);
   *u64_ivar(o, "Location") = xform.t == U64_VEC ? xform : u64_vec(0, 0, 0);
   *u64_ivar(o, "Rotation") = rot;
   if (u64_log) u64_log("  [spawn] %s at (%d, %d, %d) t=%d.%d", nm, (int)xform.u.v[0], (int)xform.u.v[1], (int)xform.u.v[2],
@@ -59,16 +61,19 @@ void u64_timer_broadcast(float t, u64_obj *task, const char *name, u64_v arg)
   for (int i = 0; i < MAX_TIMERS; i++) if (!timers[i].live) {
     timers[i] = (timer_t_){1, {U64_NONE}, t, 0, task, name, arg, 0, 0}; return;
   }
+  timers_full();
 }
 void u64_timer_call(float t, u64_obj *obj, const char *fn, u64_v arg)
 {
   for (int i = 0; i < MAX_TIMERS; i++) if (!timers[i].live) { timers[i] = (timer_t_){1, {U64_NONE}, t, 0, 0, 0, arg, obj, fn}; return; }
+  timers_full();
 }
 void u64_timer_latent(float t, u64_v dg)
 {
   for (int i = 0; i < MAX_TIMERS; i++) if (!timers[i].live) {
     timers[i] = (timer_t_){1, dg, t, 0, 0, 0, {U64_NONE}, 0, 0}; return;
   }
+  timers_full();
 }
 void u64_timers_cancel_for(u64_obj *ability)   // an ending ability cancels its tasks' pending timers
 {
@@ -192,5 +197,13 @@ void u64_world_tick(float dt)
       else u64_call(d.dobj, d.u.s, 0, 0);
     }
   }
+  if (u64_gc_stress || u64_gc_pressure() || u64_array_pressure()) u64_gc_collect();   // safe point: no Blueprint code is running
 }
 
+void u64_gc_roots_natives(void)
+{
+  for (int i = 0; i < MAX_TIMERS; i++) {
+    if (!timers[i].live) continue;
+    u64_gc_mark_v(timers[i].dg); u64_gc_mark_v(timers[i].barg); u64_gc_mark_obj(timers[i].bt); u64_gc_mark_obj(timers[i].co);
+  }
+}

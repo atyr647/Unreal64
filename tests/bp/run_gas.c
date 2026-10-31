@@ -256,5 +256,9 @@ int u64_run_scenarios(int verbose_)
 }
 
 #ifndef U64_NO_MAIN
-int main(void) { return u64_run_scenarios(1) != 0; }
+int main(void)
+{
+  u64_gc_stress = 1;                       // collect after every tick: any dangling reference shows up as a failure
+  return u64_run_scenarios(1) != 0;
+}
 #endif

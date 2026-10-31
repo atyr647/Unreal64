@@ -14,6 +14,7 @@ static u64_v call(u64_obj *o, const char *fn) { return u64_call(o, fn, 0, 0); }
 
 int main(void)
 {
+  u64_gc_stress = 1;                       // collect after every tick: any dangling reference shows up as a failure
   u64_bp_table = u64_bp_registry(); u64_bp_count = u64_bp_registry_count();
   u64_level_load();
   u64_world_begin_play();
@@ -103,6 +104,19 @@ int main(void)
   CHECK(u64_player_pawn() && u64_player_pawn() != hero && u64_obj_alive(u64_player_pawn()));     // respawned after 5 s
   hero = u64_player_pawn(); tick(3);
   CHECK(attr("Health") == 100 && attr("Shield") == 100 && u64_as_int(call(hero, "GetNumWeapons")) == 1);   // a fresh hero with the default inventory
+  // --- garbage collection: 3000 spawn/destroy cycles (plus arrays and temporaries) would exhaust the 1024-object pool without it
+  {
+    int live0 = u64_gc_live();
+    for (int i = 0; i < 3000; i++) {
+      u64_obj *tmp = u64_spawn_actor("BP_Shotgun", u64_vec(0, 0, 0));
+      *u64_ivar(tmp, "Junk") = u64_array_of(8, (u64_v[]){u64_int(1), u64_int(2), u64_int(3), u64_int(4), u64_int(5), u64_int(6), u64_int(7), u64_int(8)});
+      u64_obj_destroy(tmp);
+      if (i % 10 == 0) tick(1);
+    }
+    tick(2);
+    printf("live0=%d live=%d overflows=%d\n", live0, u64_gc_live(), u64_rt_overflows);
+    CHECK(u64_gc_live() < live0 + 80 && u64_rt_overflows == 0);
+  }
   CHECK(u64_rt_overflows == 0);
   printf(fails ? "shooter: %d FAILED\n" : "shooter: ALL PASSED\n", fails);
   return fails != 0;

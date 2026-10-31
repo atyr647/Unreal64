@@ -60,6 +60,7 @@ typedef void (*u64_log_fn)(const char *fmt, ...);
 extern const u64_bpfn *u64_bp_table; extern int u64_bp_count;
 extern u64_native_fn u64_native_hook; extern u64_log_fn u64_log;
 u64_obj *u64_new(const char *name, const char *cls);
+u64_obj *u64_new_copy(const char *name, const char *cls);   // copies the name into the object (for objects created at run time)
 
 // World simulation (u64_natives.c): timers, actor spawning, event dispatch.
 void u64_apply_defaults(u64_obj *o, const char *cls);   // generated (u64_defaults.c)
@@ -115,3 +116,12 @@ float u64_world_dt(void);
 void u64_obj_set_alive(u64_obj *o, int v);
 extern int u64_rt_overflows;   // > 0 if object or variable storage ran out
 extern int u64_trace_calls;   // set to log every call
+
+// Garbage collection (u64_rt.c): call between world ticks only. Modules mark their roots with these.
+extern int u64_gc_stress;
+void u64_gc_collect(void);
+int u64_gc_live(void);
+int u64_gc_pressure(void);                 // 1 when objects or variable slots are above 5/8 of their pools
+void u64_gc_mark_obj(u64_obj *o);
+void u64_gc_mark_v(u64_v v);
+int u64_array_pressure(void);

@@ -35,13 +35,39 @@ const char *u64_intern(const char *s);
 #define ARR_MAX 2048
 static u64_v arr_items[ARR_POOL]; static int arr_used;
 static struct { int off, n, cap, shared; } arrs[ARR_MAX]; static int narr;
+static int arr_free_ids[ARR_MAX], n_arr_free;
+static unsigned char arr_marked[ARR_MAX];
+static u64_v const_cache[1024];                                        // shared constant arrays (class defaults)
 static u64_v arr_new_cap(int cap)
 {
   u64_v r = {U64_ARRAY};
-  if (narr >= ARR_MAX || arr_used + cap > ARR_POOL) { if (!u64_rt_overflows++ && u64_log) u64_log("  [error] array pool exhausted"); return (u64_v){U64_NONE}; }
-  arrs[narr].off = arr_used; arrs[narr].n = 0; arrs[narr].cap = cap; arrs[narr].shared = 0; arr_used += cap;
-  r.u.i = ++narr; return r;
+  if ((!n_arr_free && narr >= ARR_MAX) || arr_used + cap > ARR_POOL) { if (!u64_rt_overflows++ && u64_log) u64_log("  [error] array pool exhausted"); return (u64_v){U64_NONE}; }
+  int k = n_arr_free ? arr_free_ids[--n_arr_free] : narr++;
+  arrs[k].off = arr_used; arrs[k].n = 0; arrs[k].cap = cap; arrs[k].shared = 0; arr_used += cap;
+  r.u.i = k + 1; return r;
 }
+// Garbage collection of arrays: mark what the object graph reaches, free the rest and compact the item pool (ids stay stable).
+void u64_array_gc_begin(void) { memset(arr_marked, 0, sizeof arr_marked); }
+void u64_array_gc_mark(u64_v a)
+{
+  int k = a.u.i - 1;
+  if (k < 0 || k >= narr || arr_marked[k] || arrs[k].off < 0) return;
+  arr_marked[k] = 1;
+  for (int i = 0; i < arrs[k].n; i++) u64_gc_mark_v(arr_items[arrs[k].off + i]);
+}
+void u64_array_gc_sweep(void)
+{
+  int live[ARR_MAX], nl = 0;
+  for (int k = 0; k < narr; k++) {
+    if (arrs[k].off < 0) continue;
+    if (!arr_marked[k]) { arrs[k].off = -1; arr_free_ids[n_arr_free++] = k; continue; }
+    int j = nl++; while (j > 0 && arrs[live[j - 1]].off > arrs[k].off) { live[j] = live[j - 1]; j--; } live[j] = k;
+  }
+  int top = 0;
+  for (int i = 0; i < nl; i++) { int k = live[i]; if (arrs[k].off != top) memmove(&arr_items[top], &arr_items[arrs[k].off], (size_t)arrs[k].cap * sizeof(u64_v)); arrs[k].off = top; top += arrs[k].cap; }
+  arr_used = top;
+}
+int u64_array_pressure(void) { return arr_used > ARR_POOL * 5 / 8 || (narr - n_arr_free) > ARR_MAX * 5 / 8; }
 u64_v u64_array_of(int n, const u64_v *items)
 {
   u64_v a = arr_new_cap(n < 4 ? 4 : n * 2);
@@ -49,7 +75,7 @@ u64_v u64_array_of(int n, const u64_v *items)
   for (int i = 0; i < n; i++) arr_items[arrs[a.u.i - 1].off + i] = items[i];
   arrs[a.u.i - 1].n = n; return a;
 }
-int u64_array_len(u64_v a) { return a.t == U64_ARRAY ? arrs[a.u.i - 1].n : 0; }
+int u64_array_len(u64_v a) { return a.t == U64_ARRAY && arrs[a.u.i - 1].off >= 0 ? arrs[a.u.i - 1].n : 0; }
 u64_v u64_array_get(u64_v a, int i)
 {
   if (a.t != U64_ARRAY || i < 0 || i >= arrs[a.u.i - 1].n) return (u64_v){U64_NONE};
@@ -58,7 +84,7 @@ u64_v u64_array_get(u64_v a, int i)
 // Constant arrays (class defaults) are created once per call site and shared; pushing onto one copies it first.
 u64_v u64_array_const(int id, int n, const u64_v *items)
 {
-  static u64_v cache[1024];
+  u64_v *cache = const_cache;
   if (id >= 0 && id < 1024 && cache[id].t == U64_ARRAY) return cache[id];
   u64_v a = u64_array_of(n, items);
   if (a.t == U64_ARRAY) arrs[a.u.i - 1].shared = 1;
@@ -506,7 +532,7 @@ void u64_actor_init(u64_obj *actor)
   for (int i = 0; i < u64_array_len(ca) && a->nabil < MAX_ABIL; i++) {
     const char *cls = strip_c(nm(u64_array_get(ca, i)));
     char b[64]; snprintf(b, sizeof b, "%s.%s", u64_obj_name(actor), cls);
-    u64_obj *ab = u64_new(u64_intern(b), u64_intern(cls));
+    u64_obj *ab = u64_new_copy(b, u64_intern(cls));
     *u64_ivar(ab, "Avatar") = u64_objv(actor); *u64_ivar(ab, "ASC") = u64_objv(asc);
     *u64_ivar(ab, "SourceObject") = u64_objv(actor);
     a->abil[a->nabil++] = ab;
@@ -521,7 +547,7 @@ u64_obj *u64_give_ability(u64_obj *asc_obj, const char *cls, int level, const ch
   asc_t *a = asc_from(asc_obj);
   if (!a || a->nabil >= MAX_ABIL) { if (a && !u64_rt_overflows++ && u64_log) u64_log("  [error] ability list full"); return 0; }
   char b[96]; snprintf(b, sizeof b, "%s.%s.%d", a->owner ? u64_obj_name(a->owner) : "asc", strip_c(cls), a->nabil);
-  u64_obj *ab = u64_new(u64_intern(b), u64_intern(strip_c(cls)));
+  u64_obj *ab = u64_new_copy(b, u64_intern(strip_c(cls)));
   *u64_ivar(ab, "Avatar") = u64_objv(a->owner); *u64_ivar(ab, "ASC") = u64_objv(asc_obj);
   *u64_ivar(ab, "Level") = u64_int(level); *u64_ivar(ab, "SourceObject") = u64_objv(source);
   if (input_id && *input_id) *u64_ivar(ab, "AbilityInputID") = u64_name(input_id);
@@ -912,4 +938,23 @@ int u64_sweep_sphere(const float start[3], const float end[3], float radius, u64
   }
   if (hit) *t_out = best;
   return hit;
+}
+
+// GC roots: every ability system whose avatar lives, its abilities, active effects (their specs and sources), overlap pairs and the
+// constant arrays. A destroyed actor's ability system and effects are released here so their slots can be reused.
+void u64_gc_roots_core(void)
+{
+  for (int i = 0; i < MAX_ASC; i++) {
+    asc_t *a = &ascs[i];
+    if (!a->used) continue;
+    if (!u64_obj_alive(a->owner)) {
+      for (int k = 0; k < MAX_ACTIVE; k++) if (active[k].live && (active[k].target == a || active[k].source == a)) active[k].live = 0;
+      a->used = 0; continue;
+    }
+    u64_gc_mark_obj(a->obj); u64_gc_mark_obj(a->owner);
+    for (int k = 0; k < a->nabil; k++) u64_gc_mark_obj(a->abil[k]);
+  }
+  for (int k = 0; k < MAX_ACTIVE; k++) if (active[k].live) { u64_gc_mark_obj(active[k].spec); if (active[k].source) u64_gc_mark_obj(active[k].source->obj); }
+  for (int k = 0; k < npairs; k++) { u64_gc_mark_obj(pairs[k].o); u64_gc_mark_obj(pairs[k].other); }
+  for (int k = 0; k < 1024; k++) if (const_cache[k].t == U64_ARRAY) u64_array_gc_mark(const_cache[k]);
 }

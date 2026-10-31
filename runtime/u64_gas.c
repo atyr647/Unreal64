@@ -124,7 +124,7 @@ void u64_notify_stack_tasks(u64_obj *asc, const char *effect)
 static u64_obj *new_task(const char *cls, u64_obj *ability)
 {
   static int serial; char b[48]; snprintf(b, sizeof b, "%s_%d", cls, ++serial);
-  u64_obj *t = u64_new(u64_intern(b), u64_intern(cls));
+  u64_obj *t = u64_new_copy(b, u64_intern(cls));
   *u64_ivar(t, "Ability") = u64_objv(ability);
   return t;
 }
@@ -447,3 +447,5 @@ u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
   if (IS("OnExecute") || IS("StackChange") || IS("UpdateDamage")) return NONE_;
   return NONE_;
 }
+
+void u64_gc_roots_gas(void) { for (int i = 0; i < ntasks; i++) u64_gc_mark_obj(tasks[i]); }

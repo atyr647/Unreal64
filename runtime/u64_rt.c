@@ -2,20 +2,24 @@
 // Static storage only (no malloc) so it runs on the N64 as is. Natives are provided through u64_native_hook.
 #include "u64_rt.h"
 #include <stdio.h>
+#include <stddef.h>
+void u64_array_gc_begin(void); void u64_array_gc_sweep(void); void u64_array_gc_mark(u64_v a);
 u64_v u64_native(u64_obj *self, const char *fn, int argc, const u64_v *argv);
 
-#define MAX_OBJS 1024
+#define MAX_OBJS 2048
 #define ARENA_SLOTS 32768          // shared variable storage, one slot per variable
 
-typedef struct slot { const char *k; u64_v v; struct slot *next; } slot_t;
-typedef struct { slot_t *head, *tail; int n; } vars_t;       // singly linked: a slot's address never changes (delegate bindings key on it)
-struct u64_obj { const char *name; const char *cls; vars_t iv, pf; int alive; };
+typedef struct slot { const char *k; u64_v v; struct slot *next; struct u64_obj *owner; } slot_t;
+typedef struct { slot_t *head, *tail; int n; struct u64_obj *owner; } vars_t;       // singly linked: a slot's address never changes (delegate bindings key on it)
+struct u64_obj { const char *name; const char *cls; vars_t iv, pf; int alive; char namebuf[40]; };
 
 static struct u64_obj objs[MAX_OBJS];
 static int nobjs;
 static struct u64_obj null_obj = {"None", "None"};
 static slot_t arena[ARENA_SLOTS];
 static int arena_used;
+static slot_t *free_slots;                    // slots of collected objects
+static int free_objs[MAX_OBJS], n_free_objs;
 int u64_rt_overflows;              // non-zero means storage ran out: a test and the runtime report treat it as a failure
 
 const u64_bpfn *u64_bp_table;   // set by the generated registry
@@ -28,10 +32,18 @@ static void overflow(const char *what)
   if (!u64_rt_overflows++ && u64_log) u64_log("  [error] %s exhausted: variables would alias", what);
 }
 
-u64_obj *u64_new(const char *name, const char *cls)
+static struct u64_obj *obj_take(void)
 {
-  if (nobjs >= MAX_OBJS) { overflow("object pool"); return &null_obj; }
-  struct u64_obj *o = &objs[nobjs++];
+  struct u64_obj *o;
+  if (n_free_objs) o = &objs[free_objs[--n_free_objs]];
+  else if (nobjs >= MAX_OBJS) { overflow("object pool"); return 0; }
+  else o = &objs[nobjs++];
+  memset(o, 0, sizeof *o);
+  o->iv.owner = o->pf.owner = o;
+  return o;
+}
+static u64_obj *obj_init(struct u64_obj *o, const char *name, const char *cls)
+{
   o->name = name; o->cls = cls; o->alive = 1;
   // Construction order: the root C++ class first, each class's constructor then its Blueprint defaults, down to the leaf.
   const char *chain[10]; int n = 0;
@@ -39,15 +51,29 @@ u64_obj *u64_new(const char *name, const char *cls)
   for (int i = n - 1; i >= 0; i--) { u64_cpp_construct(o, chain[i]); u64_apply_defaults(o, chain[i]); }
   return o;
 }
+u64_obj *u64_new(const char *name, const char *cls)       // name must outlive the object (a literal or interned string)
+{
+  struct u64_obj *o = obj_take();
+  return o ? obj_init(o, name, cls) : &null_obj;
+}
+u64_obj *u64_new_copy(const char *name, const char *cls)    // spawned objects: the name is copied into the object, nothing is interned
+{
+  struct u64_obj *o = obj_take();
+  if (!o) return &null_obj;
+  snprintf(o->namebuf, sizeof o->namebuf, "%s", name);
+  return obj_init(o, o->namebuf, cls);
+}
 
 static u64_v *vars_find(vars_t *t, const char *k) { for (slot_t *s = t->head; s; s = s->next) if (s->k == k || !strcmp(s->k, k)) return &s->v; return 0; }
 static u64_v *vars_get(vars_t *t, const char *k)
 {
   u64_v *f = vars_find(t, k);
   if (f) return f;
-  if (arena_used >= ARENA_SLOTS) { overflow("variable arena"); static slot_t dead; return &dead.v; }
-  slot_t *s = &arena[arena_used++];
-  s->k = k; memset(&s->v, 0, sizeof(u64_v)); s->next = 0;
+  slot_t *s;
+  if (free_slots) { s = free_slots; free_slots = s->next; }
+  else if (arena_used >= ARENA_SLOTS) { overflow("variable arena"); static slot_t dead; return &dead.v; }
+  else s = &arena[arena_used++];
+  s->k = k; memset(&s->v, 0, sizeof(u64_v)); s->next = 0; s->owner = t->owner;
   if (t->tail) t->tail->next = s; else t->head = s;
   t->tail = s; t->n++;
   return &s->v;
@@ -121,8 +147,78 @@ u64_v u64_comp(u64_obj *owner, const char *name)
   u64_v *slot = u64_ivar(owner, u64_intern(key));
   if (slot->t == U64_OBJ) return *slot;
   char nm[64]; snprintf(nm, sizeof nm, "%s.%s", owner->name, name);
-  u64_obj *c = u64_new(u64_intern(nm), "Component");
+  u64_obj *c = u64_new_copy(nm, "Component");
   *u64_ivar(c, "Owner") = u64_objv(owner);
   *slot = u64_objv(c);
   return *slot;
+}
+
+// ---------------------------------------------------------------------------------------------------- garbage collection
+// Mark and sweep over objects, their variable slots and (via the module hooks) arrays. Runs only between world ticks, when no
+// Blueprint code is on the C stack, so every live value is reachable from the roots below. Roots: alive actors, delegate targets
+// of reachable multicasts, and what the modules register (timers, tasks, ability system, game state).
+static unsigned char gc_mark[MAX_OBJS];
+static int gc_stack[MAX_OBJS], gc_sp;
+static int obj_index(u64_obj *o) { return o >= objs && o < objs + MAX_OBJS ? (int)(o - objs) : -1; }
+void u64_gc_mark_obj(u64_obj *o)
+{
+  int i = obj_index(o);
+  if (i < 0 || gc_mark[i]) return;
+  gc_mark[i] = 1; gc_stack[gc_sp++] = i;
+}
+void u64_gc_mark_v(u64_v v)
+{
+  if (v.t == U64_OBJ) u64_gc_mark_obj(v.u.o);
+  else if (v.t == U64_DELEGATE) u64_gc_mark_obj(v.dobj);
+  else if (v.t == U64_ARRAY) u64_array_gc_mark(v);
+}
+static void gc_drain(void)
+{
+  while (gc_sp) {
+    struct u64_obj *o = &objs[gc_stack[--gc_sp]];
+    for (slot_t *s = o->iv.head; s; s = s->next) u64_gc_mark_v(s->v);
+    for (slot_t *s = o->pf.head; s; s = s->next) u64_gc_mark_v(s->v);
+  }
+}
+__attribute__((weak)) void u64_gc_roots_natives(void) {}
+__attribute__((weak)) void u64_gc_roots_gas(void) {}
+__attribute__((weak)) void u64_gc_roots_core(void) {}
+__attribute__((weak)) void u64_gc_roots_cpp(void) {}
+__attribute__((weak)) void u64_gc_roots_project(void) {}
+int u64_gc_stress;                         // tests: collect after every tick to flush out dangling references
+int u64_gc_live(void) { return nobjs - n_free_objs; }
+int u64_gc_pressure(void) { return nobjs - n_free_objs > MAX_OBJS * 5 / 8 || arena_used > ARENA_SLOTS * 5 / 8 ? 1 : 0; }
+void u64_gc_collect(void)
+{
+  memset(gc_mark, 0, sizeof gc_mark); gc_sp = 0;
+  u64_array_gc_begin();
+  for (int i = 0; i < nobjs; i++) if (objs[i].alive && u64_obj_is_actor(&objs[i])) u64_gc_mark_obj(&objs[i]);
+  u64_gc_roots_natives(); u64_gc_roots_gas(); u64_gc_roots_core(); u64_gc_roots_cpp(); u64_gc_roots_project();
+  gc_drain();
+  for (int changed = 1; changed; ) {                                   // delegate targets stay alive while their multicast's owner does
+    changed = 0;
+    for (int i = 0; i < nbinds; i++) {
+      slot_t *sl = (slot_t *)((char *)binds[i].m - offsetof(slot_t, v));
+      int oi = sl >= arena && sl < arena + ARENA_SLOTS ? obj_index(sl->owner) : -1;
+      if (oi < 0 || gc_mark[oi]) {
+        int before = gc_sp; u64_gc_mark_v(binds[i].d);
+        if (gc_sp != before) { changed = 1; gc_drain(); }
+      }
+    }
+  }
+  for (int i = 0; i < nbinds; ) {                                      // drop bindings whose owner is gone
+    slot_t *sl = (slot_t *)((char *)binds[i].m - offsetof(slot_t, v));
+    int oi = sl >= arena && sl < arena + ARENA_SLOTS ? obj_index(sl->owner) : -1;
+    if (oi >= 0 && !gc_mark[oi]) binds[i] = binds[--nbinds]; else i++;
+  }
+  for (int i = 0; i < nobjs; i++) {
+    struct u64_obj *o = &objs[i];
+    if (gc_mark[i] || !o->cls || !strcmp(o->cls, "__free")) continue;
+    for (vars_t *vt = &o->iv; vt; vt = vt == &o->iv ? &o->pf : 0)
+      for (slot_t *s = vt->head, *nx; s; s = nx) { nx = s->next; s->next = free_slots; s->k = "__free"; free_slots = s; }
+    o->iv.head = o->iv.tail = o->pf.head = o->pf.tail = 0; o->iv.n = o->pf.n = 0;
+    o->name = "__free"; o->cls = "__free"; o->alive = 0;
+    free_objs[n_free_objs++] = i;
+  }
+  u64_array_gc_sweep();
 }

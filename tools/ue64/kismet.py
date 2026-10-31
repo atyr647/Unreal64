@@ -44,11 +44,12 @@ class Node:
 
 
 class Decoder:
-    def __init__(self, script: bytes, names, resolve, ue4=517, ue5=0, field_path=None, old_let=False):
+    def __init__(self, script: bytes, names, resolve, ue4=517, ue5=0, field_path=None, old_let=False, owner=None):
         self.b, self.p, self.mem = script, 0, 0
         self.names, self.resolve = names, resolve  # resolve(pkg_index) -> str
         self.field_path = (ue4 >= 518 or ue5 > 0) if field_path is None else field_path  # FFieldPath operands (4.25+)
-        self.ue5 = ue5
+        self.ue5, self.ue4 = ue5, ue4
+        self.owner = (ue5 > 0) if owner is None else owner        # field paths end with the owning struct's package index (UE5; some 4.2x saves)
         self.old_let = old_let   # pre-4.1x dialect: EX_Let carries no property operand
         self.lwc = ue5 >= 1004                       # doubles in vector/rotator/transform constants
         self.starts: dict[int, Node] = {}
@@ -88,8 +89,8 @@ class Decoder:
         mem0 = self.mem
         n = self.i32()
         path = [self.fname() for _ in range(n)]  # names of the path
-        if self.ue5:
-            self.i32()                           # UE5 also stores the owning struct's package index
+        if self.owner:
+            self.i32()
         self.mem = mem0 + 8                      # in memory the whole path is one 8-byte pointer
         return path[0] if path else ""            # innermost first: the property name, then its owners
 

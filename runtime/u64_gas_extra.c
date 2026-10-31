@@ -438,7 +438,7 @@ int u64_native_gas_extra(u64_obj *self, const char *fn, int argc, const u64_v *a
     u64_obj *t = u64_task_new("GSAT_WaitChangeFOV", O(x)), *cam = O(A(argc, a, 2));
     float dur = F(A(argc, a, 4)); if (dur < 0.001f) dur = 0.001f;
     *u64_ivar(t, "CameraComponent") = A(argc, a, 2); *u64_ivar(t, "TargetFOV") = A(argc, a, 3); *u64_ivar(t, "Duration") = u64_float(dur);
-    *u64_ivar(t, "StartFOV") = cam ? *u64_ivar(cam, "FieldOfView") : u64_float(90);
+    *u64_ivar(t, "StartFOV") = cam && u64_ivar(cam, "FieldOfView")->t == U64_FLOAT ? *u64_ivar(cam, "FieldOfView") : u64_float(90.0f);   // UCameraComponent::FieldOfView defaults to 90
     *u64_ivar(t, "StartTime") = u64_float(u64_world_time()); *u64_ivar(t, "LerpCurve") = A(argc, a, 5);
     *out = u64_objv(t); return 1;
   }

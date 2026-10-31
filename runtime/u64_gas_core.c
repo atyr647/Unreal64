@@ -920,6 +920,7 @@ void u64_remove_ge_with_tags(u64_obj *asc, const char *tag)   // RemoveActiveEff
 }
 float u64_max_speed(u64_obj *actor)                            // UGDCharacterMovementComponent::GetMaxSpeed
 {
+  if (u64_gas_hooks_active && u64_gas_hooks_active->max_speed) { float v = u64_gas_hooks_active->max_speed(actor); if (v >= 0) return v; }
   asc_t *a = asc_from(u64_asc_of(actor));
   if (!a) return 0;
   if (attr(a, "Health")->cur <= 0) return 0;

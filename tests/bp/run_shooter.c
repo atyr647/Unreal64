@@ -169,6 +169,42 @@ int main(void)
     CHECK(fabsf((sh0 - attr("Shield")) - 8 * (6.0f * 100.0f / 120.0f)) < 0.01f);                         // 8 pellets * 6 * 100/120
     hero = me;
   }
+  // --- aim down sights (GA_RifleSecondary): GE_RifleAiming and a FOV change to Targeting1PFOV (60) in 0.1 s; releasing restores Default1PFOV (90) in 0.05 s
+  {
+    u64_obj *me = hero;
+    for (int i = 0; i < u64_as_int(call(me, "GetNumWeapons")) && strcmp(u64_obj_class(call(me, "GetCurrentWeapon").u.o), "BP_Rifle"); i++) call(me, "NextWeapon");
+    tick(60);
+    u64_obj *cam = u64_comp(me, "FirstPersonCamera").u.o;
+    CHECK(!u64_tag_has(u64_asc_of(me), "Weapon.Rifle.Aiming"));
+    CHECK(u64_input_press(me, "EGSAbilityInputID::SecondaryFire"));
+    tick(1);
+    float fov_mid = u64_ivar(cam, "FieldOfView")->u.f;
+    CHECK(fov_mid < 90 && fov_mid > 60);                                              // mid-transition
+    tick(5);
+    CHECK(fabsf(u64_ivar(cam, "FieldOfView")->u.f - 60.0f) < 1e-4f && u64_tag_has(u64_asc_of(me), "Weapon.Rifle.Aiming"));
+    u64_input_release_id(me, "EGSAbilityInputID::SecondaryFire");
+    tick(4);
+    CHECK(fabsf(u64_ivar(cam, "FieldOfView")->u.f - 90.0f) < 1e-4f);
+    tick(30);
+    CHECK(u64_tag_count(u64_asc_of(me), "Weapon.Rifle.Aiming") <= u64_tag_count(u64_asc_of(me), "Weapon.Rifle.AimingRemoval"));   // spread logic: aiming only while Aiming > AimingRemoval
+  }
+  // --- movement speed (UGSCharacterMovementComponent::GetMaxSpeed): MoveSpeed 600; sprinting x1.4, aiming down sights x0.8
+  {
+    u64_obj *me = hero;
+    CHECK(u64_max_speed(me) == 600.0f);
+    CHECK(u64_input_press(me, "EGSAbilityInputID::Sprint"));
+    tick(3);
+    CHECK(u64_tag_has(u64_asc_of(me), "State.Sprinting") && fabsf(u64_max_speed(me) - 600.0f * 1.4f) < 0.01f);
+    u64_input_release_id(me, "EGSAbilityInputID::Sprint");
+    tick(10);
+    CHECK(u64_max_speed(me) == 600.0f && !u64_tag_has(u64_asc_of(me), "State.Sprinting"));
+    CHECK(u64_input_press(me, "EGSAbilityInputID::SecondaryFire"));
+    tick(10);
+    CHECK(fabsf(u64_max_speed(me) - 600.0f * 0.8f) < 0.01f);
+    u64_input_release_id(me, "EGSAbilityInputID::SecondaryFire");
+    tick(10);
+    CHECK(u64_max_speed(me) == 600.0f);
+  }
   // --- rocket launcher (GA_RocketLauncherPrimaryInstant): a projectile, then an explosion (radius 200) of RocketDamage 60 -> 60 * 100/120 = 50
   {
     u64_obj *enemy = u64_find("BP_HeroCharacter2"), *me = hero;

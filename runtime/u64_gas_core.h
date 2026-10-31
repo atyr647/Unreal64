@@ -92,6 +92,7 @@ typedef struct {
   int (*can_activate)(u64_obj *ability);                                                // UGameplayAbility::CanActivateAbility additions; 0 blocks
   int (*check_cost)(u64_obj *ability);                                                  // CheckCost additions (GSCheckCost)
   void (*apply_cost)(u64_obj *ability);                                                 // ApplyCost additions (GSApplyCost), run before the cost effect
+  float (*max_speed)(u64_obj *actor);                                                   // the project's GetMaxSpeed; negative = use the default
   void (*world_tick)(float dt);                                                         // per-frame project code (actor overlap notifications, ...)
 } u64_gas_hooks;
 extern const u64_gas_hooks *u64_gas_hooks_active;

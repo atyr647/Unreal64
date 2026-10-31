@@ -868,6 +868,7 @@ static void gs_world_tick(float dt)
 }
 
 // ---------------------------------------------------------------------------------------------------- registration
+static u64_v mv_start_sprinting(u64_obj *c, int n, const u64_v *a), mv_stop_sprinting(u64_obj *c, int n, const u64_v *a), mv_start_ads(u64_obj *c, int n, const u64_v *a), mv_stop_ads(u64_obj *c, int n, const u64_v *a);
 typedef struct { const char *cls, *fn; u64_v (*f)(u64_obj *, int, const u64_v *); } m_t;
 static const m_t methods[] = {
   {"GSCharacterBase", "IsAlive", cb_is_alive}, {"GSCharacterBase", "GetShield", cb_get_shield}, {"GSCharacterBase", "GetMaxShield", cb_get_max_shield},
@@ -899,10 +900,35 @@ static const m_t methods[] = {
   {"GSGATA_Trace", "StartTargeting", tr_start_targeting}, {"GSGATA_Trace", "ConfirmTargetingAndContinue", tr_confirm}, {"GSGATA_Trace", "StopTargeting", tr_stop_targeting},
   {"GSGameplayAbility", "MakeEffectContainerSpec", ga_make_container_spec}, {"GSGameplayAbility", "OnAvatarSet", ga_on_avatar_set},
   {"GSHeroCharacter", "PossessedBy", h_possessed_by},
+  {"GSCharacterBase", "StartSprinting", mv_start_sprinting}, {"GSCharacterBase", "StopSprinting", mv_stop_sprinting},
+  {"GSCharacterBase", "StartAimDownSights", mv_start_ads}, {"GSCharacterBase", "StopAimDownSights", mv_stop_ads},
   {"GSPickup", "PickupOnTouch", pk_pickup_on_touch}, {"GSPickup", "RespawnPickup", pk_respawn}, {"GSWeapon", "PickUpOnTouch", w_pickup_on_touch},
   {"GSGameplayAbility", "GSCheckCost", ga_gs_check_cost_default}, {"GSGameplayAbility", "GSApplyCost", ga_noop},
 };
-static const u64_gas_hooks gs_hooks = {gs_pre_attribute_change, gs_post_execute, gs_zero_health, gs_can_activate, gs_check_cost, gs_apply_cost, gs_world_tick};
+// UGSCharacterMovementComponent::GetMaxSpeed (SprintSpeedMultiplier 1.4, ADSSpeedMultiplier 0.8, KnockedDownSpeedMultiplier 0.4)
+static float gs_max_speed(u64_obj *owner)
+{
+  if (!is_class(owner, "GSCharacterBase")) return -1.0f;
+  u64_obj *asc = u64_asc_of(owner);
+  if (!is_alive(owner)) return 0.0f;
+  if (asc && u64_tag_count(asc, "State.Interacting") > u64_tag_count(asc, "State.InteractingRemoval")) return 0.0f;
+  float ms = u64_attr_get(asc, "MoveSpeed");
+  if (asc && u64_tag_count(asc, "State.KnockedDown")) return ms * 0.4f;
+  if (u64_true(*u64_ivar(owner, "RequestToStartSprinting"))) return ms * 1.4f;
+  if (u64_true(*u64_ivar(owner, "RequestToStartADS"))) return ms * 0.8f;
+  return ms;
+}
+static u64_v mv_set_flag(u64_obj *comp, const char *flag, int v)       // Start/StopSprinting, Start/StopAimDownSights on the movement component
+{
+  u64_obj *owner = !strcmp(u64_obj_class(comp), "Component") ? O(*u64_ivar(comp, "Owner")) : comp;   // movement is modelled on the character itself
+  if (owner) *u64_ivar(owner, flag) = u64_bool(v);
+  return NONE_;
+}
+static u64_v mv_start_sprinting(u64_obj *c, int n, const u64_v *a) { (void)n; (void)a; return mv_set_flag(c, "RequestToStartSprinting", 1); }
+static u64_v mv_stop_sprinting(u64_obj *c, int n, const u64_v *a) { (void)n; (void)a; return mv_set_flag(c, "RequestToStartSprinting", 0); }
+static u64_v mv_start_ads(u64_obj *c, int n, const u64_v *a) { (void)n; (void)a; return mv_set_flag(c, "RequestToStartADS", 1); }
+static u64_v mv_stop_ads(u64_obj *c, int n, const u64_v *a) { (void)n; (void)a; return mv_set_flag(c, "RequestToStartADS", 0); }
+static const u64_gas_hooks gs_hooks = {gs_pre_attribute_change, gs_post_execute, gs_zero_health, gs_can_activate, gs_check_cost, gs_apply_cost, gs_max_speed, gs_world_tick};
 
 __attribute__((constructor)) static void register_gasshooter(void)
 {

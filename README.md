@@ -41,3 +41,11 @@ the N64 VI resampling blur (MAE ≈ 3/255). See `docs/img/compare_ares_linux_1.p
 `shooterdemo/` builds a ROM that runs GASShooter's converted Blueprints, the C++ ports and the scenario suite (`tests/bp/run_shooter.c`)
 on the console: `docs/img/ares_shooter_suite.png` shows it passing (same floating-point results as the host run). Rebuild with
 `python3 tools/ue64/bpc.py <GASShooter>/Content shooterdemo/src/gen && shooterdemo/sync.sh && make -C shooterdemo` (N64_INST set).
+
+The suite checks exact values derived from the assets and the C++: attributes, weapons and pickups, firing (rifle / shotgun / rocket launcher, headshots on the
+mesh's `b_head` physics body), knock down / revive / death / respawn, the chest (3 s hold, loot, GE_ChestOpen) and the door (timeline-moved component) through
+the interaction trace. Collision comes from the assets (convex hulls, physics-asset bodies, collision profiles and responses; `runtime/u64_collision.c`).
+
+`cpp2mips/` is the other way to run project C++: the project's own `.cpp` files compiled with `mips64-elf-g++` against a small Unreal API shim. The ammo
+attribute rules of the scenario suite run in the unmodified `GSAmmoAttributeSet.cpp` that way (`cpp2mips/run_shooter_cxx.sh`, `CXX_AMMO=1 make -C shooterdemo`);
+`cpp2mips/README.md` has the measured size of the rest.

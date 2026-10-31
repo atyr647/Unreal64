@@ -153,7 +153,7 @@ a real map, 91 Blueprints and ~8k lines of C++. Status:
   `UGSAttributeSetBase`/`UGSAmmoAttributeSet` rules (shield absorbs damage, clamps, MoveSpeed range, bounty), `AGSWeapon`
   (ammo, abilities, drop), `AGSHeroCharacter` inventory (add/equip/next/previous/remove-all with the ring drop), ammo pickup
   effects, KnockDown / FinishDying and the game mode respawn. Expected values come from the assets and the C++.
-* Not yet ported: `UGSAbilitySystemComponent` (effect containers, target data), `GSGameplayAbility`, target actors (line /
+* Not yet ported: see the "missing" list in the generated compat_report.txt (54 of 248 calls): effect containers and target data, target actors, ability tasks, timelines, widget creation, interaction, pickups, projectile, damage execution (`GSDamageExecutionCalc`).
   sphere trace), ability tasks (montage-for-mesh, wait-interactable, wait-input, FOV, move-relative-location), pickups,
   interaction, player controller / HUD, projectile, damage execution (`GSDamageExecutionCalc`).
 * Runtime limits found and fixed by this project: the interned-string pool (8 KB) silently turned names into "?"; attribute,

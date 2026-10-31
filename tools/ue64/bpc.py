@@ -69,15 +69,19 @@ def main(content, out):
     with open(os.path.join(out, "compat_report.txt"), "w") as fh:
         fh.write(f"functions compiled: {nfun} in {files} files\nunsupported constructs: {unsup}\nskipped (undecodable): {skipped}\n")
         import re
-        rt = open(os.path.join(os.path.dirname(__file__), "..", "..", "runtime", "u64_natives.c")).read()
-        rt += open(os.path.join(os.path.dirname(__file__), "..", "..", "runtime", "u64_gas.c")).read()
-        rt += open(os.path.join(os.path.dirname(__file__), "..", "..", "runtime", "u64_gas_core.c")).read()
-        impl = set(re.findall(r'IS\("([A-Za-z_0-9]+)"\)', rt))
+        rtdir = os.path.join(os.path.dirname(__file__), "..", "..", "runtime")
+        rt = "".join(open(os.path.join(rtdir, f)).read() for f in sorted(os.listdir(rtdir)) if f.endswith(".c"))
+        # natives are IS("Name") branches and project-port methods registered as {"Class", "Name", fn} table rows
+        impl = set(re.findall(r'\{"[A-Za-z_0-9]+", "([A-Za-z_0-9]+)", [a-z_0-9]+\}', rt))
+        impl |= set(re.findall(r'IS\("([A-Za-z_0-9]+)"\)', rt))
+        blk = re.search(r'presentation\[\] = \{(.*?)0\};', rt, re.S)
+        pres = set(re.findall(r'"([A-Za-z_0-9]+)"', blk.group(1))) if blk else set()   # accepted and ignored: audio / UI / cue visuals
+        impl |= pres
         bpfn = {codegen.ident(fn) for _, fn in reg}
         external = sorted(n for n in natives if n not in bpfn)  # calls into engine/plugin code, not other compiled BPs
         done = [n for n in external if n in impl]
         missing = [n for n in external if n not in impl]
-        fh.write(f"native coverage: {len(done)}/{len(external)} engine functions implemented in runtime/u64_natives.c\n")
+        fh.write(f"native coverage: {len(done)}/{len(external)} engine functions implemented in runtime/ ({len([n for n in done if n in pres])} of them presentation-only: accepted and ignored)\n")
         fh.write("missing (the runtime work queue):\n  " + "\n  ".join(missing) + "\n")
     print(f"{nfun} functions in {files} files; {len(natives)} distinct callees; unsupported: {unsup}")
 

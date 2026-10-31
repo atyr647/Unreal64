@@ -346,6 +346,65 @@ u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
   }
   if (IS("RemoveActiveGameplayEffectBySourceEffect")) { u64_remove_ge_class(asc_for(self), nm(x)); return u64_int(0); }
   if (IS("HasMatchingGameplayTag")) return u64_bool(tag_arg_has(asc_for(self), x));
+  if (IS("HasAnyMatchingGameplayTags")) return u64_bool(tag_arg_has(asc_for(self), x));
+  if (IS("HasTag")) {                                                // FGameplayTagContainer::HasTag(tag): a contained tag equals or is a child of it
+    for (int i = 0; i < u64_array_len(x); i++) { const char *h = nm(u64_array_get(x, i)), *q = nm(y); size_t n = strlen(q); if (!strncmp(h, q, n) && (h[n] == 0 || h[n] == '.')) return u64_bool(1); }
+    return u64_bool(0);
+  }
+  if (IS("K2_AddLooseGameplayTags") || IS("K2_RemoveLooseGameplayTags")) {          // (tags, count)
+    int n = y.t == U64_NONE ? 1 : y.u.i, sign = IS("K2_AddLooseGameplayTags") ? 1 : -1; u64_obj *asc = asc_for(self);
+    if (x.t == U64_ARRAY) for (int i = 0; i < u64_array_len(x); i++) u64_tag_add_loose(asc, nm(u64_array_get(x, i)), sign * n);
+    else u64_tag_add_loose(asc, nm(x), sign * n);
+    return NONE_;
+  }
+  if (IS("K2_GetTagCount")) return u64_int(u64_tag_count(asc_for(self), nm(x)));
+  if (IS("GetTimeSeconds")) return u64_float(u64_world_time());
+  if (IS("PrintString")) { if (u64_log) u64_log("  [print] %s", nm(y)); return NONE_; }
+  if (IS("IsValidClass")) return u64_bool(*nm(x) != 0);
+  if (IS("IsLocallyControlled") || IS("IsLocalPlayerController")) return u64_bool(self && self == u64_player_pawn());
+  if (IS("GetAbilitySystemComponentFromActorInfo")) return *u64_ivar(self, "ASC");
+  if (IS("GetCurrentSourceObject") || IS("K2_GetSourceObject")) return *u64_ivar(self, "SourceObject");
+  if (IS("GetFloatAttributeFromAbilitySystemComponent")) {                         // (actor, attribute, out found)
+    u64_obj *asc = asc_for(obj_arg(x)); u64_out(A(argc, a, 2), u64_bool(asc != 0));
+    return u64_float(asc ? u64_attr_get(asc, nm(y)) : 0.0f);
+  }
+  if (IS("RemoveActiveGameplayEffect")) { u64_remove_ge(x.u.i); return u64_int(0); }
+  if (IS("FindAbilitySpecHandleForClass") || IS("GetPrimaryAbilityInstanceFromClass")) {   // a spec handle / primary instance is the granted ability object
+    u64_obj *list[64]; int n = u64_asc_abilities(asc_for(self), list, 64);
+    for (int i = 0; i < n; i++) if (u64_class_is(u64_obj_class(list[i]), nm(x))) return u64_objv(list[i]);
+    return u64_objv(0);
+  }
+  if (IS("GetPrimaryAbilityInstanceFromHandle")) return x;
+  if (IS("IsAbilitySpecHandleValid")) return u64_bool(obj_arg(x) != 0);
+  if (IS("IsPrimaryAbilityInstanceActive")) return u64_bool(obj_arg(x) && u64_true(*u64_ivar(obj_arg(x), "Active")));
+  if (IS("TryActivateAbilitiesByTag")) {                                           // ASC: activate every ability whose tags match; true if any did
+    u64_obj *asc = asc_for(self), *list[64]; int n = u64_asc_abilities(asc, list, 64), any = 0;
+    for (int i = 0; i < n; i++) {
+      u64_v tags = *u64_ivar(list[i], "AbilityTags");
+      for (int k = 0; k < u64_array_len(tags); k++) {
+        const char *h = nm(u64_array_get(tags, k));
+        int match = 0; if (x.t == U64_ARRAY) { for (int j = 0; j < u64_array_len(x); j++) { const char *q = nm(u64_array_get(x, j)); size_t m = strlen(q); if (!strncmp(h, q, m) && (h[m] == 0 || h[m] == '.')) match = 1; } }
+        if (match) { any |= u64_ability_try_activate(list[i]); break; }
+      }
+    }
+    return u64_bool(any);
+  }
+  if (IS("K2_GetRootComponent")) return *u64_ivar(self, "RootComponent");
+  if (IS("K2_GetComponentLocation")) {                                             // component world location = owner + R(yaw) * RelativeLocation
+    u64_v *o = u64_ivar(self, "Owner"); u64_obj *owner = o->t == U64_OBJ ? o->u.o : self;
+    u64_v base = *u64_ivar(owner, "Location"), rot = *u64_ivar(owner, "Rotation"), rel = *u64_ivar(self, "RelativeLocation");
+    if (base.t != U64_VEC) base = u64_vec(0, 0, 0);
+    if (rel.t != U64_VEC) rel = u64_vec(0, 0, 0);
+    float yaw = (rot.t == U64_VEC ? rot.u.v[1] : 0) * 0.017453292f, c = cosf(yaw), sn = sinf(yaw);
+    return u64_vec(base.u.v[0] + rel.u.v[0] * c - rel.u.v[1] * sn, base.u.v[1] + rel.u.v[0] * sn + rel.u.v[1] * c, base.u.v[2] + rel.u.v[2]);
+  }
+  // Presentation only: audio, UI widgets, HUD reticles, camera shakes and gameplay-cue visuals have no counterpart on the target
+  // (no audio / widget system is ported). Accepted and ignored, not modelled.
+  static const char *const presentation[] = {"PlaySound2D", "PlaySoundAtLocation", "SpawnSoundAttached", "ClientPlayCameraShake", "AddChildToCanvas",
+    "RemoveFromParent", "SetActiveWidgetIndex", "SetAlignment", "SetAnchors", "SetAutoSize", "SetBrushFromAtlasInterface", "SetBrushTintColor",
+    "SetColorAndOpacity", "SetFont", "SetPosition", "SetVectorParameter", "ResetHUDReticle", "SetHUDReticle", "AddGameplayCueLocal",
+    "ExecuteGameplayCueLocal", "RemoveGameplayCueLocal", "K2_ExecuteGameplayCueWithParams", 0};
+  for (int i = 0; presentation[i]; i++) if (IS(presentation[i])) return NONE_;
   if (IS("GetTagName")) return u64_name(nm(x));
   if (IS("EqualEqual_GameplayAttributeGameplayAttribute")) return u64_bool(!strcmp(nm(x), nm(y)));
   if (IS("K2_AddGameplayCue")) { if (u64_log) u64_log("  [cue] %s", nm(x)); return NONE_; }

@@ -3,10 +3,12 @@
 #include "u64_gas_core.h"
 #include <stdio.h>
 #include <math.h>
+#include <stdarg.h>
 const u64_bpfn *u64_bp_registry(void); int u64_bp_registry_count(void);
 static int fails;
 #define CHECK(c) do { if (c) printf("ok   %s\n", #c); else { printf("FAIL %s\n", #c); fails++; } } while (0)
 static void tick(int n) { for (int i = 0; i < n; i++) u64_world_tick(1.0f / 30.0f); }
+static void err_log(const char *f, ...) { va_list a; va_start(a, f); if (strstr(f, "error")) { vprintf(f, a); putchar('\n'); } va_end(a); }
 static u64_obj *hero;
 static float attr(const char *n) { return u64_attr_get(u64_asc_of(hero), n); }
 static const char *s(u64_v v) { return v.u.s ? v.u.s : ""; }
@@ -15,7 +17,7 @@ static u64_v call(u64_obj *o, const char *fn) { return u64_call(o, fn, 0, 0); }
 
 int main(void)
 {
-  u64_gc_stress = 1;                       // collect after every tick: any dangling reference shows up as a failure
+  u64_gc_stress = 1; u64_log = err_log;                       // collect after every tick: any dangling reference shows up as a failure
   u64_bp_table = u64_bp_registry(); u64_bp_count = u64_bp_registry_count();
   u64_level_load();
   u64_world_begin_play();
@@ -165,6 +167,28 @@ int main(void)
     hero = enemy;
     printf("DBG shotgun shield %f -> %f\n", sh0, attr("Shield"));
     CHECK(fabsf((sh0 - attr("Shield")) - 8 * (6.0f * 100.0f / 120.0f)) < 0.01f);                         // 8 pellets * 6 * 100/120
+    hero = me;
+  }
+  // --- rocket launcher (GA_RocketLauncherPrimaryInstant): a projectile, then an explosion (radius 200) of RocketDamage 60 -> 60 * 100/120 = 50
+  {
+    u64_obj *enemy = u64_find("BP_HeroCharacter2"), *me = hero;
+    for (int i = 0; i < u64_as_int(call(me, "GetNumWeapons")) && strcmp(u64_obj_class(call(me, "GetCurrentWeapon").u.o), "BP_RocketLauncher"); i++) call(me, "NextWeapon");
+    CHECK(!strcmp(u64_obj_class(call(me, "GetCurrentWeapon").u.o), "BP_RocketLauncher") && u64_as_int(call(me, "GetPrimaryClipAmmo")) == 3);
+    u64_v el = *u64_ivar(enemy, "Location");
+    *u64_ivar(me, "Location") = u64_vec(el.u.v[0] - 500.0f, el.u.v[1], 112.0f);
+    u64_v cam = *u64_ivar(u64_comp(me, "FirstPersonCamera").u.o, "RelativeLocation");
+    float cx = el.u.v[0] - 500.0f + cam.u.v[0], cy = el.u.v[1] + cam.u.v[1], cz = 112.0f + cam.u.v[2];
+    float dx = el.u.v[0] - cx, dy = el.u.v[1] - cy, dz = el.u.v[2] - cz;
+    *u64_ivar(me, "ControlRotation") = u64_vec(atan2f(dz, sqrtf(dx * dx + dy * dy)) * 57.29578f, atan2f(dy, dx) * 57.29578f, 0);
+    tick(60);
+    hero = enemy; float sh0 = attr("Shield"); hero = me;
+    CHECK(u64_input_press(me, "EGSAbilityInputID::PrimaryFire"));
+    for (int i = 0; i < 30 && u64_as_int(call(me, "GetPrimaryClipAmmo")) == 3; i++) tick(1);
+    u64_input_release_id(me, "EGSAbilityInputID::PrimaryFire");
+    tick(60);
+    CHECK(u64_as_int(call(me, "GetPrimaryClipAmmo")) == 2);
+    hero = enemy;
+    CHECK(fabsf((sh0 - attr("Shield")) - 60.0f * 100.0f / 120.0f) < 0.01f);
     hero = me;
   }
   // --- pickups (AGSPickup): standing on one applies its effects; it respawns after RespawnTime (5 s) and, with the hero still on it, is taken again

@@ -124,6 +124,11 @@ class Gen:
 
     def arg(self, p, s, name, i):
         # Out-parameters: LocalOutVariable always; Break* natives also write their trailing args.
+        # The compiler names the temporaries that receive a call's outputs CallFunc_<Function>_<Parameter>; a caller passes such a
+        # variable (as a plain local) for every out parameter, so it is passed by reference.
+        if p.op in ("LocalVariable", "LocalOutVariable", "InstanceVariable") and p.args and last(p.args[0]).startswith(f"CallFunc_{name}_") \
+                and not last(p.args[0]).endswith("_ReturnValue"):
+            return f"u64_ref(&{self.lv(p, s)})"
         if p.op == "LocalOutVariable" or (name.startswith("Array_") and i == 0 and p.op in ("LocalVariable", "InstanceVariable", "DefaultVariable", "StructMemberContext")) \
                 or (name.startswith("Break") and i > 0 and p.op in ("LocalVariable", "InstanceVariable")):
             return f"u64_ref(&{self.lv(p, s)})"

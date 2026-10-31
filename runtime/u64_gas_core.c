@@ -116,8 +116,13 @@ static const char *nm(u64_v v)
   return "";
 }
 static const char *strip_c(const char *s) { static char b[8][64]; static int i; char *o = b[i++ & 7]; snprintf(o, 64, "%s", s); size_t n = strlen(o); if (n > 2 && !strcmp(o + n - 2, "_C")) o[n - 2] = 0; return o; }
-static const u64_ge_def *dyn_defs[16]; static int ndyn;
-int u64_ge_register(const u64_ge_def *d) { if (ndyn >= 16) { u64_rt_overflows++; return 0; } dyn_defs[ndyn++] = d; return 1; }
+static const u64_ge_def *dyn_defs[48]; static int ndyn;
+int u64_ge_register(const u64_ge_def *d)                    // effects built at run time; registering a name again replaces its definition
+{
+  for (int i = 0; i < ndyn; i++) if (!strcmp(dyn_defs[i]->name, d->name)) { dyn_defs[i] = d; return 1; }
+  if (ndyn >= 48) { if (!u64_rt_overflows++ && u64_log) u64_log("  [error] runtime effect table full"); return 0; }
+  dyn_defs[ndyn++] = d; return 1;
+}
 static const u64_ge_def *find_ge(const char *name)
 {
   const char *n = strip_c(name);
@@ -744,7 +749,10 @@ int u64_actor_capsule(u64_obj *o, float *cx, float *cy, float *cz, float *r, flo
   *cx = sh.cx; *cy = sh.cy; *cz = sh.cz; *r = sh.a; *hh = sh.b; return 1;
 }
 int u64_actor_is_pawn(u64_obj *o);
-static int is_pawn(u64_obj *o) { return u64_ivar(o, "CharacterMovement")->t == U64_OBJ; }   // only characters' capsules block traces / sweeps / trigger overlaps
+static int is_pawn(u64_obj *o)                                   // a character: its C++ base (GDCharacterBase / GSCharacterBase) or a character movement component
+{
+  return u64_ivar(o, "CharacterMovement")->t == U64_OBJ || u64_class_is(u64_obj_class(o), "GDCharacterBase") || u64_class_is(u64_obj_class(o), "GSCharacterBase");
+}   // only characters' capsules block traces / sweeps / trigger overlaps
 // vertical capsule (centre, radius r, half height hh) against a yawed box: exact in the box's local frame
 static int capsule_box(const shape_t *cap, const shape_t *box)
 {
@@ -803,6 +811,14 @@ int u64_trace_multi(const float start[3], const float end[3], float radius, u64_
     if (!is_pawn(o)) continue;                                                                      // pickups and weapons ignore these channels
     float seg = sh.b - sh.a; if (seg < 0) seg = 0;
     float t, n[3];
+    if (radius > 0) {   // initial overlap (the sweep starts inside the capsule grown by the radius): a hit at time 0, as the engine reports bStartPenetrating
+      double zc = start[2] < sh.cz - seg ? sh.cz - seg : start[2] > sh.cz + seg ? sh.cz + seg : start[2];
+      double dx0 = start[0] - sh.cx, dy0 = start[1] - sh.cy, dz0 = start[2] - zc, rr = sh.a + radius;
+      if (dx0 * dx0 + dy0 * dy0 + dz0 * dz0 <= rr * rr) {
+        double l = sqrt(dx0 * dx0 + dy0 * dy0 + dz0 * dz0); t = 0; n[0] = l > 1e-6 ? (float)(dx0 / l) : 0; n[1] = l > 1e-6 ? (float)(dy0 / l) : 0; n[2] = l > 1e-6 ? (float)(dz0 / l) : 1;
+        found[nf].t = t; found[nf].o = o; memcpy(found[nf].n, n, sizeof n); nf++; continue;
+      }
+    }
     if (ray_vcapsule(start, d, sh.cx, sh.cy, sh.cz - seg, sh.cz + seg, sh.a + radius, &t, n)) {   /* sphere vs capsule = ray vs capsule grown by the radius */ found[nf].t = t; found[nf].o = o; memcpy(found[nf].n, n, sizeof n); nf++; }
   }
   for (int i = 1; i < nf; i++) for (int j = i; j > 0 && found[j].t < found[j - 1].t; j--) { __typeof__(found[0]) tmp = found[j]; found[j] = found[j - 1]; found[j - 1] = tmp; }

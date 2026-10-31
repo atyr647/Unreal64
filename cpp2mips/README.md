@@ -61,10 +61,13 @@ the character / controller types as runtime-backed proxies (`IsAlive` reads the 
 a property table that recycled entries (attribute identity broke after 256 lookups) and proxies cached by runtime object slot (slots are reused).
 Not mirrored: the spec's dynamic asset tags (damage-number UI only).
 
-## Compile coverage (measured, `g++ -fsyntax-only` against the shim)
+## Compile coverage (measured: `cpp2mips/coverage.sh <Source/Module>`, `g++ -fsyntax-only` against the shim)
 
-2 of the 45 `.cpp` files compile unmodified (`GSAmmoAttributeSet`, `GSAttributeSetBase`). Every other file stops at its first missing engine header; the
-most common ones are `Abilities/Tasks/AbilityTask.h` (9 files: the ability tasks), `Abilities/GameplayAbility.h` / `GameplayAbilityTargetActor.h` / `GameplayAbilityTypes.h`
-(the GAS plugin core, 6 files), `GameFramework/*` movement / game mode / player state, `AbilitySystemGlobals.h`, `Blueprint/UserWidget.h`. Peeling the tiny files
-(`GSAbilityTypes`, `GSTargetType`, `GSASCActorBase`) shows the next layer is the same: `FGameplayAbilityTargetDataHandle`, effect contexts, `UGameplayAbility`.
-So the work is one well-defined chunk, the GAS plugin core on top of `runtime/u64_gas_core.c`, after which most of the 45 files unblock together.
+10 of the 45 `.cpp` files compile unmodified (the two attribute sets, effect types, target types, the empty UI / controller / cue-manager classes). Started
+the GAS core in the shim (`shim/ue_gas.h`: ability specs / handles / target data / events / effect contexts, `UGameplayAbility`, `UAbilitySystemGlobals`,
+the ASC surface in `AttributeSet.h`; `shim/ue_engine.h`: collision query params, world, components, tasks, widgets, movement stubs). The remaining 35 each stop at
+a handful of missing members or types; the loop that was used (compile, read the most common first error, add the type, repeat) took the count from 2 to 10
+in about 40 rounds of small additions. What is left is dominated by: the ability task base and `AbilityTask_WaitTargetData` / `GameplayAbilityTargetActor`
+members (GATA traces, `GSAT_*`), `GSAbilitySystemComponent` (animation montage replication, which is animation work), movement saved-move classes,
+`GSInteractable` (UInterface macros), widget / HUD types. These are declarations, not behaviour: none of them is run yet. The two compiled classes that ARE run
+(ammo, damage rules) pass the full suite on the host and on the N64.

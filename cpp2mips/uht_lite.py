@@ -18,11 +18,11 @@ def generate(header, out):
     res += [f"{k} {n};" for n, k in re.findall(r"^\s*(class|struct)\s+(?:\w+_API\s+)?(\w+)", "\n".join(lines), re.M) for n, k in [(k, n)] if False]
     for kind, name in re.findall(r"^\s*(class|struct)\s+(?:\w+_API\s+)?(\w+)\s*(?::|\{|$)", "\n".join(lines), re.M):
         res.append(f"{kind} {name};")
-    cur, bases, props = None, {}, {}
+    cur, bases, props, kinds = None, {}, {}, {}
     for i, ln in enumerate(lines, 1):
         m = CLASS.match(ln)
         if m and ";" not in ln.split("{")[0]:
-            cur = m.group(1); bases[cur] = m.group(2); props.setdefault(cur, [])
+            cur = m.group(1); bases[cur] = m.group(2); kinds[cur] = ln.split()[0] if ln.split()[0] in ('class','struct') else 'class'; props.setdefault(cur, [])
         p = PROP.match(ln)
         if p and cur:
             props[cur].append(p.group(1))
@@ -31,8 +31,9 @@ def generate(header, out):
             finders = ""
             if bases.get(cur) == "UAttributeSet" or (bases.get(cur) or "").startswith("UGS") and False:
                 pass
+            sstruct = f" static UScriptStruct *StaticStruct() {{ static UScriptStruct s; return &s; }}" if kinds.get(cur) == "struct" else ""
             inst = f" bool InstanceOf(const UClass *c) const override {{ return c == StaticClass() || Super::InstanceOf(c); }}" if bases.get(cur) and bases[cur][0] in "UA" else ""
-            body = f"public: {sup}typedef {cur} ThisClass; static UClass *StaticClass() {{ static UClass c = {{\"{cur}\"}}; return &c; }}{inst}"
+            body = f"public: {sup}typedef {cur} ThisClass; static UClass *StaticClass() {{ static UClass c = {{\"{cur}\"}}; return &c; }}{inst}{sstruct}"
             res.append(f"#define {fid}_{i}_GENERATED_BODY {body} @FIND@{cur}@")
     text = "\n".join(res) + "\n"
     for cls, plist in props.items():

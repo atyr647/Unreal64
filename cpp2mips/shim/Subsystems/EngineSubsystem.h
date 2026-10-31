@@ -1,3 +1,2 @@
 #pragma once
-#include "ue_shim.h"
-struct UEngineSubsystem : UObject {};
+#include "ue_engine.h"

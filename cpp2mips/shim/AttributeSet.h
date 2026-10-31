@@ -37,10 +37,26 @@ struct FGameplayTagContainer {
   void AppendTags(const FGameplayTagContainer &o) { for (int i = 0; i < o.n; i++) AddTag(o.t[i]); }
   bool HasTag(const FGameplayTag &x) const { for (int i = 0; i < n; i++) if (t[i] == x) return true; return false; }
 };
-struct FGameplayAbilityActorInfo { TWeakObjectPtr<AActor> AvatarActor; TWeakObjectPtr<AController> PlayerController; };
-struct FGameplayEffectContext { AActor *EffectCauser = nullptr; UAbilitySystemComponent *Instigator = nullptr; };
+class UAbilitySystemComponent;
+struct FGameplayAbilityActorInfo { TWeakObjectPtr<AActor> OwnerActor, AvatarActor; TWeakObjectPtr<AController> PlayerController; UAbilitySystemComponent *AbilitySystemComponent = nullptr; };
+struct FArchive {}; class UPackageMap; struct UScriptStruct {};
+struct FHitResult;
+struct FGameplayEffectContext {
+  AActor *EffectCauser = nullptr; UAbilitySystemComponent *Instigator = nullptr; TArray<TWeakObjectPtr<AActor>> Actors; FHitResult *HitResultPtr = nullptr;
+  virtual ~FGameplayEffectContext() {}
+  virtual UScriptStruct *GetScriptStruct() const { static UScriptStruct s; return &s; }
+  virtual FGameplayEffectContext *Duplicate() const { return new FGameplayEffectContext(*this); }
+  virtual bool NetSerialize(FArchive &, UPackageMap *, bool &b) { b = true; return true; }
+  void AddActors(const TArray<TWeakObjectPtr<AActor>> &a, bool = true) { Actors.Append(a); }
+  void AddHitResult(const FHitResult &h, bool bReset = false);
+  const FHitResult *GetHitResult() const { return HitResultPtr; }
+  AActor *GetEffectCauser() const { return EffectCauser; }
+};
+template <class T> struct TStructOpsTypeTraitsBase2 {};
+template <class T> struct TStructOpsTypeTraits : TStructOpsTypeTraitsBase2<T> {};
 struct FGameplayEffectContextHandle {
   FGameplayEffectContext *d = nullptr;
+  const FHitResult *GetHitResult() const { return d ? d->GetHitResult() : nullptr; }
   UAbilitySystemComponent *GetOriginalInstigatorAbilitySystemComponent() const { return d ? d->Instigator : nullptr; }
   AActor *GetEffectCauser() const { return d ? d->EffectCauser : nullptr; }
 };
@@ -54,9 +70,26 @@ struct FScalableFloat { float Value = 0; FScalableFloat() {} FScalableFloat(floa
 enum class EGameplayEffectDurationType { Instant, Infinite, HasDuration };
 struct FGameplayModifierInfo { FScalableFloat ModifierMagnitude; EGameplayModOp ModifierOp = EGameplayModOp::Additive; FGameplayAttribute Attribute; };
 class UGameplayEffect : public UObject { public: EGameplayEffectDurationType DurationPolicy = EGameplayEffectDurationType::Instant; TArray<FGameplayModifierInfo> Modifiers; };
-class UAbilitySystemComponent {                                   // implemented by the Unreal64 runtime (bridge): the C++ only calls these
+enum ELevelTick { LEVELTICK_All }; struct FActorComponentTickFunction {};
+struct FGameplayCueParameters;
+struct FGameplayAbilitySpecHandle { int32 Handle = -1; bool IsValid() const { return Handle >= 0; } bool operator==(const FGameplayAbilitySpecHandle &o) const { return Handle == o.Handle; } };
+class UGameplayAbility; struct FGameplayAbilitySpec; struct USkeletalMeshComponent; struct UAnimMontage;
+class UAbilitySystemComponent : public UObject {                                   // implemented by the Unreal64 runtime (bridge): the C++ only calls these
 public:
   virtual ~UAbilitySystemComponent() {}
+  static UClass *StaticClass() { static UClass c = {"UAbilitySystemComponent"}; return &c; }
+  bool InstanceOf(const UClass *c) const override { return c == StaticClass(); }
+  virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty> &) const {}
+  virtual bool GetShouldTick() const { return false; }
+  virtual void TickComponent(float, ELevelTick, FActorComponentTickFunction *) {}
+  virtual void InitAbilityActorInfo(AActor *, AActor *) {}
+  virtual void AbilityLocalInputPressed(int32) {}
+  virtual bool ShouldDoServerAbilityRPCBatch() const { return false; }
+  virtual void NotifyAbilityEnded(FGameplayAbilitySpecHandle, UGameplayAbility *, bool) {}
+  int32 GetTagCount(const FGameplayTag &) const { return 0; }
+  void AddLooseGameplayTag(const FGameplayTag &, int32 = 1) {} void AddLooseGameplayTags(const FGameplayTagContainer &, int32 = 1) {}
+  void RemoveLooseGameplayTag(const FGameplayTag &, int32 = 1) {} void RemoveLooseGameplayTags(const FGameplayTagContainer &, int32 = 1) {}
+  AActor *GetOwnerActor() const { return nullptr; } AActor *GetAvatarActor() const { return nullptr; }
   virtual void SetNumericAttributeBase(const FGameplayAttribute &a, float v) = 0;
   virtual void ApplyModToAttributeUnsafe(const FGameplayAttribute &a, EGameplayModOp op, float magnitude) = 0;
   TSharedPtr<FGameplayAbilityActorInfo> AbilityActorInfo;

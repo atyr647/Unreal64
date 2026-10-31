@@ -19,6 +19,7 @@ typedef uint8_t uint8; typedef uint16_t uint16; typedef uint32_t uint32; typedef
 #define UPROPERTY(...)
 #define UFUNCTION(...)
 #define UMETA(...)
+#define OUT
 #define ensure(x) (!!(x))
 #define check(x) ((void)0)
 #define checkf(x, ...) ((void)0)
@@ -46,6 +47,7 @@ struct UClass { const char *Name; };
 struct FText { const char *s = ""; };
 struct FString { const char *s = ""; };
 struct FProperty { FName Name; };
+static const FName NAME_None;
 struct UObject {
   virtual ~UObject() {}
   virtual bool InstanceOf(const UClass *) const { return false; }     // generated per class (Cast<> without RTTI)
@@ -53,7 +55,7 @@ struct UObject {
 };
 template <class T, class U> T *Cast(U *p) { return p && p->InstanceOf(T::StaticClass()) ? static_cast<T *>(p) : nullptr; }
 template <class T> struct TSubclassOf { UClass *c = nullptr; };
-template <class T> struct TWeakObjectPtr { T *p = nullptr; bool IsValid() const { return p != nullptr; } T *Get() const { return p; } T *operator->() const { return p; } };
+template <class T> struct TWeakObjectPtr { T *p = nullptr; TWeakObjectPtr() {} TWeakObjectPtr(T *x) : p(x) {} bool operator==(const TWeakObjectPtr &o) const { return p == o.p; } bool IsValid() const { return p != nullptr; } T *Get() const { return p; } T *operator->() const { return p; } };
 template <class T> struct TSharedPtr { T *p = nullptr; bool IsValid() const { return p != nullptr; } T *Get() const { return p; } T *operator->() const { return p; } T &operator*() const { return *p; } };
 struct UPackage {};
 FORCEINLINE UPackage *GetTransientPackage() { static UPackage p; return &p; }
@@ -78,8 +80,23 @@ FORCEINLINE bool IsNearlyEqual(float a, float b, float tol = 1.e-4f) { return fa
 template <class T> struct TArray {                             // the part of TArray the gameplay code uses; fixed capacity, no allocation
   T d[64]; int32 n = 0;
   int32 Add(const T &v) { if (n < 64) d[n++] = v; return n - 1; }
+  int32 AddUnique(const T &v) { for (int i = 0; i < n; i++) if (d[i] == v) return i; return Add(v); }
+  void Append(const TArray &o) { for (int i = 0; i < o.n; i++) Add(o.d[i]); }
+  bool Contains(const T &v) const { for (int i = 0; i < n; i++) if (d[i] == v) return true; return false; }
+  void Empty() { n = 0; } void Reset() { n = 0; }
+  bool IsValidIndex(int32 i) const { return i >= 0 && i < n; }
+  T *begin() { return d; } T *end() { return d + n; } const T *begin() const { return d; } const T *end() const { return d + n; }
   int32 Num() const { return n; }
   void SetNum(int32 k) { n = k < 64 ? k : 64; }
   T &operator[](int32 i) { return d[i]; }
   const T &operator[](int32 i) const { return d[i]; }
 };
+struct FVector { float X = 0, Y = 0, Z = 0; FVector() {} FVector(float x, float y, float z) : X(x), Y(y), Z(z) {} static const FVector ZeroVector;
+  FVector operator+(const FVector &o) const { return FVector(X + o.X, Y + o.Y, Z + o.Z); } FVector operator-(const FVector &o) const { return FVector(X - o.X, Y - o.Y, Z - o.Z); }
+  FVector operator*(float f) const { return FVector(X * f, Y * f, Z * f); } float SizeSquared() const { return X * X + Y * Y + Z * Z; } float Size() const { return sqrtf(SizeSquared()); } };
+typedef FVector FVector_NetQuantize;
+template <class K, class V> struct TMap { K k[32]; V v[32]; int n = 0;                            // the lookups the gameplay code does; fixed capacity
+  V *Find(const K &key) { for (int i = 0; i < n; i++) if (k[i] == key) return &v[i]; return nullptr; }
+  const V *Find(const K &key) const { for (int i = 0; i < n; i++) if (k[i] == key) return &v[i]; return nullptr; }
+  V &Add(const K &key, const V &val) { V *f = Find(key); if (f) { *f = val; return *f; } k[n] = key; v[n] = val; return v[n++]; }
+  V &operator[](const K &key) { V *f = Find(key); return f ? *f : Add(key, V()); } int32 Num() const { return n; } };

@@ -1,10 +1,7 @@
-// Remaining engine natives: text, animation queries, UI widgets, collision, Gameplay Ability System (GAS-lite),
-// ability tasks, and the C++ gameplay functions of the converted project (movement, death).
-//
-// Fidelity notes. Ported faithfully from the project's C++: damage mitigation (Damage * 100/(100+Armor)),
-// Die -> OnCharacterDied -> Destroy, sprint = 1.4x move speed. Approximated: GameplayEffect modifier magnitudes are
-// keyed off the effect class name (modifier arrays are not parsed from the assets yet); attribute defaults are fixed.
-#include "u64_rt.h"
+// Engine natives called by Blueprints: text, vectors/rotators (with out-parameters), animation queries, UI widget state,
+// collision queries, attribute accessors, Gameplay Ability System entry points and ability tasks. The GAS rules live in
+// u64_gas_core.c; this file adapts the Blueprint-callable surface onto them.
+#include "u64_gas_core.h"
 #include <math.h>
 #include <stdio.h>
 
@@ -13,7 +10,7 @@ static u64_v A(int argc, const u64_v *a, int i) { return i < argc ? a[i] : (u64_
 static float F(u64_v v) { return v.t == U64_INT || v.t == U64_BOOL ? (float)v.u.i : v.t == U64_FLOAT ? v.u.f : 0.0f; }
 static const u64_v NONE_ = {U64_NONE};
 
-// ---- string pool ------------------------------------------------------------------------------------------------
+// ---- string pool ----
 static char pool[8192]; static int pool_n;
 const char *u64_intern(const char *s)
 {
@@ -23,11 +20,8 @@ const char *u64_intern(const char *s)
   memcpy(pool + pool_n, s, n); pool_n += n;
   return pool + pool_n - n;
 }
-static const char *key(const char *prefix, const char *name)
-{
-  char b[96]; snprintf(b, sizeof b, "%s%s", prefix, name ? name : ""); return u64_intern(b);
-}
-static const char *nm(u64_v v)   // class / name / string / object -> its name
+static const char *key(const char *prefix, const char *name) { char b[96]; snprintf(b, sizeof b, "%s%s", prefix, name ? name : ""); return u64_intern(b); }
+static const char *nm(u64_v v)
 {
   if (v.t == U64_CLASS || v.t == U64_NAME || v.t == U64_STR || v.t == U64_DELEGATE) return v.u.s ? v.u.s : "";
   if (v.t == U64_OBJ && v.u.o) return u64_obj_name(v.u.o);
@@ -43,108 +37,80 @@ static const char *tostr(u64_v v, char *b, int n)
   }
 }
 static u64_v text(const char *s) { return u64_str(u64_intern(s)); }
-
-// ---- actors, attributes, tags -----------------------------------------------------------------------------------
-static u64_obj *asc_of(u64_obj *actor)
+static int is_asc(u64_obj *o) { return o && !strcmp(u64_obj_class(o), "AbilitySystemComponent"); }
+static u64_obj *asc_for(u64_obj *self) { return is_asc(self) ? self : u64_asc_of(self); }
+static u64_obj *avatar_of_ability(u64_obj *ab) { u64_v *av = u64_ivar(ab, "Avatar"); return av->t == U64_OBJ ? av->u.o : ab; }
+static u64_obj *obj_arg(u64_v v) { return v.t == U64_OBJ ? v.u.o : 0; }
+static float norm180(float d) { while (d > 180) d -= 360; while (d <= -180) d += 360; return d; }
+static int tag_arg_has(u64_obj *asc, u64_v tags)           // a tag or a container of tags: any match
 {
-  if (!actor) return 0;
-  u64_v *slot = u64_ivar(actor, "AbilitySystemComponent");
-  if (slot->t == U64_OBJ && slot->u.o) return slot->u.o;
-  u64_obj *asc = u64_new(u64_intern(key(u64_obj_name(actor), ".ASC")), "AbilitySystemComponent");
-  *u64_ivar(asc, "Owner") = u64_objv(actor);
-  static const char *attrs[] = {"Health", "MaxHealth", "Mana", "MaxMana", "Stamina", "MaxStamina"};
-  for (int i = 0; i < 6; i++) *u64_ivar(asc, attrs[i]) = u64_float(100);
-  *u64_ivar(asc, "Armor") = u64_float(0);
-  *u64_ivar(asc, "MoveSpeed") = u64_float(600);
-  *slot = u64_objv(asc);
-  return asc;
+  if (tags.t == U64_ARRAY) { for (int i = 0; i < u64_array_len(tags); i++) if (u64_tag_has(asc, nm(u64_array_get(tags, i)))) return 1; return 0; }
+  return u64_tag_has(asc, nm(tags));
 }
-static u64_obj *owner_of(u64_obj *asc) { u64_v *o = u64_ivar(asc, "Owner"); return o->t == U64_OBJ ? o->u.o : 0; }
-static float attr(u64_obj *asc, const char *n) { return F(*u64_ivar(asc, n)); }
 
-#define MAX_TASKS 48
+// ---------------------------------------------------------------------------------------------------- ability tasks
+#define MAX_TASKS 64
 static u64_obj *tasks[MAX_TASKS]; static int ntasks;
-static void track(u64_obj *t) { if (ntasks < MAX_TASKS) tasks[ntasks++] = t; }
+static void track(u64_obj *t) { for (int i = 0; i < ntasks; i++) if (tasks[i] == t) return; if (ntasks < MAX_TASKS) tasks[ntasks++] = t; }
 static void untrack(u64_obj *t) { for (int i = 0; i < ntasks; i++) if (tasks[i] == t) { tasks[i] = tasks[--ntasks]; return; } }
-static void fire_tasks(const char *cls, const char *delegate, int argc, const u64_v *argv)
+static void fire_tasks(const char *cls, const char *delegate, int argc, const u64_v *argv, u64_obj *asc)
 {
   u64_obj *snap[MAX_TASKS]; int n = 0;
-  for (int i = 0; i < ntasks; i++) if (!strcmp(u64_obj_class(tasks[i]), cls)) snap[n++] = tasks[i];
+  for (int i = 0; i < ntasks; i++) {
+    if (strcmp(u64_obj_class(tasks[i]), cls)) continue;
+    if (asc && obj_arg(*u64_ivar(tasks[i], "ASC")) != asc) continue;
+    snap[n++] = tasks[i];
+  }
   for (int i = 0; i < n; i++) u64_mc_broadcast(u64_ivar(snap[i], delegate), argc, argv);
 }
-
-static void set_attr(u64_obj *asc, const char *n, float v)
+void u64_tasks_end_for(u64_obj *ability)
 {
-  float old = attr(asc, n);
-  char mx[32]; snprintf(mx, sizeof mx, "Max%s", n);
-  float cap = (!strcmp(n, "Health") || !strcmp(n, "Mana") || !strcmp(n, "Stamina")) ? attr(asc, mx) : 1e9f;
-  if (v > cap) v = cap;
-  if (v < 0) v = 0;
-  *u64_ivar(asc, n) = u64_float(v);
-  u64_v args[3] = {u64_name(n), u64_float(v), u64_float(old)};
-  fire_tasks("AbilityTask_ListenForAttributesChange", "AttributeChanged", 3, args);
+  for (int i = 0; i < ntasks; ) {
+    u64_v *ab = u64_ivar(tasks[i], "Ability");
+    if (ab->t == U64_OBJ && ab->u.o == ability) tasks[i] = tasks[--ntasks]; else i++;
+  }
+}
+void u64_notify_attribute_tasks(u64_obj *asc, int argc, const u64_v *argv)      // AsyncTaskAttributeChanged
+{
+  u64_obj *snap[MAX_TASKS]; int n = 0;
+  for (int i = 0; i < ntasks; i++) {
+    if (strcmp(u64_obj_class(tasks[i]), "AsyncTaskAttributeChanged") || obj_arg(*u64_ivar(tasks[i], "ASC")) != asc) continue;
+    u64_v list = *u64_ivar(tasks[i], "Attributes"); int hit = 0;
+    for (int k = 0; k < u64_array_len(list); k++) if (!strcmp(nm(u64_array_get(list, k)), nm(argv[0]))) hit = 1;
+    if (hit) snap[n++] = tasks[i];
+  }
+  for (int i = 0; i < n; i++) u64_mc_broadcast(u64_ivar(snap[i], "OnAttributeChanged"), argc, argv);
+}
+void u64_notify_damage_tasks(u64_obj *asc, int argc, const u64_v *argv) { fire_tasks("AbilityTask_WaitReceiveDamage", "OnDamage", argc, argv, asc); }
+void u64_notify_stack_tasks(u64_obj *asc, const char *effect)
+{
+  (void)effect;
+  for (int i = 0; i < ntasks; i++) {
+    u64_obj *t = tasks[i];
+    if (obj_arg(*u64_ivar(t, "ASC")) != asc) continue;
+    if (!strcmp(u64_obj_class(t), "AsyncTaskEffectStackChanged")) {      // OnGameplayEffectStackChange(tag, handle, new, old)
+      int now = u64_effect_stack_count(asc, nm(*u64_ivar(t, "Tag"))), old = u64_ivar(t, "Count")->u.i;
+      if (now != old) {
+        *u64_ivar(t, "Count") = u64_int(now);
+        u64_v args[4] = {u64_name(nm(*u64_ivar(t, "Tag"))), u64_int(0), u64_int(now), u64_int(old)};
+        u64_mc_broadcast(u64_ivar(t, "OnGameplayEffectStackChange"), 4, args);
+      }
+    } else if (!strcmp(u64_obj_class(t), "AsyncTaskCooldownChanged")) {  // OnCooldownBegin / OnCooldownEnd(tag, remaining, duration)
+      u64_v list = *u64_ivar(t, "CooldownTags");
+      for (int k = 0; k < u64_array_len(list); k++) {
+        const char *tag = nm(u64_array_get(list, k)); float dur;
+        float rem = u64_cooldown_remaining(asc, tag, &dur);
+        const char *kk = key("cd:", tag); int was = u64_true(*u64_ivar(t, kk));
+        if (rem > 0 && !was) { *u64_ivar(t, kk) = u64_bool(1); u64_v args[3] = {u64_name(tag), u64_float(rem), u64_float(dur)}; u64_mc_broadcast(u64_ivar(t, "OnCooldownBegin"), 3, args); }
+        else if (rem <= 0 && was) { *u64_ivar(t, kk) = u64_bool(0); u64_v args[3] = {u64_name(tag), u64_float(-1), u64_float(dur)}; u64_mc_broadcast(u64_ivar(t, "OnCooldownEnd"), 3, args); }
+      }
+    }
+  }
 }
 
-// ---- gameplay effects -------------------------------------------------------------------------------------------
-#define MAX_EFFECTS 32
-static struct { int live; u64_obj *asc; const char *cls; const char *tag; } effects[MAX_EFFECTS];
-
-static void die(u64_obj *actor)    // C++ AGDCharacterBase::Die: broadcast OnCharacterDied, then FinishDying -> Destroy
-{
-  if (u64_log) u64_log("  [die] %s", u64_obj_name(actor));
-  u64_kill(actor);
-}
-
-static int apply_effect(u64_obj *asc, const char *cls, float level, u64_obj *spec)
-{
-  if (!asc) return 0;
-  u64_obj *owner = owner_of(asc);
-  if (u64_log) u64_log("  [gas] %s <- %s (level %d)", owner ? u64_obj_name(owner) : "?", cls, (int)level);
-  const char *tag = 0;
-  if (strstr(cls, "Damage") && !strstr(cls, "Receive")) {
-    float dmg = spec ? F(*u64_ivar(spec, "sbc:Data.Damage")) : 0.0f;
-    if (dmg <= 0) dmg = 25.0f * level;                                  // fallback when no SetByCaller magnitude
-    float armor = attr(asc, "Armor");
-    float mitigated = dmg * (100.0f / (100.0f + armor));                // GDDamageExecCalculation
-    set_attr(asc, "Health", attr(asc, "Health") - mitigated);
-    u64_v args[3] = {u64_objv(0), u64_float(dmg), u64_float(mitigated)};
-    fire_tasks("AbilityTask_WaitReceiveDamage", "OnDamage", 3, args);   // UGDAbilitySystemComponent::ReceiveDamage
-    if (attr(asc, "Health") <= 0 && owner) die(owner);
-    return 0;                                                            // instant effect: no handle
-  }
-  if (strstr(cls, "Regen") || strstr(cls, "Heal") || strstr(cls, "HealthManaStamina")) {
-    set_attr(asc, "Health", attr(asc, "Health") + 20 * level);
-    set_attr(asc, "Mana", attr(asc, "Mana") + 20 * level);
-    set_attr(asc, "Stamina", attr(asc, "Stamina") + 20 * level);
-    return 0;
-  }
-  if (strstr(cls, "AimDownSightRemoval")) { *u64_ivar(asc, "tag:State.AimDownSights") = u64_bool(0); if (owner) *u64_ivar(owner, "bAiming") = u64_bool(0); return 0; }
-  if (strstr(cls, "AimDownSight")) { tag = "State.AimDownSights"; if (owner) *u64_ivar(owner, "bAiming") = u64_bool(1); }
-  else if (strstr(cls, "Sprint")) { tag = "State.Sprinting"; if (owner) *u64_ivar(owner, "bSprinting") = u64_bool(1); }
-  else if (strstr(cls, "Armor")) { set_attr(asc, "Armor", attr(asc, "Armor") + 10 * level); }
-  if (tag) *u64_ivar(asc, key("tag:", tag)) = u64_bool(1);
-  for (int i = 0; i < MAX_EFFECTS; i++) if (!effects[i].live) {
-    effects[i].live = 1; effects[i].asc = asc; effects[i].cls = u64_intern(cls); effects[i].tag = tag ? u64_intern(tag) : 0;
-    return i + 1;
-  }
-  return 0;
-}
-static void remove_effect(int i)
-{
-  if (i < 0 || i >= MAX_EFFECTS || !effects[i].live) return;
-  if (effects[i].tag) {
-    *u64_ivar(effects[i].asc, key("tag:", effects[i].tag)) = u64_bool(0);
-    u64_obj *o = owner_of(effects[i].asc);
-    if (o && !strcmp(effects[i].tag, "State.Sprinting")) *u64_ivar(o, "bSprinting") = u64_bool(0);
-    if (o && !strcmp(effects[i].tag, "State.AimDownSights")) *u64_ivar(o, "bAiming") = u64_bool(0);
-  }
-  effects[i].live = 0;
-}
-
-// ---- ability tasks ----------------------------------------------------------------------------------------------
 static u64_obj *new_task(const char *cls, u64_obj *ability)
 {
-  static int serial; char b[40]; snprintf(b, sizeof b, "%s_%d", cls, ++serial);
+  static int serial; char b[48]; snprintf(b, sizeof b, "%s_%d", cls, ++serial);
   u64_obj *t = u64_new(u64_intern(b), u64_intern(cls));
   *u64_ivar(t, "Ability") = u64_objv(ability);
   return t;
@@ -154,21 +120,27 @@ static void activate_task(u64_obj *t)
   const char *c = u64_obj_class(t);
   track(t);
   if (!strcmp(c, "AbilityTask_WaitDelay")) u64_timer_broadcast(F(*u64_ivar(t, "Time")), t, "OnFinish", u64_float(F(*u64_ivar(t, "Time"))));
-  else if (!strcmp(c, "AbilityTask_PlayMontageAndWaitForEvent")) u64_timer_broadcast(1.0f, t, "OnCompleted", u64_name("None"));
+  else if (!strcmp(c, "AbilityTask_PlayMontageAndWaitForEvent")) {
+    // GDAT_PlayMontageAndWaitForEvent: OnBlendOut when the montage starts blending out, OnCompleted when it ends.
+    float blend, len = u64_montage_length(nm(*u64_ivar(t, "Montage")), &blend), rate = F(*u64_ivar(t, "Rate")); if (rate <= 0) rate = 1;
+    if (len < 0) { if (u64_log) u64_log("  [anim] montage %s has no data", nm(*u64_ivar(t, "Montage"))); len = 0; blend = 0; }
+    float bo = (len - blend) / rate; if (bo < 0) bo = 0;
+    u64_timer_broadcast(bo, t, "OnBlendOut", u64_name("None"));
+    u64_timer_broadcast(len / rate, t, "OnCompleted", u64_name("None"));
+  }
   else if (!strcmp(c, "AbilityTask_ApplyRootMotionConstantForce")) u64_timer_broadcast(F(*u64_ivar(t, "Duration")), t, "OnFinish", NONE_);
   else if (!strcmp(c, "AbilityTask_WaitNetSync")) u64_timer_broadcast(0.0f, t, "OnSync", NONE_);
   else if (!strcmp(c, "AbilityTask_WaitTargetData")) u64_timer_broadcast(0.0f, t, "ValidData", u64_objv(u64_new("TargetData", "GameplayAbilityTargetData")));
+  else if (!strcmp(c, "AsyncTaskEffectStackChanged")) *u64_ivar(t, "Count") = u64_int(u64_effect_stack_count(obj_arg(*u64_ivar(t, "ASC")), nm(*u64_ivar(t, "Tag"))));
 }
 void u64_input_release(u64_obj *ability)
 {
-  (void)ability;
   u64_v t = u64_float(0);
-  fire_tasks("AbilityTask_WaitInputRelease", "OnRelease", 1, &t);
+  fire_tasks("AbilityTask_WaitInputRelease", "OnRelease", 1, &t, 0);
+  (void)ability;
 }
 
-// ---- helpers for rotators / text ----------------------------------------------------------------------------------
-static float norm180(float d) { while (d > 180) d -= 360; while (d <= -180) d += 360; return d; }
-
+// ---------------------------------------------------------------------------------------------------- natives
 u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
 {
   u64_v x = A(argc, a, 0), y = A(argc, a, 1), z = A(argc, a, 2);
@@ -184,7 +156,7 @@ u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
     return text(b1);
   }
   if (IS("Conv_NameToString")) return text(nm(x));
-  if (IS("Format")) {                                    // "{0}/{1}" style FText::Format
+  if (IS("Format")) {
     char out[160]; int n = 0; const char *p = nm(x);
     while (*p && n < 150) {
       if (*p == '{' && p[1] >= '0' && p[1] <= '9' && p[2] == '}') { n += snprintf(out + n, sizeof out - n, "%s", tostr(A(argc, a, 1 + p[1] - '0'), b2, sizeof b2)); p += 3; }
@@ -192,7 +164,7 @@ u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
     }
     out[n] = 0; return text(out);
   }
-  // ---------------- vectors / rotators (out-parameters arrive as references) ----------------
+  // ---------------- vectors / rotators ----------------
   if (IS("BreakVector")) { u64_out(y, u64_float(x.u.v[0])); u64_out(z, u64_float(x.u.v[1])); u64_out(A(argc, a, 3), u64_float(x.u.v[2])); return NONE_; }
   if (IS("BreakRotator")) { u64_out(y, u64_float(x.u.v[2])); u64_out(z, u64_float(x.u.v[0])); u64_out(A(argc, a, 3), u64_float(x.u.v[1])); return NONE_; }  // roll, pitch, yaw
   if (IS("BreakTransform")) { u64_out(y, x); u64_out(z, u64_vec(0, 0, 0)); u64_out(A(argc, a, 3), u64_vec(1, 1, 1)); return NONE_; }
@@ -200,24 +172,28 @@ u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
   if (IS("NormalizedDeltaRotator")) return u64_vec(norm180(x.u.v[0] - y.u.v[0]), norm180(x.u.v[1] - y.u.v[1]), norm180(x.u.v[2] - y.u.v[2]));
   if (IS("K2_GetActorRotation") || IS("GetBaseAimRotation")) { u64_v *r = u64_ivar(self, "Rotation"); return r->t == U64_VEC ? *r : u64_vec(0, 0, 0); }
   if (IS("GetActorForwardVector")) { u64_v *r = u64_ivar(self, "Rotation"); float yaw = (r->t == U64_VEC ? r->u.v[1] : 0) * 0.0174533f; return u64_vec(cosf(yaw), sinf(yaw), 0); }
-  if (IS("CalculateDirection")) {                        // angle of the velocity relative to where the actor faces
-    float heading = atan2f(x.u.v[1], x.u.v[0]) * 57.29578f;
-    return u64_float(norm180(heading - y.u.v[1]));
-  }
+  if (IS("CalculateDirection")) return u64_float(norm180(atan2f(x.u.v[1], x.u.v[0]) * 57.29578f - y.u.v[1]));
   // ---------------- movement / animation queries ----------------
   if (IS("GetVelocity")) { u64_v *v = u64_ivar(self, "Velocity"); return v->t == U64_VEC ? *v : u64_vec(0, 0, 0); }
   if (IS("GetCurrentAcceleration")) { u64_v *v = u64_ivar(self, "Acceleration"); return v->t == U64_VEC ? *v : u64_vec(0, 0, 0); }
   if (IS("IsFalling")) return u64_bool(u64_true(*u64_ivar(self, "bFalling")));
   if (IS("GetMovementComponent")) { u64_v *m = u64_ivar(self, "MovementComponent"); return m->t == U64_OBJ ? *m : u64_objv(self); }
   if (IS("TryGetPawnOwner")) { u64_v *p = u64_ivar(self, "Pawn"); return p->t == U64_OBJ ? *p : u64_objv(self); }
+  if (IS("GetMaxSpeed")) return u64_float(u64_max_speed(self));
   if (IS("PlayAnimation") || IS("GetInstanceAssetPlayerTimeFromEndFraction")) return u64_float(0);
   // ---------------- C++ gameplay of the converted project ----------------
-  if (IS("StartSprinting")) { *u64_ivar(self, "bSprinting") = u64_bool(1); return NONE_; }
+  if (IS("StartSprinting")) { *u64_ivar(self, "bSprinting") = u64_bool(1); return NONE_; }       // RequestToStartSprinting = true
   if (IS("StopSprinting"))  { *u64_ivar(self, "bSprinting") = u64_bool(0); return NONE_; }
-  if (IS("StartAimDownSights")) { *u64_ivar(self, "bAiming") = u64_bool(1); return NONE_; }
+  if (IS("StartAimDownSights")) { *u64_ivar(self, "bAiming") = u64_bool(1); return NONE_; }      // RequestToStartADS = true
   if (IS("StopAimDownSights"))  { *u64_ivar(self, "bAiming") = u64_bool(0); return NONE_; }
-  if (IS("FinishDying")) { u64_kill(self); return NONE_; }
-  if (IS("GetAbilityLevel")) return u64_int(1);          // AGDCharacterBase::GetAbilityLevel returns 1
+  if (IS("FinishDying")) { u64_obj_destroy(self); return NONE_; }                                // Destroy()
+  if (IS("GetAbilityLevel")) return u64_int(1);                                                  // AGDCharacterBase::GetAbilityLevel
+  if (IS("IsAlive")) { u64_obj *asc = u64_asc_of(self); return u64_bool(u64_obj_alive(self) && (!asc || u64_attr_get(asc, "Health") > 0)); }
+  if (IS("GetHealth") || IS("GetMaxHealth") || IS("GetMana") || IS("GetMaxMana") || IS("GetStamina") || IS("GetMaxStamina") ||
+      IS("GetHealthRegenRate") || IS("GetManaRegenRate") || IS("GetStaminaRegenRate") || IS("GetArmor") || IS("GetMoveSpeed") ||
+      IS("GetCharacterLevel") || IS("GetXP") || IS("GetXPBounty") || IS("GetGold") || IS("GetGoldBounty"))
+    return u64_float(u64_attr_get(u64_asc_of(self), fn + 3));                                    // AGDCharacterBase attribute getters
+  if (IS("SetHealth") || IS("SetMana") || IS("SetStamina")) { return NONE_; }
   // ---------------- UI widgets ----------------
   if (IS("SetText"))       { *u64_ivar(self, "Text") = x; return NONE_; }
   if (IS("SetPercent"))    { *u64_ivar(self, "Percent") = x; return NONE_; }
@@ -225,99 +201,114 @@ u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
   if (IS("SetOpacity"))    { *u64_ivar(self, "Opacity") = x; return NONE_; }
   if (IS("GetUserWidgetObject")) { u64_v *w = u64_ivar(self, "Widget"); return w->t == U64_OBJ ? *w : u64_objv(self); }
   if (IS("GetOwningPlayer")) return u64_objv(u64_find("PlayerController"));
-  // ---------------- property setters, components, collision, effects ----------------
+  // ---------------- property setters, components, collision ----------------
   if (IS("SetObjectPropertyByName") || IS("SetDoublePropertyByName") || IS("SetStructurePropertyByName")) {
     if (x.t == U64_OBJ && x.u.o) *u64_ivar(x.u.o, u64_intern(nm(y))) = z;
     return NONE_;
   }
   if (IS("SetCollisionProfileNameProperty")) { *u64_ivar(self, "CollisionProfile") = y; return NONE_; }
-  if (IS("K2_DestroyComponent")) { if (x.t == U64_OBJ) u64_kill(x.u.o); return NONE_; }
+  if (IS("K2_DestroyComponent")) { if (x.t == U64_OBJ) u64_obj_destroy(x.u.o); return NONE_; }
   if (IS("GetCollisionObjectType")) return u64_int(0);
-  if (IS("LineTraceMultiForObjects")) return u64_bool(0);        // no physics world: nothing is ever hit
-  if (IS("GetOverlappingActors")) { u64_out(A(argc, a, 2), u64_int(0)); return NONE_; }
+  if (IS("LineTraceMultiForObjects")) return u64_bool(0);        // needs collision meshes (editor export): reports no hit
+  if (IS("GetOverlappingActors")) {
+    u64_obj *hit[16]; int n = u64_overlapping(self, hit, 16);
+    u64_v arr = u64_array_of(0, 0);
+    for (int i = 0; i < n; i++) u64_array_push(&arr, u64_objv(hit[i]));
+    u64_out(A(argc, a, argc > 1 ? 1 : 0), arr);
+    return NONE_;
+  }
   if (IS("SpawnEmitterAtLocation") || IS("SpawnEmitterAttached")) {
     if (u64_log) u64_log("  [fx] emitter %s", nm(x));
     return u64_objv(u64_new("Emitter", "ParticleSystemComponent"));
   }
-  if (IS("BeginSpawningActor")) { u64_obj *o = u64_spawn_actor(nm(y), u64_vec(0, 0, 0)); return u64_objv(o); }
+  if (IS("BeginSpawningActor")) return u64_objv(u64_spawn_actor(nm(y), u64_vec(0, 0, 0)));
+  // ---------------- arrays ----------------
+  if (IS("Array_Length")) return u64_int(u64_array_len(x));
+  if (IS("Array_Get")) { u64_v item = u64_array_get(x, y.u.i); u64_out(z, item); return item; }
   // ---------------- Gameplay Ability System ----------------
-  if (IS("GetAbilitySystemComponent")) {
-    u64_obj *actor = x.t == U64_OBJ ? x.u.o : self;
-    return u64_objv(asc_of(actor));
-  }
-  if (IS("GetActorInfo")) {                              // FGameplayAbilityActorInfo: avatar + its movement component
+  if (IS("GetAbilitySystemComponent")) return u64_objv(u64_asc_of(x.t == U64_OBJ ? x.u.o : self));
+  if (IS("GetActorInfo")) {
     u64_v *av = u64_ivar(self, "Avatar");
     u64_obj *info = u64_new(u64_intern(key(u64_obj_name(self), ".ActorInfo")), "GameplayAbilityActorInfo");
     *u64_ivar(info, "AvatarActor") = *av;
-    *u64_ivar(info, "MovementComponent") = *av;          // movement is modelled on the actor itself
+    *u64_ivar(info, "MovementComponent") = *av;                  // movement is modelled on the actor itself
     return u64_objv(info);
   }
-  if (IS("GetAvatarActorFromActorInfo") || IS("GetOwningActorFromActorInfo")) {
-    u64_v *av = u64_ivar(self, "Avatar");
-    if (av->t == U64_OBJ) return *av;
-    u64_obj *o = owner_of(self);
-    return u64_objv(o ? o : self);
-  }
+  if (IS("GetAvatarActorFromActorInfo") || IS("GetOwningActorFromActorInfo")) return u64_objv(avatar_of_ability(self));
   if (IS("MakeEffectContext") || IS("GetEffectContext")) return u64_objv(u64_new("EffectContext", "GameplayEffectContext"));
   if (IS("EffectContextAddHitResult")) return NONE_;
   if (IS("EffectContextGetHitResult") || IS("GetHitResultFromTargetData")) return u64_int(0);
   if (IS("MakeOutgoingSpec") || IS("MakeOutgoingGameplayEffectSpec")) {
-    int ia = IS("MakeOutgoingSpec") ? 0 : 0;                   // (class, level[, context]) after the receiver
     u64_obj *spec = u64_new("EffectSpec", "GameplayEffectSpec");
-    *u64_ivar(spec, "GEClass") = u64_name(u64_intern(nm(A(argc, a, ia))));
-    *u64_ivar(spec, "Level") = A(argc, a, ia + 1);
+    *u64_ivar(spec, "GEClass") = u64_name(u64_intern(nm(x)));
+    *u64_ivar(spec, "Level") = y;
+    *u64_ivar(spec, "Source") = u64_objv(asc_for(self));
     return u64_objv(spec);
   }
   if (IS("AssignTagSetByCallerMagnitude")) {
-    if (x.t == U64_OBJ && x.u.o) *u64_ivar(x.u.o, key("sbc:", nm(y))) = z;
+    u64_obj *spec = obj_arg(x);
+    if (spec) {
+      int n = u64_ivar(spec, "sbcN")->u.i; char k[16];
+      snprintf(k, sizeof k, "sbc%d_tag", n); *u64_ivar(spec, u64_intern(k)) = u64_name(u64_intern(nm(y)));
+      snprintf(k, sizeof k, "sbc%d_val", n); *u64_ivar(spec, u64_intern(k)) = z;
+      *u64_ivar(spec, "sbcN") = u64_int(n + 1);
+    }
     return x;
   }
-  if (IS("BP_ApplyGameplayEffectToOwner")) {           // called on the ability: (class, level, stacks)
-    u64_v *av = u64_ivar(self, "Avatar"); u64_obj *actor = av->t == U64_OBJ ? av->u.o : (owner_of(self) ? owner_of(self) : self);
-    return u64_int(apply_effect(asc_of(actor), nm(x), F(y) > 0 ? F(y) : 1, 0));
+  if (IS("BP_ApplyGameplayEffectToOwner")) {                      // on the ability: (class, level, stacks)
+    u64_obj *asc = u64_asc_of(avatar_of_ability(self));
+    return u64_int(u64_apply_ge(asc, asc, nm(x), F(y), 0));
   }
-  if (IS("BP_ApplyGameplayEffectToSelf")) return u64_int(apply_effect(!strcmp(u64_obj_class(self), "AbilitySystemComponent") ? self : asc_of(self), nm(x), F(y) > 0 ? F(y) : 1, 0));
+  if (IS("BP_ApplyGameplayEffectToSelf")) { u64_obj *asc = asc_for(self); return u64_int(u64_apply_ge(asc, asc, nm(x), F(y), 0)); }
   if (IS("BP_ApplyGameplayEffectSpecToSelf")) {
-    u64_obj *spec = x.t == U64_OBJ ? x.u.o : 0;
-    u64_obj *asc = !strcmp(u64_obj_class(self), "AbilitySystemComponent") ? self : asc_of(self);
-    return u64_int(spec ? apply_effect(asc, nm(*u64_ivar(spec, "GEClass")), F(*u64_ivar(spec, "Level")) > 0 ? F(*u64_ivar(spec, "Level")) : 1, spec) : 0);
+    u64_obj *spec = obj_arg(x);
+    if (!spec) return u64_int(0);
+    return u64_int(u64_apply_ge(asc_for(self), obj_arg(*u64_ivar(spec, "Source")), nm(*u64_ivar(spec, "GEClass")), F(*u64_ivar(spec, "Level")), spec));
   }
-  if (IS("BP_RemoveGameplayEffectFromOwnerWithHandle")) { remove_effect(x.u.i - 1); return u64_int(1); }
-  if (IS("BP_RemoveGameplayEffectFromOwnerWithGrantedTags") || IS("RemoveActiveGameplayEffectBySourceEffect")) {
-    for (int i = 0; i < MAX_EFFECTS; i++) if (effects[i].live && effects[i].tag && (!strcmp(effects[i].tag, nm(x)) || strstr(nm(x), "Sprint"))) remove_effect(i);
+  if (IS("BP_RemoveGameplayEffectFromOwnerWithHandle")) { u64_remove_ge(x.u.i); return u64_int(1); }
+  if (IS("BP_RemoveGameplayEffectFromOwnerWithGrantedTags")) {
+    u64_obj *asc = u64_asc_of(avatar_of_ability(self));
+    if (x.t == U64_ARRAY) for (int i = 0; i < u64_array_len(x); i++) u64_remove_ge_with_tags(asc, nm(u64_array_get(x, i)));
+    else u64_remove_ge_with_tags(asc, nm(x));
     return u64_int(0);
   }
-  if (IS("HasMatchingGameplayTag")) { u64_obj *asc = !strcmp(u64_obj_class(self), "AbilitySystemComponent") ? self : asc_of(self); return u64_bool(u64_true(*u64_ivar(asc, key("tag:", nm(x))))); }
+  if (IS("RemoveActiveGameplayEffectBySourceEffect")) { u64_remove_ge_class(asc_for(self), nm(x)); return u64_int(0); }
+  if (IS("HasMatchingGameplayTag")) return u64_bool(tag_arg_has(asc_for(self), x));
   if (IS("GetTagName")) return u64_name(nm(x));
   if (IS("EqualEqual_GameplayAttributeGameplayAttribute")) return u64_bool(!strcmp(nm(x), nm(y)));
   if (IS("K2_AddGameplayCue")) { if (u64_log) u64_log("  [cue] %s", nm(x)); return NONE_; }
   if (IS("SendGameplayEventToActor")) { if (u64_log) u64_log("  [event] %s -> %s", nm(y), x.t == U64_OBJ && x.u.o ? u64_obj_name(x.u.o) : "?"); return u64_int(0); }
-  if (IS("K2_CommitAbility") || IS("K2_CommitAbilityCost")) return u64_bool(1);
-  if (IS("K2_EndAbility") || IS("K2_CancelAbility")) {
-    if (u64_true(*u64_ivar(self, "Ended"))) return NONE_;
-    if (u64_log) u64_log("  [ability] %s ended", u64_obj_name(self));
-    *u64_ivar(self, "Ended") = u64_bool(1);
-    u64_timers_cancel_for(self);                         // abort the ability's outstanding tasks
-    for (int i = 0; i < ntasks; ) { u64_v *ab = u64_ivar(tasks[i], "Ability"); if (ab->t == U64_OBJ && ab->u.o == self) tasks[i] = tasks[--ntasks]; else i++; }
-    u64_call(self, "K2_OnEndAbility", 0, 0);             // the ability's OnEndAbility event (e.g. StopSprinting)
-    return NONE_;
-  }
+  if (IS("K2_CommitAbility")) return u64_bool(u64_ability_commit(self, 1, 1));           // cooldown + cost
+  if (IS("K2_CommitAbilityCost")) return u64_bool(u64_ability_commit(self, 1, 0));
+  if (IS("K2_EndAbility")) { u64_ability_end(self, 0); return NONE_; }
+  if (IS("K2_CancelAbility")) { u64_ability_end(self, 1); return NONE_; }
   // ---------------- ability tasks ----------------
   if (IS("WaitDelay")) { u64_obj *t = new_task("AbilityTask_WaitDelay", x.u.o); *u64_ivar(t, "Time") = y; return u64_objv(t); }
-  if (IS("PlayMontageAndWaitForEvent")) return u64_objv(new_task("AbilityTask_PlayMontageAndWaitForEvent", x.u.o));
+  if (IS("PlayMontageAndWaitForEvent")) {                          // (ability, taskName, montage, eventTags, rate, ...)
+    u64_obj *t = new_task("AbilityTask_PlayMontageAndWaitForEvent", x.u.o);
+    *u64_ivar(t, "Montage") = A(argc, a, 2); *u64_ivar(t, "Rate") = A(argc, a, 4);
+    return u64_objv(t);
+  }
   if (IS("ApplyRootMotionConstantForce")) { u64_obj *t = new_task("AbilityTask_ApplyRootMotionConstantForce", x.u.o); *u64_ivar(t, "Duration") = A(argc, a, 4); return u64_objv(t); }
   if (IS("WaitInputRelease")) return u64_objv(new_task("AbilityTask_WaitInputRelease", x.u.o));
   if (IS("WaitTargetData")) return u64_objv(new_task("AbilityTask_WaitTargetData", x.u.o));
   if (IS("WaitNetSync")) return u64_objv(new_task("AbilityTask_WaitNetSync", x.u.o));
-  if (IS("WaitReceiveDamage")) return u64_objv(new_task("AbilityTask_WaitReceiveDamage", x.u.o));
+  if (IS("WaitReceiveDamage")) { u64_obj *t = new_task("AbilityTask_WaitReceiveDamage", x.u.o); *u64_ivar(t, "ASC") = u64_objv(asc_for(obj_arg(x))); return u64_objv(t); }
   if (IS("WaitForGameplayEffectStackChange")) return u64_objv(new_task("AbilityTask_WaitForGameplayEffectStackChange", x.u.o));
-  if (IS("ListenForAttributesChange")) return u64_objv(new_task("AbilityTask_ListenForAttributesChange", x.u.o));
-  if (IS("ListenForCooldownChange") || IS("ListenForGameplayEffectStackChange")) return u64_objv(new_task("AbilityTask_ListenForOther", x.u.o));
+  if (IS("ListenForAttributesChange")) {                           // (ASC, attributes[])
+    u64_obj *t = new_task("AsyncTaskAttributeChanged", 0); *u64_ivar(t, "ASC") = x; *u64_ivar(t, "Attributes") = y; return u64_objv(t);
+  }
+  if (IS("ListenForGameplayEffectStackChange")) {                  // (ASC, effect tag)
+    u64_obj *t = new_task("AsyncTaskEffectStackChanged", 0); *u64_ivar(t, "ASC") = x; *u64_ivar(t, "Tag") = y; return u64_objv(t);
+  }
+  if (IS("ListenForCooldownChange")) {                             // (ASC, cooldown tags, use server cooldown)
+    u64_obj *t = new_task("AsyncTaskCooldownChanged", 0); *u64_ivar(t, "ASC") = x; *u64_ivar(t, "CooldownTags") = y; return u64_objv(t);
+  }
   if (IS("MakeTargetLocationInfoFromOwnerActor")) return u64_objv(new_task("TargetLocationInfo", x.u.o));
-  if (IS("ReadyForActivation") || IS("Activate")) { if (x.t == U64_OBJ && x.u.o) activate_task(x.u.o); else if (self) activate_task(self); return NONE_; }
+  if (IS("ReadyForActivation") || IS("Activate")) { u64_obj *t = x.t == U64_OBJ && x.u.o ? x.u.o : self; if (t) activate_task(t); return NONE_; }
   if (IS("EndTask")) { untrack(self); return NONE_; }
   // ---------------- latent actions ----------------
   if (IS("Delay")) { if (y.t == U64_FLOAT && z.t == U64_DELEGATE) u64_timer_latent(F(y), z); return NONE_; }
-  if (IS("WaitDelay_") || IS("OnExecute") || IS("StackChange") || IS("UpdateDamage")) return NONE_;
+  if (IS("OnExecute") || IS("StackChange") || IS("UpdateDamage")) return NONE_;
   return NONE_;
 }

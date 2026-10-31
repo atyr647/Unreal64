@@ -4,8 +4,8 @@
 #include <stdio.h>
 u64_v u64_native(u64_obj *self, const char *fn, int argc, const u64_v *argv);
 
-#define MAX_OBJS 64
-#define MAX_VARS 48
+#define MAX_OBJS 256
+#define MAX_VARS 32
 
 typedef struct { const char *k; u64_v v; } slot_t;
 struct u64_obj { const char *name; const char *cls; slot_t iv[MAX_VARS]; int niv; slot_t pf[MAX_VARS]; int npf; int alive; };
@@ -21,13 +21,14 @@ u64_log_fn u64_log;
 
 u64_obj *u64_new(const char *name, const char *cls)
 {
-  if (nobjs >= MAX_OBJS) return &null_obj;
+  if (nobjs >= MAX_OBJS) { static int warned; if (!warned++ && u64_log) u64_log("  [warn] object pool exhausted (%d)", MAX_OBJS); return &null_obj; }
   struct u64_obj *o = &objs[nobjs++];
   o->name = name; o->cls = cls; o->alive = 1;
   u64_apply_defaults(o, cls);
   return o;
 }
 
+static u64_v *slot_find(slot_t *a, int n, const char *k) { for (int i = 0; i < n; i++) if (!strcmp(a[i].k, k)) return &a[i].v; return 0; }
 static u64_v *slot(slot_t *a, int *n, const char *k)
 {
   for (int i = 0; i < *n; i++) if (!strcmp(a[i].k, k)) return &a[i].v;
@@ -66,8 +67,10 @@ const char *u64_obj_class(u64_obj *o) { return o->cls; }
 int u64_obj_count(void)               { return nobjs; }
 u64_obj *u64_obj_at(int i)            { return &objs[i]; }
 int u64_obj_alive(u64_obj *o)         { return o && o->alive; }
-void u64_obj_destroy(u64_obj *o)      { if (o) o->alive = 0; }
-void u64_array_set(u64_v *a, int n, const u64_v *e) { (void)a; (void)n; (void)e; }
+int u64_obj_is_actor(u64_obj *o)      { u64_v *l = o && o->alive ? slot_find(o->iv, o->niv, "Location") : 0; return l && l->t == U64_VEC; }   // actors have a location; components and tasks do not
+void u64_obj_destroy(u64_obj *o)      { if (o) { o->alive = 0; if (u64_log) u64_log("  [destroy] %s", o->name); } }
+u64_v u64_array_of(int n, const u64_v *items);
+void u64_array_set(u64_v *a, int n, const u64_v *e) { *a = u64_array_of(n, e); }
 
 u64_v u64_call(u64_obj *self, const char *fn, int argc, const u64_v *argv)
 {
@@ -82,4 +85,18 @@ u64_v u64_call(u64_obj *self, const char *fn, int argc, const u64_v *argv)
   u64_v r = u64_native(self, fn, argc, argv);
   if (r.t == U64_NONE && u64_native_hook) return u64_native_hook(self, fn, argc, argv);
   return r;
+}
+
+u64_v u64_comp(u64_obj *owner, const char *name)
+{
+  if (!owner) return (u64_v){U64_NONE};
+  const char *k = u64_intern(name);
+  char key[96]; snprintf(key, sizeof key, "comp:%s", k);
+  u64_v *slot = u64_ivar(owner, u64_intern(key));
+  if (slot->t == U64_OBJ) return *slot;
+  char nm[64]; snprintf(nm, sizeof nm, "%s.%s", owner->name, name);
+  u64_obj *c = u64_new(u64_intern(nm), "Component");
+  *u64_ivar(c, "Owner") = u64_objv(owner);
+  *slot = u64_objv(c);
+  return *slot;
 }

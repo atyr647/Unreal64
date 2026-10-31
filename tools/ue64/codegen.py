@@ -36,7 +36,7 @@ class Gen:
             return f"(*u64_ivar({self_expr}, {cstr(last(n.args[0]))}))"
         if n.op == "Context":
             obj = self.ex(n.args[0], self_expr)
-            return self.lv(n.args[3], f"({obj}).u.o")
+            return self.lv(n.args[3], f"u64_asobj({obj})")
         if n.op == "StructMemberContext":
             return f"(*u64_member(&{self.lv(n.args[1], self_expr)}, {cstr(last(n.args[0]))}))"
         self.unsupported.append(n.op + " (as l-value)")
@@ -73,7 +73,7 @@ class Gen:
             return self.call(a[0], a[1], s, c)
         if o in ("Context", "Context_FailSilent", "ClassContext"):
             obj = self.ex(a[0], c)
-            return f"({{ u64_v _o = {obj}; {self.ex(a[3], '_o.u.o', c)}; }})"
+            return f"({{ u64_v _o = {obj}; {self.ex(a[3], 'u64_asobj(_o)', c)}; }})"
         if o == "TextConst":
             kind = a[0]
             if kind in (2, 3) and len(a) > 1: return self.ex(a[1], s)

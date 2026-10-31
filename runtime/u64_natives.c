@@ -1,5 +1,5 @@
 // Engine natives that Blueprints call by name, plus the world loop (timers, spawning, BeginPlay).
-#include "u64_rt.h"
+#include "u64_gas_core.h"
 #include <math.h>
 #include <stdio.h>
 
@@ -79,13 +79,12 @@ u64_v u64_native(u64_obj *self, const char *fn, int argc, const u64_v *a)
   // --- world / actors
   if (IS("HasAuthority")) { HIT; return u64_bool(1); }
   if (IS("IsValid")) { HIT; return u64_bool(x.t == U64_OBJ && u64_obj_alive(x.u.o)); }
-  if (IS("IsAlive")) { HIT; return u64_bool(1); }
   if (IS("GetTransform") || IS("K2_GetActorLocation")) { HIT; return loc_of(self); }
   if (IS("K2_SetActorLocation") || IS("K2_SetRelativeLocation")) { HIT; *u64_ivar(self, "Location") = x; return u64_bool(1); }
   if (IS("GetOwner") || IS("GetInstigator") || IS("GetOwningActorFromActorInfo")) { HIT; return u64_objv(self); }
   if (IS("BeginDeferredActorSpawnFromClass")) { HIT; return u64_objv(spawn(y, arg(argc, a, 2))); }
-  if (IS("FinishSpawningActor")) { HIT; if (x.t == U64_OBJ && x.u.o) u64_call(x.u.o, "ReceiveBeginPlay", 0, 0); return x; }
-  if (IS("K2_DestroyActor")) { HIT; u64_kill(self); return u64_int(0); }
+  if (IS("FinishSpawningActor")) { HIT; if (x.t == U64_OBJ && x.u.o) { u64_actor_init(x.u.o); u64_call(x.u.o, "ReceiveBeginPlay", 0, 0); } return x; }
+  if (IS("K2_DestroyActor")) { HIT; u64_obj_destroy(self); return u64_int(0); }
   if (IS("SetLifeSpan")) { HIT; return u64_int(0); }
   // --- timers
   if (IS("K2_SetTimerDelegate")) { HIT; return set_timer(argc, a); }
@@ -127,13 +126,14 @@ void u64_world_begin_play(void)
   int n = u64_obj_count();
   for (int i = 0; i < n; i++) {
     u64_obj *o = u64_obj_at(i);
-    if (u64_obj_alive(o)) u64_call(o, "ReceiveBeginPlay", 0, 0);
+    if (u64_obj_alive(o)) { u64_actor_init(o); u64_call(o, "ReceiveBeginPlay", 0, 0); }
   }
 }
 
 void u64_world_tick(float dt)
 {
   now_ += dt;
+  u64_gas_tick(dt);
   for (int i = 0; i < MAX_TIMERS; i++) {
     if (!timers[i].live) continue;
     timers[i].t -= dt;
@@ -148,11 +148,3 @@ void u64_world_tick(float dt)
   }
 }
 
-void u64_kill(u64_obj *o)
-{
-  if (!u64_obj_alive(o)) return;
-  u64_v self = u64_objv(o);
-  u64_mc_broadcast(u64_ivar(o, "OnCharacterDied"), 1, &self);
-  u64_obj_destroy(o);
-  if (u64_log) u64_log("  [kill] %s", u64_obj_name(o));
-}

@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import codegen
+import props
 import uasset
 
 
-def cval(v):
+def cval(v, owner="o"):
     """C expression for a tagged-property value, or None if it can't be represented."""
     if isinstance(v, bool): return f"u64_bool({int(v)})"
     if isinstance(v, int): return f"u64_int({v})"
@@ -13,8 +14,21 @@ def cval(v):
     if isinstance(v, str): return f"u64_str({codegen.cstr(v)})"
     if isinstance(v, tuple):
         if v[0] == "name": return f"u64_name({codegen.cstr(v[1])})"
-        if v[0] == "obj": return f"u64_cls({codegen.cstr(v[1].removesuffix('_C'))})"
+        if v[0] == "obj":
+            if len(v) > 2 and v[2] > 0:        # a sub-object of this package (component): owned by the actor
+                return f"u64_comp({owner}, {codegen.cstr(v[1])})"
+            return f"u64_cls({codegen.cstr(v[1].removesuffix('_C'))})"
         if v[0] == "vec": return f"u64_vec({v[1][0]!r}f, {v[1][1]!r}f, {v[1][2]!r}f)"
+        if v[0] == "enum": return f"u64_name({codegen.cstr(v[1])})"
+        if v[0] == "tag": return f"u64_name({codegen.cstr(v[1])})"
+        if v[0] == "tags":
+            items = ", ".join(f"u64_name({codegen.cstr(t)})" for t in v[1])
+            return f"u64_array_of({len(v[1])}, (u64_v[]){{u64_int(0){', ' + items if items else ''}}} + 1)"
+        if v[0] == "array":
+            parts = [cval(x, owner) for x in v[1]]
+            if all(parts):
+                items = ", ".join(parts)
+                return f"u64_array_of({len(parts)}, (u64_v[]){{u64_int(0){', ' + items if items else ''}}} + 1)"
     return None
 
 
@@ -23,10 +37,14 @@ def class_defaults(p, data):
     out = {}
     for e in p.exports:
         if e.name.startswith("Default__") and e.name.endswith("_C"):
+            cls = e.name[len("Default__"):-2]
             try:
-                out[e.name[len("Default__"):-2]] = uasset.read_tags(p, data, e)
+                out[cls] = props.read_object(p, data, e)          # nested: arrays, tag containers, enums
             except Exception:
-                pass  # older tag layouts (pre-UE4.20 assets) are not handled; defaults are skipped
+                try:
+                    out[cls] = uasset.read_tags(p, data, e)
+                except Exception:
+                    pass  # older tag layouts (pre-UE4.20 assets) are not handled; defaults are skipped
     return out
 
 
@@ -55,9 +73,9 @@ def level_actors(p, data):
 
 
 def emit_defaults_c(defaults):
-    lines = ['#include "u64_rt.h"', "void u64_apply_defaults(u64_obj *o, const char *cls) {"]
+    lines = ['#include "u64_gas_core.h"', "void u64_apply_defaults(u64_obj *o, const char *cls) {"]
     for cls in sorted(defaults):
-        sets = [(k, cval(v)) for k, v in defaults[cls].items() if k not in ("UberGraphFrame", "ActorLabel")]
+        sets = [(k, cval(v, "o")) for k, v in defaults[cls].items() if k not in ("UberGraphFrame", "ActorLabel")]
         sets = [(k, c) for k, c in sets if c]
         if not sets:
             continue
@@ -69,12 +87,12 @@ def emit_defaults_c(defaults):
 
 
 def emit_level_c(actors):
-    lines = ['#include "u64_rt.h"', "void u64_level_load(void) {", "  u64_obj *a;"]
+    lines = ['#include "u64_gas_core.h"', "void u64_level_load(void) {", "  u64_obj *a;"]
     for label, cls, props, loc in actors:
         lines.append(f"  a = u64_new({codegen.cstr(label)}, {codegen.cstr(cls)});")
         lines.append(f"  *u64_ivar(a, \"Location\") = u64_vec({loc[0]!r}f, {loc[1]!r}f, {loc[2]!r}f);")
         for k, v in props.items():
-            c = cval(v)
+            c = cval(v, "a")
             if c and k not in ("UberGraphFrame", "ActorLabel", "RootComponent"):
                 lines.append(f"  *u64_ivar(a, {codegen.cstr(codegen.ident(k))}) = {c};")
     lines.append("  u64_world_begin_play();")

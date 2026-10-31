@@ -11,3 +11,6 @@ bpdemo/src/u64_rt.c
 bpdemo/src/u64_natives.c
 bpdemo/src/u64_gas.c
 bpdemo/src/scenarios.c
+bpdemo/src/u64_gas_core.c
+bpdemo/src/u64_gas_core.h
+bpdemo/src/u64_rt.h

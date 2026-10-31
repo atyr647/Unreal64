@@ -90,7 +90,7 @@ class Decoder:
         if self.ue5:
             self.i32()                           # UE5 also stores the owning struct's package index
         self.mem = mem0 + 8                      # in memory the whole path is one 8-byte pointer
-        return ".".join(path)
+        return path[0] if path else ""            # innermost first: the property name, then its owners
 
     def cstr(self):
         e = self.b.index(b"\0", self.p)

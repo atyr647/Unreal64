@@ -5,6 +5,7 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 import bpscan  # noqa: E402
 import codegen  # noqa: E402
+import gasdata  # noqa: E402
 import leveldata  # noqa: E402
 import uasset  # noqa: E402
 
@@ -50,6 +51,9 @@ def main(content, out):
     known = {c for c, _ in reg}
     maps_found.sort(key=lambda m: -sum(1 for a in m[2] if a[1] in known))
     actors = maps_found[0][2] if maps_found else []
+    ges, montages, shapes = gasdata.collect(content)
+    with open(os.path.join(out, "u64_gas_data.c"), "w") as fh:
+        fh.write(gasdata.emit_gas_data_c(ges, montages, shapes))
     with open(os.path.join(out, "u64_defaults.c"), "w") as fh:
         fh.write(leveldata.emit_defaults_c(defaults))
     with open(os.path.join(out, "u64_level.c"), "w") as fh:
@@ -67,6 +71,7 @@ def main(content, out):
         import re
         rt = open(os.path.join(os.path.dirname(__file__), "..", "..", "runtime", "u64_natives.c")).read()
         rt += open(os.path.join(os.path.dirname(__file__), "..", "..", "runtime", "u64_gas.c")).read()
+        rt += open(os.path.join(os.path.dirname(__file__), "..", "..", "runtime", "u64_gas_core.c")).read()
         impl = set(re.findall(r'IS\("([A-Za-z_0-9]+)"\)', rt))
         bpfn = {fn for _, fn in reg}
         external = sorted(n for n in natives if n not in bpfn)  # calls into engine/plugin code, not other compiled BPs

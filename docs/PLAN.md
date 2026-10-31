@@ -60,20 +60,44 @@ both spawners spawn at t=2.0 (the Blue one with its per-instance `MinionClass` o
 The compiler reports exactly which engine functions remain unimplemented (`compat_report.txt`).
 
 **Engine function coverage: 127/129** of the functions this project's Blueprints call (the other two are Blueprint
-ubergraphs in the old-dialect assets that cannot be decoded). Grouped in `runtime/u64_natives.c` (world, math, timers)
-and `runtime/u64_gas.c` (text, rotators/vectors with out-parameters, animation queries, UI widget state, collision,
-Gameplay Ability System, ability tasks, latent `Delay`, and the project's own C++ movement/death functions).
-Verified by scenario tests that drive the project's *own compiled abilities*: Sprint (activate -> `StartSprinting`
--> input release -> `K2_OnEndAbility` -> `StopSprinting`), Dash (root-motion task ends the ability; the pending montage
-task is cancelled), damage with armor (`Damage * 100/(100+Armor)`, lethal damage destroys the actor), `BreakVector`
-out-parameters and `Format`. Same 12 checks pass on host and in ares (docs/img/ares_gas.png).
+ubergraphs in old-dialect assets that cannot be decoded).
 
-Fidelity of the ports: faithful where the project's C++ was read (damage formula, Die/FinishDying, sprint,
-`GetAbilityLevel`); **approximated** elsewhere. In particular GameplayEffect modifier magnitudes are chosen from the
-effect class name (the modifier arrays inside GE assets are not parsed yet), attribute defaults are fixed
-(100/100/100, MoveSpeed 600), there is no physics (`LineTrace`/`GetOverlappingActors` find nothing), animation montages
-complete after a fixed 1 s, and arrays are not modelled. "Ported" here means every called function has defined behaviour
-that the tests exercise or that is trivially correct, not that GAS is reimplemented in full.
+**The Gameplay Ability System is ported from real data and the project's C++, not approximated**
+(`runtime/u64_gas_core.c`, `tools/ue64/gasdata.py`, `props.py`):
+- All 21 GameplayEffect assets are read (modifiers, op, magnitude type, duration, period, stacking, granted/asset/remove
+  tags, application and ongoing tag requirements, executions) and compiled to tables.
+- Attribute values are `aggregate(base, active modifiers)` (Additive/Multiplicative/Division/Override, stack-scaled);
+  instant and periodic effects change the base. Periodic effects execute on application and every period; Duration effects
+  expire; ongoing tag requirements inhibit modifiers *and* granted tags (so `GE_HealthRegen` stops while `State.Dead`).
+- `GDAttributeSetBase` is ported: `PreAttributeChange` (MoveSpeed clamp 150-1000; `AdjustAttributeForMaxChange`, which is
+  what takes Health 0 -> 100 when `GE_HeroAttributes` overrides MaxHealth), `PostGameplayEffectExecute` (Damage meta
+  attribute, Health/Mana/Stamina clamps, bounty to the source).
+- `GDDamageExecCalculation` is ported exactly (target Armor, source Damage, SetByCaller `Data.Damage`, `100/(100+Armor)`).
+- Startup follows `GDHeroCharacter::PossessedBy` / `GDMinionCharacter::BeginPlay`: DefaultAttributes -> max-out ->
+  StartupEffects -> CharacterAbilities. Death follows `Die`/`FinishDying` (OnCharacterDied, cancel abilities, remove
+  `Effect.RemoveOnDeath` effects, add `State.Dead`, destroy after the death montage's real length).
+- Abilities: cost check (`CanApplyAttributeModifiers`), cooldown (the cooldown effect's granted tags), activation
+  blocked/required tags, `CancelAbilitiesWithTag`, owned tags, `BlockAbilitiesWithTag`, Commit applies cost + cooldown,
+  stun cancels abilities (`StunTagChanged`), input press/release by `AbilityInputID`.
+- Tasks mirror the C++ async tasks (attribute changed, cooldown begin/end, effect stack change) and the montage task
+  fires BlendOut then Completed at the montage's **real** length and blend-out time read from the AnimMontage asset.
+- Movement speed follows `GetMaxSpeed` (0 when dead/stunned, x1.4 sprinting, x0.5 aiming). Overlaps use the real
+  collision shapes (BoxExtent x RelativeScale3D; capsule radii/half heights, engine defaults where not overridden).
+- Components are real objects owned by their actor; arrays are real; out-parameters write through references.
+
+Verified by scenarios that check exact values derived from the assets (e.g. 25 dmg vs Armor 15 = 21.739; regen +1 per
+second; stack limit 4 -> Armor 55; Dash cost -15 applied by the Blueprint's own CommitAbility; Dash montage cancelled on
+end; sprint speed 840) plus the project's own compiled Sprint/Dash abilities. Same checks pass on host (also under
+AddressSanitizer) and in ares (docs/img/ares_gas.png).
+
+**Not ported (reported, not guessed):**
+- Collision queries that need geometry: `LineTraceMultiForObjects` and hit results (need collision meshes from the editor
+  export). Overlaps use actor-level shapes: component relative transforms and rotation are ignored.
+- Animation: montage notifies (`EventReceived` from AnimNotifies) are not read; no skeletal pose / anim graph evaluation.
+- `ScalableFloat` curve tables, custom magnitude calculation classes, conditional/overflow effects: the data extractor
+  flags them as unsupported (none are used by this project). Attribute capture snapshotting is not modelled.
+- No replication/networking; UI widgets only keep state (Text/Percent/Visibility), nothing is drawn.
+- Hit-react and damage-number effects are Blueprint/C++ events that are called when they exist but have no visuals.
 
 Bugs found by this work: argument expressions of a `Context` call were evaluated against the callee instead of the caller
 (`Self` as an argument pointed at the wrong object) — fixed in `codegen.py`.
@@ -104,3 +128,7 @@ Known gaps: out-parameters are passed by value; struct members use a placeholder
 4. Reflections (sphere map), LODs, collision + gravity so you can walk a real level.
 5. Production bake backend (Embree or Cycles) for path-traced quality; the interface is `bake.bake()`.
 6. Gameplay: a Blueprint bytecode interpreter is the only route to preserving game logic natively. Large.
+
+Additional bug found while porting: in UE 4.25-style packages a field path is stored innermost-first, so taking the last
+name collapsed every variable of `UI_HUD` into one (fixed; regression test in tests/test_props.py). Another: argument
+expressions of a `Context` call must run in the caller's frame (fixed earlier).

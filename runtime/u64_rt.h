@@ -5,7 +5,7 @@
 #include <string.h>
 
 typedef struct u64_obj u64_obj;
-typedef enum { U64_NONE, U64_BOOL, U64_INT, U64_FLOAT, U64_STR, U64_NAME, U64_OBJ, U64_VEC, U64_CLASS, U64_DELEGATE, U64_REF } u64_type;
+typedef enum { U64_NONE, U64_BOOL, U64_INT, U64_FLOAT, U64_STR, U64_NAME, U64_OBJ, U64_VEC, U64_CLASS, U64_DELEGATE, U64_REF, U64_ARRAY } u64_type;
 typedef struct u64_v {
   u64_type t;
   union { int32_t i; float f; const char *s; u64_obj *o; float v[3]; struct u64_v *r; } u;
@@ -84,3 +84,16 @@ void u64_mc_broadcast(u64_v *m, int argc, const u64_v *argv);
 void u64_input_release(u64_obj *ability);   // player released the ability's input
 const char *u64_intern(const char *s);      // stable copy of a string (variable names built at run time)
 void u64_timers_cancel_for(u64_obj *ability);
+
+// Hooks between the GAS core and the ability-task natives (u64_gas.c).
+void u64_notify_attribute_tasks(u64_obj *asc, int argc, const u64_v *argv);
+void u64_notify_damage_tasks(u64_obj *asc, int argc, const u64_v *argv);
+void u64_notify_stack_tasks(u64_obj *asc, const char *effect_name);
+void u64_tasks_end_for(u64_obj *ability);
+void u64_obj_destroy(u64_obj *o);
+
+// Safe object access: a value that is not an object reference yields NULL (never a reinterpreted pointer).
+static inline u64_obj *u64_asobj(u64_v v) { return v.t == U64_OBJ ? v.u.o : 0; }
+// Sub-objects (components) of an actor, created on first use and owned by it.
+u64_v u64_comp(u64_obj *owner, const char *name);
+int u64_obj_is_actor(u64_obj *o);   // placed or spawned actors (not components, tasks or specs)

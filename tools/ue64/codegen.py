@@ -122,8 +122,8 @@ class Gen:
         if o == "LetValueOnPersistentFrame":
             return f"*u64_pframe(self, {cstr(last(a[0]))}) = {self.ex(a[1])};"
         if o == "Return":
-            if a[0].op == "Nothing": return "return;"
-            return f"L.ReturnValue = {self.ex(a[0])}; return;"
+            if a[0].op == "Nothing": return "goto u64_ret;"
+            return f"L.ReturnValue = {self.ex(a[0])}; goto u64_ret;"
         if o == "Jump":
             self.targets.add(a[0]); return f"goto L_{a[0]};"
         if o == "JumpIfNot":
@@ -145,7 +145,24 @@ class Gen:
         return self.ex(n) + ";"
 
 
+def order_params(params, stmts):
+    """Property export order is not declaration order. Event stubs copy their parameters into persistent-frame variables
+    one statement per parameter, in pin order, so that order is the declaration order; any other parameters keep export order."""
+    names = {n for n, _ in params}
+    seen = []
+    for st in stmts:
+        if st.op == "LetValueOnPersistentFrame" and isinstance(st.args[1], Node) and st.args[1].op == "LocalVariable":
+            v = last(st.args[1].args[0])
+            if v in names and v not in seen:
+                seen.append(v)
+    by_name = dict(params)
+    ordered = [(n, by_name[n]) for n in seen]
+    return ordered + [(n, o) for n, o in params if n not in seen]
+
+
 def gen_function(cls, fname, stmts, params=()):
+    params = order_params(list(params), stmts) if params and not fname.startswith("ExecuteUbergraph") else params
+    """params: [(name, is_out)] in declaration order. Out/reference parameters are written back to the caller on return."""
     uber = fname.startswith("ExecuteUbergraph")
     g = Gen(uber)
     body = [(n, g.stmt(n)) for n in stmts]
@@ -155,13 +172,19 @@ def gen_function(cls, fname, stmts, params=()):
     for n, text in body:
         text = text.replace("DISPATCH_CASES", cases)
         lines.append(f"  L_{n.mem}:; {text}")
-    names = sorted((g.locals | {"ReturnValue", "_unsupported"} | set(params)) if not uber else {"ReturnValue", "_unsupported"})
+    pnames = [pn for pn, _ in params]
+    names = sorted((g.locals | {"ReturnValue", "_unsupported"} | {ident(x) for x in pnames}) if not uber else {"ReturnValue", "_unsupported"})
     locs = "".join(f" u64_v {n};" for n in names)
-    bind = []
-    for i, pn in enumerate(params):
+    bind, back = [], []
+    for i, (pn, is_out) in enumerate(params):
         tgt = f"(*u64_pframe(self, {cstr(pn)}))" if uber else f"L.{ident(pn)}"
-        bind.append(f"  if (argc > {i}) {tgt} = args[{i}];")
+        if is_out and not uber:
+            bind.append(f"  if (argc > {i}) {tgt} = args[{i}].t == U64_REF ? *args[{i}].u.r : args[{i}];")
+            back.append(f"  if (argc > {i}) u64_out(args[{i}], {tgt});")
+        else:
+            bind.append(f"  if (argc > {i}) {tgt} = args[{i}];")
     src = (f"void bp_{ident(cls)}__{ident(fname)}(u64_obj *self, const u64_v *args, int argc) {{\n"
            f"  (void)args; (void)argc;\n  struct {{{locs} }} L; memset(&L, 0, sizeof L); (void)L;\n"
-           f"  U64_FLOW_DECL; (void)flow_n;\n" + "\n".join(bind + lines) + "\n}\n")
+           f"  U64_FLOW_DECL; (void)flow_n;\n" + "\n".join(bind + lines) +
+           "\n  u64_ret:; u64_set_return(L.ReturnValue);\n" + "\n".join(back) + "\n}\n")
     return src, g

@@ -81,6 +81,19 @@ void u64_notify_attribute_tasks(u64_obj *asc, int argc, const u64_v *argv)      
   }
   for (int i = 0; i < n; i++) u64_mc_broadcast(u64_ivar(snap[i], "OnAttributeChanged"), argc, argv);
 }
+void u64_deliver_gameplay_event(u64_obj *asc, const char *tag, int argc, const u64_v *argv)
+{
+  u64_obj *snap[MAX_TASKS]; int n = 0;
+  for (int i = 0; i < ntasks; i++) {
+    u64_obj *t = tasks[i];
+    if (strcmp(u64_obj_class(t), "AbilityTask_PlayMontageAndWaitForEvent")) continue;
+    if (u64_asc_of(avatar_of_ability(obj_arg(*u64_ivar(t, "Ability")))) != asc) continue;
+    u64_v tags = *u64_ivar(t, "EventTags"); int hit = u64_array_len(tags) == 0;
+    for (int k = 0; k < u64_array_len(tags); k++) { const char *want = nm(u64_array_get(tags, k)); size_t q = strlen(want); if (!strncmp(tag, want, q) && (tag[q] == 0 || tag[q] == '.')) hit = 1; }
+    if (hit) snap[n++] = t;
+  }
+  for (int i = 0; i < n; i++) u64_mc_broadcast(u64_ivar(snap[i], "EventReceived"), argc, argv);
+}
 void u64_notify_damage_tasks(u64_obj *asc, int argc, const u64_v *argv) { fire_tasks("AbilityTask_WaitReceiveDamage", "OnDamage", argc, argv, asc); }
 void u64_notify_stack_tasks(u64_obj *asc, const char *effect)
 {
@@ -123,6 +136,7 @@ static void activate_task(u64_obj *t)
   else if (!strcmp(c, "AbilityTask_PlayMontageAndWaitForEvent")) {
     // GDAT_PlayMontageAndWaitForEvent: OnBlendOut when the montage starts blending out, OnCompleted when it ends.
     float blend, len = u64_montage_length(nm(*u64_ivar(t, "Montage")), &blend), rate = F(*u64_ivar(t, "Rate")); if (rate <= 0) rate = 1;
+    u64_montage_play(avatar_of_ability(obj_arg(*u64_ivar(t, "Ability"))), nm(*u64_ivar(t, "Montage")), rate);   // schedules AnimNotifies
     if (len < 0) { if (u64_log) u64_log("  [anim] montage %s has no data", nm(*u64_ivar(t, "Montage"))); len = 0; blend = 0; }
     float bo = (len - blend) / rate; if (bo < 0) bo = 0;
     u64_timer_broadcast(bo, t, "OnBlendOut", u64_name("None"));
@@ -168,7 +182,21 @@ u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
   if (IS("BreakVector")) { u64_out(y, u64_float(x.u.v[0])); u64_out(z, u64_float(x.u.v[1])); u64_out(A(argc, a, 3), u64_float(x.u.v[2])); return NONE_; }
   if (IS("BreakRotator")) { u64_out(y, u64_float(x.u.v[2])); u64_out(z, u64_float(x.u.v[0])); u64_out(A(argc, a, 3), u64_float(x.u.v[1])); return NONE_; }  // roll, pitch, yaw
   if (IS("BreakTransform")) { u64_out(y, x); u64_out(z, u64_vec(0, 0, 0)); u64_out(A(argc, a, 3), u64_vec(1, 1, 1)); return NONE_; }
-  if (IS("BreakHitResult") || IS("BreakGameplayCueParameters")) { for (int i = 1; i < argc; i++) u64_out(a[i], u64_int(0)); return NONE_; }
+  if (IS("BreakHitResult")) {                                       // UE 4.27/5.x layout: 17 parameters (hit + 16 outputs)
+    u64_obj *h = obj_arg(x);
+    if (!h) { for (int i = 1; i < argc; i++) u64_out(a[i], u64_int(0)); return NONE_; }
+    u64_v actor = *u64_ivar(h, "HitActor");
+    u64_out(A(argc, a, 1), *u64_ivar(h, "bBlockingHit")); u64_out(A(argc, a, 2), u64_bool(0));
+    u64_out(A(argc, a, 3), *u64_ivar(h, "Time")); u64_out(A(argc, a, 4), *u64_ivar(h, "Distance"));
+    u64_out(A(argc, a, 5), *u64_ivar(h, "Location")); u64_out(A(argc, a, 6), *u64_ivar(h, "Location"));
+    u64_out(A(argc, a, 7), *u64_ivar(h, "Normal")); u64_out(A(argc, a, 8), *u64_ivar(h, "Normal"));
+    u64_out(A(argc, a, 9), u64_int(0)); u64_out(A(argc, a, 10), actor);
+    u64_out(A(argc, a, 11), actor.t == U64_OBJ ? u64_comp(actor.u.o, "CapsuleComponent") : u64_int(0));
+    u64_out(A(argc, a, 12), u64_name("None")); u64_out(A(argc, a, 13), u64_int(0)); u64_out(A(argc, a, 14), u64_int(0));
+    u64_out(A(argc, a, 15), *u64_ivar(h, "TraceStart")); u64_out(A(argc, a, 16), *u64_ivar(h, "TraceEnd"));
+    return NONE_;
+  }
+  if (IS("BreakGameplayCueParameters")) { for (int i = 1; i < argc; i++) u64_out(a[i], u64_int(0)); return NONE_; }
   if (IS("NormalizedDeltaRotator")) return u64_vec(norm180(x.u.v[0] - y.u.v[0]), norm180(x.u.v[1] - y.u.v[1]), norm180(x.u.v[2] - y.u.v[2]));
   if (IS("K2_GetActorRotation") || IS("GetBaseAimRotation")) { u64_v *r = u64_ivar(self, "Rotation"); return r->t == U64_VEC ? *r : u64_vec(0, 0, 0); }
   if (IS("GetActorForwardVector")) { u64_v *r = u64_ivar(self, "Rotation"); float yaw = (r->t == U64_VEC ? r->u.v[1] : 0) * 0.0174533f; return u64_vec(cosf(yaw), sinf(yaw), 0); }
@@ -181,12 +209,41 @@ u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
   if (IS("TryGetPawnOwner")) { u64_v *p = u64_ivar(self, "Pawn"); return p->t == U64_OBJ ? *p : u64_objv(self); }
   if (IS("GetMaxSpeed")) return u64_float(u64_max_speed(self));
   if (IS("PlayAnimation") || IS("GetInstanceAssetPlayerTimeFromEndFraction")) return u64_float(0);
+  // ---------------- character input, control rotation, rotator math ----------------
+  if (IS("AddMovementInput")) {                                                                  // APawn::AddMovementInput
+    u64_v *in = u64_ivar(self, "InputVec"); float sc = F(y);
+    float cur[3] = {in->t == U64_VEC ? in->u.v[0] : 0, in->t == U64_VEC ? in->u.v[1] : 0, in->t == U64_VEC ? in->u.v[2] : 0};
+    if (x.t == U64_VEC) *in = u64_vec(cur[0] + x.u.v[0] * sc, cur[1] + x.u.v[1] * sc, cur[2] + x.u.v[2] * sc);
+    return NONE_;
+  }
+  if (IS("AddControllerYawInput") || IS("AddControllerPitchInput")) {                            // APlayerController::AddYawInput/AddPitchInput
+    u64_v *cr = u64_ivar(self, "ControlRotation");
+    float p = cr->t == U64_VEC ? cr->u.v[0] : 0, yw = cr->t == U64_VEC ? cr->u.v[1] : 0, r = cr->t == U64_VEC ? cr->u.v[2] : 0;
+    if (IS("AddControllerYawInput")) yw += F(x) * 2.5f; else { p += F(x) * 2.5f; if (p > 89.9f) p = 89.9f; if (p < -89.9f) p = -89.9f; }   // InputYawScale/PitchScale = 2.5, view pitch +-89.9
+    while (yw > 180) yw -= 360; while (yw <= -180) yw += 360;
+    *cr = u64_vec(p, yw, r);
+    return NONE_;
+  }
+  if (IS("GetControlRotation")) { u64_v *cr = u64_ivar(self, "ControlRotation"); return cr->t == U64_VEC ? *cr : u64_vec(0, 0, 0); }
+  if (IS("MakeRot")) return u64_vec(F(y), F(z), F(x));                                         // (roll, pitch, yaw) -> (pitch, yaw, roll)
+  if (IS("BreakRot")) { u64_out(y, u64_float(x.u.v[2])); u64_out(z, u64_float(x.u.v[0])); u64_out(A(argc, a, 3), u64_float(x.u.v[1])); return NONE_; }
+  if (IS("GetForwardVector") || IS("GetRightVector")) {                                         // FRotationMatrix axes
+    float p = x.u.v[0] * 0.0174533f, yw = x.u.v[1] * 0.0174533f, r = x.u.v[2] * 0.0174533f;
+    float sp = sinf(p), cp = cosf(p), sy = sinf(yw), cy = cosf(yw), sr = sinf(r), cr = cosf(r);
+    if (IS("GetForwardVector")) return u64_vec(cp * cy, cp * sy, sp);
+    return u64_vec(sr * sp * cy - cr * sy, sr * sp * sy + cr * cy, -sr * cp);
+  }
+  if (IS("Jump")) { *u64_ivar(self, "bPressedJump") = u64_bool(1); return NONE_; }               // ACharacter::Jump
+  if (IS("StopJumping")) { *u64_ivar(self, "bPressedJump") = u64_bool(0); return NONE_; }
+  if (IS("CanJump")) return u64_bool(!u64_true(*u64_ivar(self, "bFalling")) && u64_ivar(self, "JumpCount")->u.i < 1);   // JumpMaxCount = 1
+  if (IS("EqualEqual_BoolBool")) return u64_bool(u64_true(x) == u64_true(y));
+  if (IS("GetAnimAssetPlayerTimeFromEndFraction")) return u64_float(0);
   // ---------------- C++ gameplay of the converted project ----------------
   if (IS("StartSprinting")) { *u64_ivar(self, "bSprinting") = u64_bool(1); return NONE_; }       // RequestToStartSprinting = true
   if (IS("StopSprinting"))  { *u64_ivar(self, "bSprinting") = u64_bool(0); return NONE_; }
   if (IS("StartAimDownSights")) { *u64_ivar(self, "bAiming") = u64_bool(1); return NONE_; }      // RequestToStartADS = true
   if (IS("StopAimDownSights"))  { *u64_ivar(self, "bAiming") = u64_bool(0); return NONE_; }
-  if (IS("FinishDying")) { u64_obj_destroy(self); return NONE_; }                                // Destroy()
+  if (IS("FinishDying")) { u64_obj_destroy(self); return NONE_; }                                // AGDCharacterBase::FinishDying -> Destroy()
   if (IS("GetAbilityLevel")) return u64_int(1);                                                  // AGDCharacterBase::GetAbilityLevel
   if (IS("IsAlive")) { u64_obj *asc = u64_asc_of(self); return u64_bool(u64_obj_alive(self) && (!asc || u64_attr_get(asc, "Health") > 0)); }
   if (IS("GetHealth") || IS("GetMaxHealth") || IS("GetMana") || IS("GetMaxMana") || IS("GetStamina") || IS("GetMaxStamina") ||
@@ -209,7 +266,23 @@ u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
   if (IS("SetCollisionProfileNameProperty")) { *u64_ivar(self, "CollisionProfile") = y; return NONE_; }
   if (IS("K2_DestroyComponent")) { if (x.t == U64_OBJ) u64_obj_destroy(x.u.o); return NONE_; }
   if (IS("GetCollisionObjectType")) return u64_int(0);
-  if (IS("LineTraceMultiForObjects")) return u64_bool(0);        // needs collision meshes (editor export): reports no hit
+  if (IS("LineTraceMultiForObjects")) {                            // (world, start, end, objectTypes[], complex, ignore[], draw, OutHits, ignoreSelf, ...)
+    u64_v types = A(argc, a, 3); int pawn = u64_array_len(types) == 0;
+    for (int i = 0; i < u64_array_len(types); i++) if (u64_array_get(types, i).u.i == 2) pawn = 1;      // ObjectTypeQuery3 = Pawn
+    u64_obj *hits[16]; int n = 0;
+    if (pawn) {
+      u64_obj *ign = u64_true(A(argc, a, 8)) ? self : 0;
+      if (y.t == U64_VEC && z.t == U64_VEC) n = u64_line_trace(y.u.v, z.u.v, ign, hits, 16);
+    }
+    u64_v ignore = A(argc, a, 5), arr = u64_array_of(0, 0);
+    for (int i = 0; i < n; i++) {
+      int skip = 0; u64_obj *act = u64_asobj(*u64_ivar(hits[i], "HitActor"));
+      for (int k = 0; k < u64_array_len(ignore); k++) if (u64_asobj(u64_array_get(ignore, k)) == act) skip = 1;
+      if (!skip) u64_array_push(&arr, u64_objv(hits[i]));
+    }
+    u64_out(A(argc, a, 7), arr);
+    return u64_bool(u64_array_len(arr) > 0);
+  }
   if (IS("GetOverlappingActors")) {
     u64_obj *hit[16]; int n = u64_overlapping(self, hit, 16);
     u64_v arr = u64_array_of(0, 0);
@@ -243,6 +316,7 @@ u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
     *u64_ivar(spec, "GEClass") = u64_name(u64_intern(nm(x)));
     *u64_ivar(spec, "Level") = y;
     *u64_ivar(spec, "Source") = u64_objv(asc_for(self));
+    *u64_ivar(spec, "snapDamage") = u64_float(u64_attr_get(asc_for(self), "Damage"));      // FGameplayEffectAttributeCaptureDefinition: Snapshot = true
     return u64_objv(spec);
   }
   if (IS("AssignTagSetByCallerMagnitude")) {
@@ -277,7 +351,11 @@ u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
   if (IS("GetTagName")) return u64_name(nm(x));
   if (IS("EqualEqual_GameplayAttributeGameplayAttribute")) return u64_bool(!strcmp(nm(x), nm(y)));
   if (IS("K2_AddGameplayCue")) { if (u64_log) u64_log("  [cue] %s", nm(x)); return NONE_; }
-  if (IS("SendGameplayEventToActor")) { if (u64_log) u64_log("  [event] %s -> %s", nm(y), x.t == U64_OBJ && x.u.o ? u64_obj_name(x.u.o) : "?"); return u64_int(0); }
+  if (IS("SendGameplayEventToActor")) {
+    if (u64_log) u64_log("  [event] %s -> %s", nm(y), x.t == U64_OBJ && x.u.o ? u64_obj_name(x.u.o) : "?");
+    if (x.t == U64_OBJ && x.u.o) u64_send_gameplay_event(x.u.o, nm(y), z);
+    return u64_int(1);
+  }
   if (IS("K2_CommitAbility")) return u64_bool(u64_ability_commit(self, 1, 1));           // cooldown + cost
   if (IS("K2_CommitAbilityCost")) return u64_bool(u64_ability_commit(self, 1, 0));
   if (IS("K2_EndAbility")) { u64_ability_end(self, 0); return NONE_; }
@@ -286,7 +364,7 @@ u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
   if (IS("WaitDelay")) { u64_obj *t = new_task("AbilityTask_WaitDelay", x.u.o); *u64_ivar(t, "Time") = y; return u64_objv(t); }
   if (IS("PlayMontageAndWaitForEvent")) {                          // (ability, taskName, montage, eventTags, rate, ...)
     u64_obj *t = new_task("AbilityTask_PlayMontageAndWaitForEvent", x.u.o);
-    *u64_ivar(t, "Montage") = A(argc, a, 2); *u64_ivar(t, "Rate") = A(argc, a, 4);
+    *u64_ivar(t, "Montage") = A(argc, a, 2); *u64_ivar(t, "EventTags") = A(argc, a, 3); *u64_ivar(t, "Rate") = A(argc, a, 4);
     return u64_objv(t);
   }
   if (IS("ApplyRootMotionConstantForce")) { u64_obj *t = new_task("AbilityTask_ApplyRootMotionConstantForce", x.u.o); *u64_ivar(t, "Duration") = A(argc, a, 4); return u64_objv(t); }

@@ -44,11 +44,12 @@ class Node:
 
 
 class Decoder:
-    def __init__(self, script: bytes, names, resolve, ue4=517, ue5=0, field_path=None):
+    def __init__(self, script: bytes, names, resolve, ue4=517, ue5=0, field_path=None, old_let=False):
         self.b, self.p, self.mem = script, 0, 0
         self.names, self.resolve = names, resolve  # resolve(pkg_index) -> str
         self.field_path = (ue4 >= 518 or ue5 > 0) if field_path is None else field_path  # FFieldPath operands (4.25+)
         self.ue5 = ue5
+        self.old_let = old_let   # pre-4.1x dialect: EX_Let carries no property operand
         self.lwc = ue5 >= 1004                       # doubles in vector/rotator/transform constants
         self.starts: dict[int, Node] = {}
 
@@ -135,8 +136,14 @@ class Decoder:
         elif t == 0x06: a.append(self.u32())
         elif t == 0x07: a += [self.u32(), e()]
         elif t == 0x09: a += [self.u16(), self.u8(), e()]
-        elif t == 0x0F: a += [self.prop(), e(), e()]
-        elif t in (0x12, 0x19, 0x1A): a += [e(), self.u32(), self.prop(), e()]
+        elif t == 0x0F:
+            a += ([] if self.old_let else [self.prop()]) + [e(), e()]
+            if self.old_let: a.insert(0, "")   # keep args = [prop, lhs, rhs]
+        elif t in (0x12, 0x19, 0x1A):
+            obj, skip = e(), self.u32()
+            if self.old_let:
+                self.u8()          # pre-4.1x dialect: an r-value property-type byte precedes the pointer
+            a += [obj, skip, self.prop(), e()]
         elif t in (0x13, 0x2E, 0x52, 0x54, 0x55): a += [self.pkg(), e()]
         elif t in (0x14, 0x43, 0x44, 0x5C, 0x5F, 0x60, 0x62, 0x6B): a += [e(), e()]
         elif t == 0x5D: a.append(e())

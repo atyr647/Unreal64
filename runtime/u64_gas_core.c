@@ -5,7 +5,7 @@
 #include <math.h>
 #include <stdio.h>
 
-#define MAX_ASC 24
+#define MAX_ASC 160
 #define MAX_ATTR 24
 #define MAX_TAGS 48
 #define MAX_ACTIVE 96
@@ -31,15 +31,15 @@ static active_t active[MAX_ACTIVE];
 const char *u64_intern(const char *s);
 
 // ---------------------------------------------------------------------------------------------------- arrays
-#define ARR_POOL 4096
-#define ARR_MAX 128
+#define ARR_POOL 32768
+#define ARR_MAX 2048
 static u64_v arr_items[ARR_POOL]; static int arr_used;
-static struct { int off, n, cap; } arrs[ARR_MAX]; static int narr;
+static struct { int off, n, cap, shared; } arrs[ARR_MAX]; static int narr;
 static u64_v arr_new_cap(int cap)
 {
   u64_v r = {U64_ARRAY};
-  if (narr >= ARR_MAX || arr_used + cap > ARR_POOL) return (u64_v){U64_NONE};
-  arrs[narr].off = arr_used; arrs[narr].n = 0; arrs[narr].cap = cap; arr_used += cap;
+  if (narr >= ARR_MAX || arr_used + cap > ARR_POOL) { if (!u64_rt_overflows++ && u64_log) u64_log("  [error] array pool exhausted"); return (u64_v){U64_NONE}; }
+  arrs[narr].off = arr_used; arrs[narr].n = 0; arrs[narr].cap = cap; arrs[narr].shared = 0; arr_used += cap;
   r.u.i = ++narr; return r;
 }
 u64_v u64_array_of(int n, const u64_v *items)
@@ -55,8 +55,21 @@ u64_v u64_array_get(u64_v a, int i)
   if (a.t != U64_ARRAY || i < 0 || i >= arrs[a.u.i - 1].n) return (u64_v){U64_NONE};
   return arr_items[arrs[a.u.i - 1].off + i];
 }
+// Constant arrays (class defaults) are created once per call site and shared; pushing onto one copies it first.
+u64_v u64_array_const(int id, int n, const u64_v *items)
+{
+  static u64_v cache[1024];
+  if (id >= 0 && id < 1024 && cache[id].t == U64_ARRAY) return cache[id];
+  u64_v a = u64_array_of(n, items);
+  if (a.t == U64_ARRAY) arrs[a.u.i - 1].shared = 1;
+  if (id >= 0 && id < 1024) cache[id] = a;
+  return a;
+}
 void u64_array_push(u64_v *a, u64_v item)
 {
+  if (a->t == U64_ARRAY && arrs[a->u.i - 1].shared) {                 // copy-on-write
+    u64_v old = *a; *a = u64_array_of(u64_array_len(old), &arr_items[arrs[old.u.i - 1].off]);
+  }
   if (a->t != U64_ARRAY) *a = arr_new_cap(8);
   if (a->t != U64_ARRAY) return;
   int k = a->u.i - 1;
@@ -77,9 +90,12 @@ static const char *nm(u64_v v)
   return "";
 }
 static const char *strip_c(const char *s) { static char b[8][64]; static int i; char *o = b[i++ & 7]; snprintf(o, 64, "%s", s); size_t n = strlen(o); if (n > 2 && !strcmp(o + n - 2, "_C")) o[n - 2] = 0; return o; }
+static const u64_ge_def *dyn_defs[16]; static int ndyn;
+int u64_ge_register(const u64_ge_def *d) { if (ndyn >= 16) { u64_rt_overflows++; return 0; } dyn_defs[ndyn++] = d; return 1; }
 static const u64_ge_def *find_ge(const char *name)
 {
   const char *n = strip_c(name);
+  for (int i = 0; i < ndyn; i++) if (!strcmp(dyn_defs[i]->name, n)) return dyn_defs[i];
   for (int i = 0; i < u64_ge_count; i++) if (!strcmp(u64_ge_defs[i].name, n)) return &u64_ge_defs[i];
   return 0;
 }
@@ -267,7 +283,8 @@ static void exec_damage(asc_t *tgt, asc_t *src, u64_obj *spec)
 {
   float armor = attr(tgt, "Armor")->cur;                  // captured from the Target, not snapshotted
   if (armor < 0) armor = 0;
-  float damage = src ? attr(src, "Damage")->cur : 0;      // captured from the Source (snapshot)
+  float damage = src ? attr(src, "Damage")->cur : 0;      // captured from the Source (snapshot taken when the spec was made)
+  if (spec && u64_ivar(spec, "snapDamage")->t == U64_FLOAT) damage = u64_ivar(spec, "snapDamage")->u.f;
   int found; float sbc = spec_sbc(spec, "Data.Damage", &found);
   damage += sbc > 0 ? sbc : 0;                            // + max(SetByCaller Data.Damage, 0)
   float unmitigated = damage;
@@ -306,6 +323,16 @@ static void remove_active_idx(int i)
 }
 void u64_remove_ge(int handle) { if (handle > 0 && handle <= MAX_ACTIVE) remove_active_idx(handle - 1); }
 
+static void apply_conditionals(asc_t *tgt, asc_t *src, const u64_ge_def *d, float level)   // FConditionalGameplayEffect
+{
+  for (int i = 0; d->cond_effects && d->cond_effects[i]; i++) {
+    char req[160]; snprintf(req, sizeof req, "%s", d->cond_required && d->cond_required[i] ? d->cond_required[i] : "");
+    int ok = 1;
+    for (char *tok = strtok(req, "|"); tok; tok = strtok(0, "|")) if (!src || !tag_count(src, tok)) ok = 0;
+    if (ok) u64_apply_ge(tgt->obj, src ? src->obj : tgt->obj, d->cond_effects[i], level, 0);
+  }
+}
+
 int u64_apply_ge(u64_obj *tasc, u64_obj *sasc, const char *ge_name, float level, u64_obj *spec)
 {
   asc_t *tgt = asc_from(tasc), *src = asc_from(sasc ? sasc : tasc);
@@ -320,7 +347,7 @@ int u64_apply_ge(u64_obj *tasc, u64_obj *sasc, const char *ge_name, float level,
         for (int j = 0; active[i].def->asset_tags && active[i].def->asset_tags[j]; j++)
           if (tag_match(active[i].def->asset_tags[j], d->remove_tags[k])) { remove_active_idx(i); break; }
       }
-  if (d->dur == U64_DUR_INSTANT) { run_modifiers(tgt, src, d, 0, spec); return 0; }
+  if (d->dur == U64_DUR_INSTANT) { run_modifiers(tgt, src, d, 0, spec); apply_conditionals(tgt, src, d, level); return 0; }
   // stacking
   if (d->stack_type) {
     for (int i = 0; i < MAX_ACTIVE; i++) {
@@ -346,6 +373,7 @@ int u64_apply_ge(u64_obj *tasc, u64_obj *sasc, const char *ge_name, float level,
     if (d->period > 0 && !e->inhibited) run_modifiers(tgt, src, d, e, spec);       // execute on application
     update_inhibition(tgt);
     u64_notify_stack_tasks(tgt->obj, d->name);
+    apply_conditionals(tgt, src, d, level);
     return i + 1;
   }
   return 0;
@@ -394,6 +422,7 @@ u64_obj *u64_asc_of(u64_obj *actor)
   if (!actor) return 0;
   u64_v *slot = u64_ivar(actor, "AbilitySystemComponent");
   if (slot->t == U64_OBJ && slot->u.o) return slot->u.o;
+  if (!u64_obj_is_actor(actor) && strcmp(u64_obj_class(actor), "Component")) { /* only actors own an ability system */ }
   for (int i = 0; i < MAX_ASC; i++) if (!ascs[i].used) {
     asc_t *a = &ascs[i]; memset(a, 0, sizeof *a); a->used = 1; a->owner = actor;
     char nmb[64]; snprintf(nmb, sizeof nmb, "%s.ASC", u64_obj_name(actor));
@@ -403,6 +432,7 @@ u64_obj *u64_asc_of(u64_obj *actor)
     *slot = u64_objv(a->obj);
     return a->obj;
   }
+  u64_rt_overflows++; if (u64_log) u64_log("  [error] ability system pool exhausted");
   return 0;
 }
 
@@ -424,10 +454,10 @@ void u64_die(u64_obj *actor)                      // AGDCharacterBase::Die
   }
   u64_v *dm = u64_ivar(actor, "DeathMontage");
   if (dm->t == U64_OBJ || dm->t == U64_CLASS || dm->t == U64_NAME) {
-    float blend; float len = u64_montage_length(nm(*dm), &blend);                 // PlayAnimMontage(DeathMontage)
-    if (len > 0) { u64_timer_latent(len, u64_latent(u64_objv(actor), "FinishDying", 0)); return; }
+    u64_montage_play(actor, nm(*dm), 1.0f);                                       // PlayAnimMontage(DeathMontage): its Die notify calls FinishDying
+    return;
   }
-  u64_obj_destroy(actor);                                                         // FinishDying() -> Destroy()
+  u64_obj_destroy(actor);                                                         // no montage: FinishDying() -> Destroy()
 }
 void u64_kill(u64_obj *o) { u64_die(o); }
 
@@ -499,6 +529,7 @@ int u64_ability_try_activate(u64_obj *ab)               // UGameplayAbility::Can
   for (int i = 0; i < u64_array_len(required); i++) if (!tag_count(a, tag_i(required, i))) return 0;
   u64_v mytags = *u64_ivar(ab, "AbilityTags");
   for (int i = 0; i < u64_array_len(mytags); i++) { char k[96]; snprintf(k, sizeof k, "blocked:%s", tag_i(mytags, i)); if (tag_count(a, k)) return 0; }
+  if (!u64_cpp_ability_can_activate(ab)) return 0;
   if (!cooldown_ok(a, ability_ge(ab, "CooldownGameplayEffectClass"))) return 0;
   if (!cost_ok(a, ability_ge(ab, "CostGameplayEffectClass"))) return 0;
   // activate: cancel abilities, grant owned tags, block tags, run the Blueprint
@@ -510,7 +541,7 @@ int u64_ability_try_activate(u64_obj *ab)               // UGameplayAbility::Can
   u64_v block = *u64_ivar(ab, "BlockAbilitiesWithTag");
   for (int i = 0; i < u64_array_len(block); i++) { char k[96]; snprintf(k, sizeof k, "blocked:%s", tag_i(block, i)); tag_add(a, k, 1); }
   if (u64_log) u64_log("  [ability] %s activated", u64_obj_name(ab));
-  u64_call(ab, "K2_ActivateAbility", 0, 0);
+  if (!u64_cpp_ability_activate(ab)) u64_call(ab, "K2_ActivateAbility", 0, 0);       // a C++ override, else the Blueprint event
   return 1;
 }
 int u64_ability_commit(u64_obj *ab, int cost, int cooldown)
@@ -551,7 +582,7 @@ void u64_input_release_id(u64_obj *actor, const char *id)
 {
   asc_t *a = asc_from(u64_asc_of(actor));
   for (int i = 0; a && i < a->nabil; i++)
-    if (!strcmp(nm(*u64_ivar(a->abil[i], "AbilityInputID")), id) && u64_true(*u64_ivar(a->abil[i], "Active"))) u64_input_release(a->abil[i]);
+    if (!strcmp(nm(*u64_ivar(a->abil[i], "AbilityInputID")), id) && u64_true(*u64_ivar(a->abil[i], "Active"))) { u64_input_release(a->abil[i]); u64_cpp_ability_input_released(a->abil[i]); }
 }
 
 // ---------------------------------------------------------------------------------------------------- montages and overlaps
@@ -566,26 +597,119 @@ static const u64_shape_def *shape_of(u64_obj *o)
   for (const u64_shape_def *s = u64_shapes; s->cls; s++) if (!strcmp(s->cls, cls)) return s;
   return 0;
 }
-int u64_overlapping(u64_obj *self, u64_obj **out, int max)       // AABB overlap of the actor's box/capsule shapes
+typedef struct { float x, y, z; } v3_;
+static v3_ vget(u64_obj *o, const char *n) { u64_v *v = u64_ivar(o, n); return v->t == U64_VEC ? (v3_){v->u.v[0], v->u.v[1], v->u.v[2]} : (v3_){0, 0, 0}; }
+static v3_ vget_def(u64_obj *o, const char *n, v3_ d) { u64_v *v = u64_ivar(o, n); return v->t == U64_VEC ? (v3_){v->u.v[0], v->u.v[1], v->u.v[2]} : d; }
+// World transform of an actor's collision shape: centre, yaw (radians), scaled dimensions.
+typedef struct { const u64_shape_def *s; float cx, cy, cz, yaw, a, b, c; } shape_t;
+static int shape_world(u64_obj *o, shape_t *out)
+{
+  const u64_shape_def *s = shape_of(o);
+  if (!s) return 0;
+  v3_ loc = vget(o, "Location"), rot = vget(o, "Rotation"), sc = vget_def(o, "Scale", (v3_){1, 1, 1});
+  float yaw = rot.y * 0.0174533f, cy = cosf(yaw), sy = sinf(yaw);
+  float rx = s->rx * sc.x, ry = s->ry * sc.y;
+  out->s = s; out->yaw = yaw + s->ryaw * 0.0174533f;
+  out->cx = loc.x + rx * cy - ry * sy; out->cy = loc.y + rx * sy + ry * cy; out->cz = loc.z + s->rz * sc.z;
+  out->a = s->a * sc.x; out->b = s->kind == 1 ? s->b * sc.y : (s->kind == 3 ? 0 : s->b * sc.z); out->c = s->kind == 1 ? s->c * sc.z : 0;
+  return 1;
+}
+// vertical capsule (centre, radius r, half height hh) against a yawed box: exact in the box's local frame
+static int capsule_box(const shape_t *cap, const shape_t *box)
+{
+  float dx = cap->cx - box->cx, dy = cap->cy - box->cy, c = cosf(-box->yaw), s = sinf(-box->yaw);
+  float lx = dx * c - dy * s, ly = dx * s + dy * c;
+  float r = cap->a, hh = cap->b, seg = hh - r; if (seg < 0) seg = 0;
+  float ex = fmaxf(fabsf(lx) - box->a, 0), ey = fmaxf(fabsf(ly) - box->b, 0);
+  float lo = cap->cz - seg, hi = cap->cz + seg, blo = box->cz - box->c, bhi = box->cz + box->c;
+  float gz = fmaxf(0.f, fmaxf(lo - bhi, blo - hi));
+  return ex * ex + ey * ey + gz * gz <= r * r;
+}
+int u64_overlapping(u64_obj *self, u64_obj **out, int max)       // actors whose capsule overlaps this actor's box
 {
   if (self && !strcmp(u64_obj_class(self), "Component")) self = u64_asobj(*u64_ivar(self, "Owner"));   // component -> its actor
   if (!self) return 0;
-  const u64_shape_def *ss = shape_of(self);
-  if (!ss) return 0;
-  u64_v *l = u64_ivar(self, "Location");
-  if (l->t != U64_VEC) return 0;
-  float sx = l->u.v[0], sy = l->u.v[1], sz = l->u.v[2];
-  float ex = ss->kind == 1 ? ss->a : ss->a, ey = ss->kind == 1 ? ss->b : ss->a, ez = ss->kind == 1 ? ss->c : ss->b;
+  shape_t me;
+  if (!shape_world(self, &me) || me.s->kind != 1) return 0;
   int n = 0;
   for (int i = 0; i < u64_obj_count() && n < max; i++) {
-    u64_obj *o = u64_obj_at(i);
-    if (o == self || !u64_obj_alive(o)) continue;
-    const u64_shape_def *os = shape_of(o); u64_v *ol = u64_ivar(o, "Location");
-    if (!os || ol->t != U64_VEC || os->kind != 2) continue;             // only characters (capsules) are overlapped
-    float rx = os->a, rz = os->b;
-    if (fabsf(ol->u.v[0] - sx) <= ex + rx && fabsf(ol->u.v[1] - sy) <= ey + rx && fabsf(ol->u.v[2] - sz) <= ez + rz) out[n++] = o;
+    u64_obj *o = u64_obj_at(i); shape_t other;
+    if (o == self || !u64_obj_is_actor(o) || !shape_world(o, &other) || other.s->kind != 2) continue;   // characters (capsules)
+    if (capsule_box(&other, &me)) out[n++] = o;
   }
   return n;
+}
+
+// ---------------------------------------------------------------------------------------------------- line traces
+static int ray_vcapsule(const float p[3], const float d[3], float cx, float cy, float zlo, float zhi, float r, float *t, float nrm[3])
+{
+  float best = 1e30f; int hit = 0;
+  float ox = p[0] - cx, oy = p[1] - cy;
+  float A = d[0] * d[0] + d[1] * d[1], B = 2 * (ox * d[0] + oy * d[1]), C = ox * ox + oy * oy - r * r;
+  if (A > 1e-9f) {                                           // side of the cylinder
+    float disc = B * B - 4 * A * C;
+    if (disc >= 0) { float tt = (-B - sqrtf(disc)) / (2 * A); float z = p[2] + tt * d[2];
+      if (tt >= 0 && tt <= 1 && z >= zlo && z <= zhi && tt < best) { best = tt; hit = 1; nrm[0] = (ox + tt * d[0]) / r; nrm[1] = (oy + tt * d[1]) / r; nrm[2] = 0; } }
+  }
+  for (int cap = 0; cap < 2; cap++) {                        // the two end spheres
+    float cz = cap ? zhi : zlo, sx = p[0] - cx, sy = p[1] - cy, sz = p[2] - cz;
+    float a = d[0] * d[0] + d[1] * d[1] + d[2] * d[2], b = 2 * (sx * d[0] + sy * d[1] + sz * d[2]), c = sx * sx + sy * sy + sz * sz - r * r;
+    float disc = b * b - 4 * a * c; if (disc < 0 || a < 1e-9f) continue;
+    float tt = (-b - sqrtf(disc)) / (2 * a); float z = p[2] + tt * d[2];
+    if (tt >= 0 && tt <= 1 && ((cap && z >= zhi) || (!cap && z <= zlo)) && tt < best) {
+      best = tt; hit = 1; nrm[0] = (sx + tt * d[0]) / r; nrm[1] = (sy + tt * d[1]) / r; nrm[2] = (sz + tt * d[2]) / r; }
+  }
+  if (hit) *t = best;
+  return hit;
+}
+int u64_line_trace(const float start[3], const float end[3], u64_obj *ignore, u64_obj **hits, int max)
+{
+  float d[3] = {end[0] - start[0], end[1] - start[1], end[2] - start[2]}, dist = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+  struct { float t; u64_obj *o; float n[3]; } found[16]; int nf = 0;
+  for (int i = 0; i < u64_obj_count() && nf < 16; i++) {
+    u64_obj *o = u64_obj_at(i); shape_t sh;
+    if (o == ignore || !u64_obj_is_actor(o) || !shape_world(o, &sh) || sh.s->kind != 2) continue;     // pawn capsules block object traces
+    float seg = sh.b - sh.a; if (seg < 0) seg = 0;
+    float t, n[3];
+    if (ray_vcapsule(start, d, sh.cx, sh.cy, sh.cz - seg, sh.cz + seg, sh.a, &t, n)) { found[nf].t = t; found[nf].o = o; memcpy(found[nf].n, n, sizeof n); nf++; }
+  }
+  for (int i = 1; i < nf; i++) for (int j = i; j > 0 && found[j].t < found[j - 1].t; j--) { __typeof__(found[0]) tmp = found[j]; found[j] = found[j - 1]; found[j - 1] = tmp; }
+  int n = 0;
+  for (int i = 0; i < nf && n < max; i++) {
+    u64_obj *h = u64_new("HitResult", "HitResult");
+    float t = found[i].t;
+    *u64_ivar(h, "Time") = u64_float(t); *u64_ivar(h, "Distance") = u64_float(t * dist); *u64_ivar(h, "bBlockingHit") = u64_bool(1);
+    *u64_ivar(h, "Location") = u64_vec(start[0] + d[0] * t, start[1] + d[1] * t, start[2] + d[2] * t);
+    *u64_ivar(h, "Normal") = u64_vec(found[i].n[0], found[i].n[1], found[i].n[2]);
+    *u64_ivar(h, "HitActor") = u64_objv(found[i].o);
+    *u64_ivar(h, "TraceStart") = u64_vec(start[0], start[1], start[2]); *u64_ivar(h, "TraceEnd") = u64_vec(end[0], end[1], end[2]);
+    hits[n++] = h;
+  }
+  return n;
+}
+
+// ---------------------------------------------------------------------------------------------------- montage notifies and gameplay events
+void u64_montage_play(u64_obj *actor, const char *name, float rate)      // schedules the montage's AnimNotifies
+{
+  if (rate <= 0) rate = 1;
+  for (const u64_montage_def *m = u64_montages; m->name; m++) {
+    if (strcmp(m->name, name)) continue;
+    *u64_ivar(actor, "CurrentMontage") = u64_name(m->name);
+    for (int i = 0; i < m->nnotifies; i++) {
+      char cls[64], nmb[64]; snprintf(cls, sizeof cls, "AnimNotify_%s", m->notifies[i].cls);
+      snprintf(nmb, sizeof nmb, "%s.%s.%d", m->name, m->notifies[i].cls, i);
+      u64_obj *nobj = u64_new(u64_intern(nmb), u64_intern(cls));
+      if (m->notifies[i].tag[0]) *u64_ivar(nobj, "EventTag") = u64_name(m->notifies[i].tag);
+      u64_timer_call(m->notifies[i].time / rate, nobj, "Received_Notify", u64_comp(actor, "Mesh"));   // arg: the mesh component
+    }
+    return;
+  }
+}
+void u64_send_gameplay_event(u64_obj *actor, const char *tag, u64_v payload)
+{
+  u64_obj *asc = u64_asc_of(actor);
+  u64_v args[2] = {u64_name(tag), payload};
+  u64_deliver_gameplay_event(asc, tag, 2, args);
 }
 
 // ---------------------------------------------------------------------------------------------------- queries used by tasks and natives
@@ -640,3 +764,80 @@ float u64_max_speed(u64_obj *actor)                            // UGDCharacterMo
   return ms;
 }
 int u64_asc_ability_count(u64_obj *asc) { asc_t *a = asc_from(asc); return a ? a->nabil : 0; }
+void u64_attr_set_base(u64_obj *asc, const char *name, float v) { asc_t *a = asc_from(asc); if (a) set_base(a, name, v); }
+
+// ---------------------------------------------------------------------------------------------------- component overlap events
+static const u64_shape_def *shape_for(u64_obj *o, const char *comp)
+{
+  const char *cls = u64_obj_class(o);
+  for (const char *c = cls; c; c = u64_parent_of(c))
+    for (const u64_shape_def *s = u64_shapes; s->cls; s++) if (!strcmp(s->cls, c) && !strcmp(s->comp, comp)) return s;
+  return 0;
+}
+static int world_shape_of(u64_obj *o, const u64_shape_def *def, shape_t *out)
+{
+  const u64_shape_def *save = def;
+  v3_ loc = vget(o, "Location"), rot = vget(o, "Rotation"), sc = vget_def(o, "Scale", (v3_){1, 1, 1});
+  float yaw = rot.y * 0.0174533f, cy = cosf(yaw), sy = sinf(yaw), rx = save->rx * sc.x, ry = save->ry * sc.y;
+  out->s = save; out->yaw = yaw + save->ryaw * 0.0174533f;
+  out->cx = loc.x + rx * cy - ry * sy; out->cy = loc.y + rx * sy + ry * cy; out->cz = loc.z + save->rz * sc.z;
+  out->a = save->a * sc.x; out->b = save->kind == 1 ? save->b * sc.y : (save->kind == 3 ? 0 : save->b * sc.z); out->c = save->kind == 1 ? save->c * sc.z : 0;
+  return 1;
+}
+static int sphere_capsule(const shape_t *sp, const shape_t *cap)       // sphere vs vertical capsule
+{
+  float seg = cap->b - cap->a; if (seg < 0) seg = 0;
+  float dz = sp->cz < cap->cz - seg ? (cap->cz - seg) - sp->cz : (sp->cz > cap->cz + seg ? sp->cz - (cap->cz + seg) : 0);
+  float dx = sp->cx - cap->cx, dy = sp->cy - cap->cy, r = sp->a + cap->a;
+  return dx * dx + dy * dy + dz * dz <= r * r;
+}
+static int comp_overlaps_capsule(const shape_t *c, const shape_t *cap) { return c->s->kind == 3 ? sphere_capsule(c, cap) : (c->s->kind == 1 ? capsule_box(cap, c) : 0); }
+
+#define MAX_PAIRS 192
+static struct { u64_obj *o, *other; const char *comp; } pairs[MAX_PAIRS]; static int npairs;
+static int pair_find(u64_obj *o, const char *comp, u64_obj *other) { for (int i = 0; i < npairs; i++) if (pairs[i].o == o && pairs[i].other == other && !strcmp(pairs[i].comp, comp)) return i; return -1; }
+
+void u64_overlap_events_tick(void)             // OnComponentBeginOverlap / EndOverlap for components bound in the Blueprint graph
+{
+  for (const u64_bound_event_def *d = u64_bound_events; d->cls; d++) {
+    int primary = 1;                           // handle each (class, component) once; it dispatches begin and end handlers
+    for (const u64_bound_event_def *e = u64_bound_events; e < d; e++) if (!strcmp(e->cls, d->cls) && !strcmp(e->comp, d->comp)) primary = 0;
+    if (!primary) continue;
+    for (int i = 0; i < u64_obj_count(); i++) {
+      u64_obj *o = u64_obj_at(i);
+      if (!u64_obj_is_actor(o) || !u64_class_is(u64_obj_class(o), d->cls)) continue;
+      const u64_shape_def *def = shape_for(o, d->comp);
+      if (!def || def->kind == 2) continue;
+      shape_t me; world_shape_of(o, def, &me);
+      for (int j = 0; j < u64_obj_count(); j++) {
+        u64_obj *oo = u64_obj_at(j); shape_t other;
+        if (oo == o || !u64_obj_is_actor(oo) || !shape_world(oo, &other) || other.s->kind != 2) continue;
+        int now = comp_overlaps_capsule(&me, &other), pi = pair_find(o, d->comp, oo);
+        if (now == (pi >= 0)) continue;
+        if (now && npairs < MAX_PAIRS) { pairs[npairs].o = o; pairs[npairs].other = oo; pairs[npairs++].comp = d->comp; }
+        if (!now) pairs[pi] = pairs[--npairs];
+        for (const u64_bound_event_def *h = u64_bound_events; h->cls; h++) {
+          if (strcmp(h->cls, d->cls) || strcmp(h->comp, d->comp) || h->end == now) continue;      // begin handlers on enter, end handlers on leave
+          u64_v args[6] = {u64_comp(o, d->comp), u64_objv(oo), u64_comp(oo, "CapsuleComponent"), u64_int(0), u64_bool(0), u64_int(0)};
+          u64_call(o, h->fn, 6, args);
+        }
+        if (!u64_obj_alive(o)) break;
+      }
+    }
+  }
+}
+
+// Sphere sweep (ProjectileMovementComponent): earliest contact with a pawn capsule along start -> end, ignoring one actor.
+int u64_sweep_sphere(const float start[3], const float end[3], float radius, u64_obj *ignore, float *t_out)
+{
+  float d[3] = {end[0] - start[0], end[1] - start[1], end[2] - start[2]}, best = 2; int hit = 0;
+  for (int i = 0; i < u64_obj_count(); i++) {
+    u64_obj *o = u64_obj_at(i); shape_t sh;
+    if (o == ignore || !u64_obj_is_actor(o) || !shape_world(o, &sh) || sh.s->kind != 2) continue;
+    float seg = sh.b - sh.a; if (seg < 0) seg = 0;
+    float t, n[3];
+    if (ray_vcapsule(start, d, sh.cx, sh.cy, sh.cz - seg, sh.cz + seg, sh.a + radius, &t, n) && t < best) { best = t; hit = 1; }
+  }
+  if (hit) *t_out = best;
+  return hit;
+}

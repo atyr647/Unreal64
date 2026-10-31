@@ -6,8 +6,8 @@
 void u64_mc_broadcast(u64_v *m, int argc, const u64_v *argv);
 void u64_obj_destroy(u64_obj *o);
 
-#define MAX_TIMERS 64
-typedef struct { int live; u64_v dg; float t, period; u64_obj *bt; const char *bname; u64_v barg; } timer_t_;
+#define MAX_TIMERS 96
+typedef struct { int live; u64_v dg; float t, period; u64_obj *bt; const char *bname; u64_v barg; u64_obj *co; const char *cfn; } timer_t_;
 static timer_t_ timers[MAX_TIMERS];
 static float now_;
 static int spawn_serial;
@@ -15,6 +15,8 @@ static char names[64][24];
 static int nnames;
 
 float u64_world_time(void) { return now_; }
+static float dt_;
+float u64_world_dt(void) { return dt_; }
 
 static float F(u64_v v) { return v.t == U64_INT || v.t == U64_BOOL ? (float)v.u.i : v.u.f; }
 static u64_v arg(int argc, const u64_v *a, int i) { return i < argc ? a[i] : (u64_v){U64_NONE}; }
@@ -30,7 +32,7 @@ int u64_native_hits(const char *fn) { for (int i = 0; i < nhit; i++) if (!strcmp
 static u64_v set_timer(int argc, const u64_v *a)
 {
   for (int i = 0; i < MAX_TIMERS; i++) if (!timers[i].live) {
-    timers[i] = (timer_t_){1, arg(argc, a, 0), F(arg(argc, a, 1)), F(arg(argc, a, 1)), 0, 0, {U64_NONE}};
+    timers[i] = (timer_t_){1, arg(argc, a, 0), F(arg(argc, a, 1)), F(arg(argc, a, 1)), 0, 0, {U64_NONE}, 0, 0};
     if (!u64_true(arg(argc, a, 2))) timers[i].period = 0;
     return u64_int(i + 1);
   }
@@ -39,11 +41,14 @@ static u64_v set_timer(int argc, const u64_v *a)
 
 static u64_obj *spawn(u64_v cls, u64_v xform)
 {
+  u64_v rot = u64_vec(0, 0, 0);
+  if (xform.t == U64_OBJ && xform.u.o) { rot = *u64_ivar(xform.u.o, "Rotation"); xform = *u64_ivar(xform.u.o, "Location"); }   // a transform carries rotation
   if (cls.t != U64_CLASS) return 0;
   char *nm = names[nnames++ & 63];
   snprintf(nm, 24, "%.14s_%d", cls.u.s, ++spawn_serial);
   u64_obj *o = u64_new(nm, cls.u.s);
   *u64_ivar(o, "Location") = xform.t == U64_VEC ? xform : u64_vec(0, 0, 0);
+  *u64_ivar(o, "Rotation") = rot;
   if (u64_log) u64_log("  [spawn] %s at (%d, %d, %d) t=%d.%d", nm, (int)xform.u.v[0], (int)xform.u.v[1], (int)xform.u.v[2],
                        (int)now_, (int)(now_ * 10) % 10);
   return o;
@@ -52,13 +57,17 @@ static u64_obj *spawn(u64_v cls, u64_v xform)
 void u64_timer_broadcast(float t, u64_obj *task, const char *name, u64_v arg)
 {
   for (int i = 0; i < MAX_TIMERS; i++) if (!timers[i].live) {
-    timers[i] = (timer_t_){1, {U64_NONE}, t, 0, task, name, arg}; return;
+    timers[i] = (timer_t_){1, {U64_NONE}, t, 0, task, name, arg, 0, 0}; return;
   }
+}
+void u64_timer_call(float t, u64_obj *obj, const char *fn, u64_v arg)
+{
+  for (int i = 0; i < MAX_TIMERS; i++) if (!timers[i].live) { timers[i] = (timer_t_){1, {U64_NONE}, t, 0, 0, 0, arg, obj, fn}; return; }
 }
 void u64_timer_latent(float t, u64_v dg)
 {
   for (int i = 0; i < MAX_TIMERS; i++) if (!timers[i].live) {
-    timers[i] = (timer_t_){1, dg, t, 0, 0, 0, {U64_NONE}}; return;
+    timers[i] = (timer_t_){1, dg, t, 0, 0, 0, {U64_NONE}, 0, 0}; return;
   }
 }
 void u64_timers_cancel_for(u64_obj *ability)   // an ending ability cancels its tasks' pending timers
@@ -79,13 +88,18 @@ u64_v u64_native(u64_obj *self, const char *fn, int argc, const u64_v *a)
   // --- world / actors
   if (IS("HasAuthority")) { HIT; return u64_bool(1); }
   if (IS("IsValid")) { HIT; return u64_bool(x.t == U64_OBJ && u64_obj_alive(x.u.o)); }
-  if (IS("GetTransform") || IS("K2_GetActorLocation")) { HIT; return loc_of(self); }
+  if (IS("K2_GetActorLocation")) { HIT; return loc_of(self); }
+  if (IS("GetTransform")) { HIT; u64_v *r = u64_ivar(self, "Rotation"); return u64_xform_new(loc_of(self), r->t == U64_VEC ? *r : u64_vec(0, 0, 0)); }
   if (IS("K2_SetActorLocation") || IS("K2_SetRelativeLocation")) { HIT; *u64_ivar(self, "Location") = x; return u64_bool(1); }
-  if (IS("GetOwner") || IS("GetInstigator") || IS("GetOwningActorFromActorInfo")) { HIT; return u64_objv(self); }
+  if (IS("GetOwner") || IS("GetInstigator") || IS("GetOwningActorFromActorInfo")) {
+    HIT;
+    if (!strcmp(u64_obj_class(self), "Component")) return *u64_ivar(self, "Owner");     // a component's owner is its actor
+    return u64_objv(self);
+  }
   if (IS("BeginDeferredActorSpawnFromClass")) { HIT; return u64_objv(spawn(y, arg(argc, a, 2))); }
   if (IS("FinishSpawningActor")) { HIT; if (x.t == U64_OBJ && x.u.o) { u64_actor_init(x.u.o); u64_call(x.u.o, "ReceiveBeginPlay", 0, 0); } return x; }
   if (IS("K2_DestroyActor")) { HIT; u64_obj_destroy(self); return u64_int(0); }
-  if (IS("SetLifeSpan")) { HIT; return u64_int(0); }
+  if (IS("SetLifeSpan")) { HIT; if (F(x) > 0) u64_timer_call(F(x), self, "K2_DestroyActor", (u64_v){U64_NONE}); return u64_int(0); }   // AActor::SetLifeSpan
   // --- timers
   if (IS("K2_SetTimerDelegate")) { HIT; return set_timer(argc, a); }
   if (IS("K2_ClearAndInvalidateTimerHandle")) { HIT; return u64_int(0); }
@@ -111,7 +125,7 @@ u64_v u64_native(u64_obj *self, const char *fn, int argc, const u64_v *a)
   if (IS("Conv_IntToFloat")) { HIT; return u64_float((float)x.u.i); }
   // --- vectors
   if (IS("MakeVector")) { HIT; return u64_vec(F(x), F(y), F(arg(argc, a, 2))); }
-  if (IS("MakeTransform")) { HIT; return x; }
+  if (IS("MakeTransform")) { HIT; return u64_xform_new(x, y); }
   if (IS("Add_VectorVector")) { HIT; return u64_vec(x.u.v[0] + y.u.v[0], x.u.v[1] + y.u.v[1], x.u.v[2] + y.u.v[2]); }
   if (IS("Multiply_VectorFloat")) { HIT; return u64_vec(x.u.v[0] * F(y), x.u.v[1] * F(y), x.u.v[2] * F(y)); }
   if (IS("VSize")) { HIT; return u64_float(sqrtf(x.u.v[0] * x.u.v[0] + x.u.v[1] * x.u.v[1] + x.u.v[2] * x.u.v[2])); }
@@ -130,9 +144,37 @@ void u64_world_begin_play(void)
   }
 }
 
+static void projectile_tick(float dt)
+{
+  for (int i = 0; i < u64_obj_count(); i++) {
+    u64_obj *o = u64_obj_at(i);
+    if (!u64_obj_is_actor(o)) continue;
+    for (const u64_projectile_def *p = u64_projectiles; p->cls; p++) {
+      if (strcmp(p->cls, u64_obj_class(o)) || p->initial_speed <= 0) continue;
+      u64_v *loc = u64_ivar(o, "Location"), *rot = u64_ivar(o, "Rotation");
+      float pitch = rot->t == U64_VEC ? rot->u.v[0] * 0.0174533f : 0, yaw = rot->t == U64_VEC ? rot->u.v[1] * 0.0174533f : 0;
+      u64_v *vel = u64_ivar(o, "Velocity");
+      if (vel->t != U64_VEC) *vel = u64_vec(cosf(pitch) * cosf(yaw) * p->initial_speed, cosf(pitch) * sinf(yaw) * p->initial_speed, sinf(pitch) * p->initial_speed);
+      vel->u.v[2] += -980.0f * p->gravity_scale * dt;
+      float from[3] = {loc->u.v[0], loc->u.v[1], loc->u.v[2]};
+      float to[3] = {from[0] + vel->u.v[0] * dt, from[1] + vel->u.v[1] * dt, from[2] + vel->u.v[2] * dt};
+      float radius = 16.0f, t = 1.0f;                                   // the projectile's collision sphere
+      for (const u64_shape_def *sd = u64_shapes; sd->cls; sd++) if (!strcmp(sd->cls, u64_obj_class(o)) && sd->kind == 3) radius = sd->a;
+      u64_v *inst = u64_ivar(o, "Instigator");
+      if (u64_sweep_sphere(from, to, radius, inst->t == U64_OBJ ? inst->u.o : 0, &t)) {       // sweep: stop at first contact so the overlap fires
+        t += 0.002f; for (int k = 0; k < 3; k++) to[k] = from[k] + (to[k] - from[k]) * t;
+      }
+      *loc = u64_vec(to[0], to[1], to[2]);
+    }
+  }
+}
+
 void u64_world_tick(float dt)
 {
-  now_ += dt;
+  now_ += dt; dt_ = dt;
+  u64_movement_tick(dt);
+  projectile_tick(dt);
+  u64_overlap_events_tick();
   u64_gas_tick(dt);
   for (int i = 0; i < MAX_TIMERS; i++) {
     if (!timers[i].live) continue;
@@ -140,6 +182,7 @@ void u64_world_tick(float dt)
     if (timers[i].t > 0) continue;
     u64_v d = timers[i].dg;
     if (timers[i].period > 0) timers[i].t += timers[i].period; else timers[i].live = 0;
+    if (timers[i].co) { u64_v av = timers[i].barg; u64_call(timers[i].co, timers[i].cfn, 1, &av); continue; }
     if (timers[i].bt) { u64_v av = timers[i].barg; u64_mc_broadcast(u64_ivar(timers[i].bt, timers[i].bname), 1, &av); continue; }
     if (d.t == U64_DELEGATE && u64_obj_alive(d.dobj)) {
       if (d.aux) { u64_v entry = u64_int(d.aux); u64_call(d.dobj, d.u.s, 1, &entry); }   // latent: re-enter the event graph

@@ -42,7 +42,7 @@ class KismetTests(unittest.TestCase):
         _, st = decode(BEGIN_PLAY)
         src, g = codegen.gen_function("BP_X", "ReceiveBeginPlay", st)
         self.assertIn('U64_CALL(self, "ExecuteUbergraph_X", u64_int(152))', src)
-        self.assertIn("return;", src)
+        self.assertIn("u64_ret:;", src)
         self.assertEqual(g.unsupported, [])
 
 

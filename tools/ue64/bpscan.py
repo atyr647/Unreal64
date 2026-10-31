@@ -19,9 +19,10 @@ def decode_function(p, data, e):
         return "None"
     last = None
     for buf, ser, script in uasset.find_scripts(data, e):
-        for field_path in ((False, True) if p.ue4 >= 518 or p.ue5 else (False,)):
+        modes = [(fp, ol) for fp in ((False, True) if p.ue4 >= 518 or p.ue5 else (False,)) for ol in ((False, True) if p.ue4 < 500 else (False,))]
+        for field_path, old_let in modes:
             try:
-                d = kismet.Decoder(script, p.names, resolve, p.ue4, p.ue5, field_path)
+                d = kismet.Decoder(script, p.names, resolve, p.ue4, p.ue5, field_path, old_let)
                 st = d.run()
                 if d.mem != buf:
                     raise kismet.KismetError(f"mem {d.mem} != {buf}")

@@ -22,7 +22,8 @@ int main(int argc, char **argv)
       }
     }
   }
-  int alive = 0, ever = 0; for (int i = 0; i < u64_obj_count(); i++) { u64_obj *o = u64_obj_at(i); if (u64_obj_is_actor(o)) alive++; if (u64_ivar(o, "Location")->t == U64_VEC) ever++; }
-  printf("t=%.1f actors alive: %d (ever placed or spawned: %d)\n", u64_world_time(), alive, ever);
+  int alive = 0; for (int i = 0; i < u64_obj_count(); i++) if (u64_obj_is_actor(u64_obj_at(i))) alive++;
+  printf("t=%.1f actors alive: %d\n", u64_world_time(), alive);
+  if (u64_rt_overflows) { printf("RUNTIME STORAGE EXHAUSTED (%d)\n", u64_rt_overflows); return 1; }
   (void)verbose; return 0;
 }

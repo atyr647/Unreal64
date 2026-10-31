@@ -97,3 +97,16 @@ static inline u64_obj *u64_asobj(u64_v v) { return v.t == U64_OBJ ? v.u.o : 0; }
 // Sub-objects (components) of an actor, created on first use and owned by it.
 u64_v u64_comp(u64_obj *owner, const char *name);
 int u64_obj_is_actor(u64_obj *o);   // placed or spawned actors (not components, tasks or specs)
+void u64_timer_call(float t, u64_obj *obj, const char *fn, u64_v arg);   // call a Blueprint function later
+void u64_deliver_gameplay_event(u64_obj *asc, const char *tag, int argc, const u64_v *argv);
+void u64_set_return(u64_v v);   // a Blueprint function's return value, picked up by u64_call
+
+// Class hierarchy (Blueprint -> C++ parents) and the ports of the project's C++ gameplay classes (u64_cpp_game.c).
+const char *u64_parent_of(const char *cls);
+int u64_class_is(const char *cls, const char *ancestor);
+void u64_cpp_construct(u64_obj *o, const char *cls);                         // C++ constructor defaults of exactly this class
+int u64_cpp_dispatch(u64_obj *self, const char *fn, int argc, const u64_v *argv, u64_v *ret);   // member functions along the chain
+float u64_world_dt(void);
+void u64_obj_set_alive(u64_obj *o, int v);
+extern int u64_rt_overflows;   // > 0 if object or variable storage ran out
+extern int u64_trace_calls;   // set to log every call

@@ -6,6 +6,10 @@ import props
 import uasset
 
 
+import itertools
+_ids = itertools.count()
+
+
 def cval(v, owner="o"):
     """C expression for a tagged-property value, or None if it can't be represented."""
     if isinstance(v, bool): return f"u64_bool({int(v)})"
@@ -23,12 +27,12 @@ def cval(v, owner="o"):
         if v[0] == "tag": return f"u64_name({codegen.cstr(v[1])})"
         if v[0] == "tags":
             items = ", ".join(f"u64_name({codegen.cstr(t)})" for t in v[1])
-            return f"u64_array_of({len(v[1])}, (u64_v[]){{u64_int(0){', ' + items if items else ''}}} + 1)"
+            return f"u64_array_const({next(_ids)}, {len(v[1])}, (u64_v[]){{u64_int(0){', ' + items if items else ''}}} + 1)"
         if v[0] == "array":
             parts = [cval(x, owner) for x in v[1]]
             if all(parts):
                 items = ", ".join(parts)
-                return f"u64_array_of({len(parts)}, (u64_v[]){{u64_int(0){', ' + items if items else ''}}} + 1)"
+                return f"u64_array_const({next(_ids)}, {len(parts)}, (u64_v[]){{u64_int(0){', ' + items if items else ''}}} + 1)"
     return None
 
 
@@ -40,6 +44,12 @@ def class_defaults(p, data):
             cls = e.name[len("Default__"):-2]
             try:
                 out[cls] = props.read_object(p, data, e)          # nested: arrays, tag containers, enums
+                for k, v in list(out[cls].items()):               # properties of the actor's components (camera boom, gun, ...)
+                    if isinstance(v, tuple) and v[0] == "obj" and len(v) > 2 and 0 < v[2] <= len(p.exports):
+                        try:
+                            out[cls]["__comp:" + v[1]] = ("compprops", props.read_object(p, data, p.exports[v[2] - 1]))
+                        except Exception:
+                            pass
             except Exception:
                 try:
                     out[cls] = uasset.read_tags(p, data, e)
@@ -53,13 +63,13 @@ def level_actors(p, data):
     actors = []
     for e in p.exports:
         cn = uasset.class_name(p, e.cls)
-        if not cn.endswith("_C") or e.name.startswith("Default__"):
+        if (not cn.endswith("_C") and cn != "PlayerStart" and e.name != "EnemyHeroSpawn") or e.name.startswith("Default__"):
             continue
         try:
             props = uasset.read_tags(p, data, e)
         except Exception:
             continue
-        loc = (0.0, 0.0, 0.0)
+        loc, rot, scale = (0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (1.0, 1.0, 1.0)
         root = props.get("RootComponent")
         if isinstance(root, tuple) and root[0] == "obj" and 0 < root[2] <= len(p.exports):
             try:
@@ -68,6 +78,11 @@ def level_actors(p, data):
                 rt = {}
             if isinstance(rt.get("RelativeLocation"), tuple) and rt["RelativeLocation"][0] == "vec":
                 loc = rt["RelativeLocation"][1]
+            if isinstance(rt.get("RelativeRotation"), tuple) and rt["RelativeRotation"][0] == "vec":
+                rot = rt["RelativeRotation"][1]
+            if isinstance(rt.get("RelativeScale3D"), tuple) and rt["RelativeScale3D"][0] == "vec":
+                scale = rt["RelativeScale3D"][1]
+        props = dict(props); props["__rot"] = ("vec", rot); props["__scale"] = ("vec", scale)
         actors.append((e.name, cn.removesuffix("_C"), props, loc))
     return actors
 
@@ -75,12 +90,23 @@ def level_actors(p, data):
 def emit_defaults_c(defaults):
     lines = ['#include "u64_gas_core.h"', "void u64_apply_defaults(u64_obj *o, const char *cls) {"]
     for cls in sorted(defaults):
-        sets = [(k, cval(v, "o")) for k, v in defaults[cls].items() if k not in ("UberGraphFrame", "ActorLabel")]
+        sets = [(k, cval(v, "o")) for k, v in defaults[cls].items() if k not in ("UberGraphFrame", "ActorLabel") and not k.startswith("__comp:")]
         sets = [(k, c) for k, c in sets if c]
-        if not sets:
+        comps = []
+        for k, v in defaults[cls].items():
+            if k.startswith("__comp:") and v[0] == "compprops":
+                cs = [(pk, cval(pv, "o")) for pk, pv in v[1].items() if pk not in ("UberGraphFrame",)]
+                cs = [(pk, c) for pk, c in cs if c and not c.startswith("u64_comp(")]
+                if cs:
+                    comps.append((k[len("__comp:"):], cs))
+        if not sets and not comps:
             continue
         lines.append(f'  if (!strcmp(cls, {codegen.cstr(cls)})) {{')
         lines += [f'    *u64_ivar(o, {codegen.cstr(codegen.ident(k))}) = {c};' for k, c in sets]
+        for cname, cs in comps:
+            lines.append(f'    {{ u64_obj *c = u64_asobj(u64_comp(o, {codegen.cstr(cname)}));')
+            lines += [f'      *u64_ivar(c, {codegen.cstr(codegen.ident(pk))}) = {c};' for pk, c in cs]
+            lines.append("    }")
         lines.append("  }")
     lines.append("}")
     return "\n".join(lines) + "\n"
@@ -94,7 +120,8 @@ def emit_level_c(actors):
         for k, v in props.items():
             c = cval(v, "a")
             if c and k not in ("UberGraphFrame", "ActorLabel", "RootComponent"):
-                lines.append(f"  *u64_ivar(a, {codegen.cstr(codegen.ident(k))}) = {c};")
+                name = {"__rot": "Rotation", "__scale": "Scale"}.get(k, codegen.ident(k))
+                lines.append(f"  *u64_ivar(a, {codegen.cstr(name)}) = {c};")
     lines.append("  u64_world_begin_play();")
     lines.append("}")
     return "\n".join(lines) + "\n"

@@ -57,5 +57,21 @@ class FieldPathTests(unittest.TestCase):
         self.assertEqual(st[0].args[0], "Health")      # previously returned the outermost name ("/Game/Pkg")
 
 
+class ParamOrderTests(unittest.TestCase):
+    def test_event_stub_pin_order_beats_export_order(self):
+        import codegen
+        # Export order is (A, B, C), but the event stub copies them to the frame as C, A, B: that is the declaration order.
+        N = kismet.Node
+        def stub(var): return N(0, 0, "LetValueOnPersistentFrame", ["K2Node_X_" + var, N(0, 0, "LocalVariable", [var])])
+        out = codegen.order_params([("A", False), ("B", False), ("C", True)], [stub("C"), stub("A"), stub("B")])
+        self.assertEqual([n for n, _ in out], ["C", "A", "B"])
+        self.assertTrue(dict(out)["C"])                          # the out flag follows the parameter
+
+    def test_parameters_without_stub_keep_export_order(self):
+        import codegen
+        out = codegen.order_params([("A", False), ("B", False)], [])
+        self.assertEqual([n for n, _ in out], ["A", "B"])
+
+
 if __name__ == "__main__":
     unittest.main()

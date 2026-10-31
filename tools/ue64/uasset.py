@@ -147,7 +147,7 @@ def parse_tables(path) -> Package:
             r.skip(20)  # preload dependency ints
         if not (0 <= off < len(data) and 0 <= size <= len(data) - off and off >= p.header_size):
             raise ValueError(f"{path}: export table not understood (export {i} at {off}+{size}); package version {p.ue4}")
-        p.exports.append(Export(i, cls, sup, outer, name, flags, size, off))
+        p.exports.append(Export(i, cls, sup, outer, name, flags, size, off))   # sup: super class/struct package index
     return p
 
 
@@ -174,22 +174,22 @@ def find_scripts(data: bytes, e: Export):
     return hits[::-1]
 
 
-CPF_PARM, CPF_RETURN = 0x80, 0x400
+CPF_PARM, CPF_OUT, CPF_RETURN, CPF_REF = 0x80, 0x100, 0x400, 0x8000
 
 
 def function_params(p, data, fn_export):
-    """Parameter names of a function, from its child property exports (pre-FField packages).
+    """[(name, is_out)] parameters of a function in declaration order, excluding the return value.
 
-    Property exports serialize: tagged-properties terminator FName (8) + ArrayDim (4) + PropertyFlags (8).
-    Returns names in declaration order, excluding the return value.
+    Pre-FField packages store each parameter as a property export owned by the function:
+    tagged-properties terminator FName (8) + 4 bytes + ArrayDim (4) + PropertyFlags (8, at +16).
     """
     owner = fn_export.index + 1
     out = []
     for x in p.exports:
-        if x.outer == owner and class_name(p, x.cls).endswith("Property") and x.size >= 20:
-            flags = struct.unpack_from("<Q", data, x.offset + 12)[0]
+        if x.outer == owner and class_name(p, x.cls).endswith("Property") and x.size >= 24:
+            flags = struct.unpack_from("<Q", data, x.offset + 16)[0]
             if flags & CPF_PARM and not flags & CPF_RETURN:
-                out.append(x.name)
+                out.append((x.name, bool(flags & (CPF_OUT | CPF_REF))))
     return out
 
 

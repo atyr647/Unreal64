@@ -1,6 +1,7 @@
 // GASShooter scenarios on the host. Every expected value is derived from the project's assets (GE_HeroAttributes, the weapon
 // Blueprints' defaults) or its C++ (Source/GASShooter), cited per check.
 #include "u64_gas_core.h"
+#include "u64_anim.h"
 #include <stdio.h>
 #include <math.h>
 #include <stdarg.h>
@@ -46,6 +47,20 @@ int u64_run_shooter_scenarios(int verbose)
   // SpawnDefaultInventory: DefaultInventoryWeaponClasses = [BP_Rifle], equipped (i == 0)
   CHECK(u64_as_int(call(hero, "GetNumWeapons")) == 1);
   u64_obj *rifle = call(hero, "GetCurrentWeapon").u.o;
+  // --- first-person animation: ABP_Hero1P standing with the rifle stays in FPP_Idle (no transition rule fires) and plays FPP_RifleIdle (3 s loop). The pose of
+  // b_RightWeapon in mesh space at idle time 1.0 s is the sequence's raw keys sampled and composed down the skeleton, computed independently in Python
+  // (tools/ue64/animation.py: pose(), component_space()): (-14.0033, 25.8975, 126.3519).
+  {
+    extern float u64_anim_debug_acc(const u64_an_inst *a, int n); extern u64_an_inst *u64_gs_anim_of(u64_obj *hero);
+    u64_obj *me = hero;
+    const u64_an_graph *g = u64_anim_find_graph("ABP_Hero1P"); u64_an_inst *a = u64_gs_anim_of(me);
+    CHECK(g && a);
+    int idle = -1; for (int n = 0; g && n < g->nnodes; n++) if (g->nodes[n].kind == 4 && !strcmp(g->seqs[g->nodes[n].seq].name, "FPP_RifleIdle") && u64_anim_debug_acc(a, n) > 0) idle = n;
+    for (int i = 0; i < 400 && idle >= 0 && u64_anim_debug_acc(a, idle) < 1.0f - 1e-3f; i++) tick(1);   // stand still until the idle sequence is at 1.0 s
+    float t[3], q[4]; int ok = a && u64_anim_bone_cs(a, "b_RightWeapon", t, q);
+    CHECK(ok && idle >= 0 && fabsf(u64_anim_debug_acc(a, idle) - 1.0f) < 0.04f);
+    CHECK(ok && fabsf(t[0] + 14.0033f) < 0.1f && fabsf(t[1] - 25.8975f) < 0.1f && fabsf(t[2] - 126.3519f) < 0.1f);
+  }
   CHECK(rifle && !strcmp(u64_obj_class(rifle), "BP_Rifle"));
   CHECK(u64_as_int(call(hero, "GetPrimaryClipAmmo")) == 30 && u64_as_int(call(hero, "GetMaxPrimaryClipAmmo")) == 30);   // BP_Rifle: 30 / 30
   CHECK(u64_as_int(call(hero, "GetPrimaryReserveAmmo")) == 60);                      // Weapon.Ammo.Rifle -> RifleReserveAmmo
@@ -337,6 +352,7 @@ int u64_run_shooter_scenarios(int verbose)
     u64_obj *down = u64_find("BP_HeroCharacter3"), *me = hero;
     u64_v dl = *u64_ivar(down, "Location");
     hero = down; u64_obj *dasc = asc_of_hero();
+    u64_remove_ge_class(dasc, "GE_HealthRegen");                                                        // so the health value is only the revive effect's
     dm[0].value = 500.0f; u64_apply_ge(dasc, dasc, "TestDamage", 1, 0);                                    // lethal damage: KnockDown (health back to full, KnockedDown tag)
     CHECK(u64_tag_has(dasc, "State.KnockedDown") && attr("Health") == 100);
     hero = me;

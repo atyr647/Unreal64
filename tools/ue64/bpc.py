@@ -1,4 +1,5 @@
 """Blueprint -> C compiler driver. python tools/ue64/bpc.py <Content dir> <out dir>"""
+import glob
 import os
 import sys
 
@@ -55,6 +56,19 @@ def main(content, out):
     ges, montages, shapes, moves, projs, parents, bound = gasdata.collect(content)
     with open(os.path.join(out, "u64_gas_data.c"), "w") as fh:
         fh.write(gasdata.emit_gas_data_c(ges, montages, shapes, moves, projs, parents, bound))
+    try:                                                              # animation: compiled AnimBPs of character meshes (bone chain to the weapon socket)
+        import animgraph
+        anim_c, graphs = [], []
+        for abp, mesh, bone in (("ABP_Hero1P", "HeroFPP", "b_RightWeapon"),):
+            if glob.glob(content + "/**/%s.uasset" % abp, recursive=True) and glob.glob(content + "/**/%s.uasset" % mesh, recursive=True):
+                c, _ = animgraph.emit_c(content, abp, mesh, bone); anim_c.append(c); graphs.append(abp)
+        text = "".join(anim_c) + '#include "u64_anim.h"\n' + "".join("extern const u64_an_graph u64_an_%s;\n" % g for g in graphs)
+        text += "const u64_an_graph *const u64_an_graphs[] = {%s0};\n" % "".join("&u64_an_%s, " % g for g in graphs)
+    except Exception as ex:
+        text = '#include "u64_anim.h"\nconst u64_an_graph *const u64_an_graphs[] = {0};\n'
+        print("animation data skipped:", ex)
+    with open(os.path.join(out, "u64_anim_data.c"), "w") as fh:
+        fh.write(text)
     with open(os.path.join(out, "u64_defaults.c"), "w") as fh:
         fh.write(leveldata.emit_defaults_c(defaults))
     with open(os.path.join(out, "u64_level.c"), "w") as fh:

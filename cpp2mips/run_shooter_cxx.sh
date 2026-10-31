@@ -7,7 +7,7 @@ here="$(cd "$(dirname "$0")/.." && pwd)"; out="$(mktemp -d)"; [ -n "${KEEP:-}" ]
 python3 "$here/tools/ue64/bpc.py" "$content" "$out/gen" | tail -1
 python3 "$here/cpp2mips/uht_lite.py" "$out/ugen" "$gs/Public/Characters/Abilities/AttributeSets/GSAmmoAttributeSet.h" "$gs/Public/Characters/Abilities/AttributeSets/GSAttributeSetBase.h" "$gs/Public/Characters/GSCharacterBase.h" "$gs/Public/Player/GSPlayerController.h" "$gs/Public/Characters/Abilities/GSGA_CharacterJump.h" "$gs/Public/Characters/Abilities/GSAbilityTypes.h" "$gs/Public/Characters/Abilities/GSGameplayAbility.h" >/dev/null
 objs=()
-for f in u64_rt u64_natives u64_gas u64_gas_core u64_gas_extra u64_collision u64_math u64_movement u64_cpp_game u64_cpp_gasshooter; do
+for f in u64_rt u64_natives u64_gas u64_gas_core u64_gas_extra u64_collision u64_anim u64_math u64_movement u64_cpp_game u64_cpp_gasshooter; do
   gcc -g -w -DU64_CXX_AMMO -DU64_CXX_BASE -DU64_CXX_JUMP -I"$here/runtime" -c -o "$out/$f.o" "$here/runtime/$f.c"; objs+=("$out/$f.o"); done
 gcc -g -w -DU64_CXX_AMMO -DU64_CXX_BASE -DU64_CXX_JUMP -I"$here/runtime" -c -o "$out/run_shooter.o" "$here/tests/bp/run_shooter.c"; objs+=("$out/run_shooter.o")
 for f in "$out"/gen/*.c; do gcc -g -w -I"$here/runtime" -c -o "$f.o" "$f"; objs+=("$f.o"); done

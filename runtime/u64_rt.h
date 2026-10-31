@@ -25,7 +25,7 @@ static inline u64_v u64_ref(u64_v *p) { u64_v r = {U64_REF}; r.u.r = p; return r
 static inline void u64_out(u64_v dst, u64_v val) { if (dst.t == U64_REF && dst.u.r) *dst.u.r = val; }
 static inline u64_v u64_latent(u64_v obj, const char *fn, int linkage) { u64_v r = {U64_DELEGATE}; r.u.s = fn; r.dobj = obj.u.o; r.aux = linkage; return r; }
 static inline u64_v u64_vec(float x, float y, float z) { u64_v r = {U64_VEC}; r.u.v[0] = x; r.u.v[1] = y; r.u.v[2] = z; return r; }
-static inline int   u64_true(u64_v v)      { return v.t == U64_FLOAT ? v.u.f != 0 : v.t == U64_OBJ ? v.u.o != 0 : v.u.i != 0; }
+static inline int   u64_true(u64_v v)      { if (v.t == U64_REF) { if (!v.u.r) return 0; v = *v.u.r; } return v.t == U64_FLOAT ? v.u.f != 0 : v.t == U64_OBJ ? v.u.o != 0 : v.u.i != 0; }
 static inline int   u64_as_int(u64_v v)    { return v.t == U64_FLOAT ? (int)v.u.f : v.u.i; }
 
 // Object model (implemented by the runtime): instance variables, named-object lookup, and function dispatch.

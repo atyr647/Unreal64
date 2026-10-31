@@ -7,7 +7,7 @@
 
 #define IS(n) (!strcmp(fn, n))
 static u64_v A(int argc, const u64_v *a, int i) { return i < argc ? a[i] : (u64_v){U64_NONE}; }
-static float F(u64_v v) { return v.t == U64_INT || v.t == U64_BOOL ? (float)v.u.i : v.t == U64_FLOAT ? v.u.f : 0.0f; }
+static float F(u64_v v) { if (v.t == U64_REF && v.u.r) v = *v.u.r; return v.t == U64_INT || v.t == U64_BOOL ? (float)v.u.i : v.t == U64_FLOAT ? v.u.f : 0.0f; }
 static const u64_v NONE_ = {U64_NONE};
 
 // ---- string pool ----
@@ -222,6 +222,7 @@ u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
   // ---------------- movement / animation queries ----------------
   if (IS("GetVelocity")) { u64_v *v = u64_ivar(self, "Velocity"); return v->t == U64_VEC ? *v : u64_vec(0, 0, 0); }
   if (IS("GetCurrentAcceleration")) { u64_v *v = u64_ivar(self, "Acceleration"); return v->t == U64_VEC ? *v : u64_vec(0, 0, 0); }
+  if (IS("GetInstanceAssetPlayerTimeFromEnd")) { extern float u64_anim_time_from_end(u64_obj *, int); return u64_float(u64_anim_time_from_end(self, x.t == U64_INT ? x.u.i : 0)); }
   if (IS("IsFalling")) return u64_bool(u64_true(*u64_ivar(self, "bFalling")));
   if (IS("GetMovementComponent")) { u64_v *m = u64_ivar(self, "MovementComponent"); return m->t == U64_OBJ ? *m : u64_objv(self); }
   if (IS("TryGetPawnOwner")) { u64_v *p = u64_ivar(self, "Pawn"); return p->t == U64_OBJ ? *p : u64_objv(self); }

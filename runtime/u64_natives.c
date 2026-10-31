@@ -19,7 +19,7 @@ float u64_world_time(void) { return now_; }
 static float dt_;
 float u64_world_dt(void) { return dt_; }
 
-static float F(u64_v v) { return v.t == U64_INT || v.t == U64_BOOL ? (float)v.u.i : v.u.f; }
+static float F(u64_v v) { if (v.t == U64_REF && v.u.r) v = *v.u.r; return v.t == U64_INT || v.t == U64_BOOL ? (float)v.u.i : v.u.f; }
 static u64_v arg(int argc, const u64_v *a, int i) { return i < argc ? a[i] : (u64_v){U64_NONE}; }
 static u64_v loc_of(u64_obj *o) { u64_v *l = u64_ivar(o, "Location"); return l->t == U64_VEC ? *l : u64_vec(0, 0, 0); }
 

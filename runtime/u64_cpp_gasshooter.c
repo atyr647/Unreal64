@@ -5,6 +5,7 @@
 // Differences that come from the runtime, not the game: the hero owns its ability system component (the project keeps it on
 // the PlayerState, which only matters across respawns), and authority / replication code paths are always the server's.
 #include "u64_gas_core.h"
+#include "u64_anim.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -219,6 +220,7 @@ static u64_v w_end_play(u64_obj *s, int c, const u64_v *a)         // AGSWeapon:
 // ---------------------------------------------------------------------------------------------------- AGSHeroCharacter
 static void ctor_hero(u64_obj *o)                                  // AGSHeroCharacter::AGSHeroCharacter
 {
+  { u64_v cm = u64_comp(o, "CharacterMovement"); *u64_ivar(o, "CharacterMovement") = cm; *u64_ivar(cm.u.o, "MaxWalkSpeed") = u64_float(600.0f); }   // UCharacterMovementComponent default (the Blueprint sets none)
   *u64_ivar(o, "bStartInFirstPersonPerspective") = u64_bool(1);
   *u64_ivar(o, "bIsFirstPersonPerspective") = u64_bool(0);
   *u64_ivar(o, "Default1PFOV") = u64_float(90.0f); *u64_ivar(o, "Default3PFOV") = u64_float(80.0f);
@@ -873,10 +875,33 @@ static u64_v w_pickup_on_touch(u64_obj *w, int c, const u64_v *a)
 #define MAX_TOUCH 96
 static struct { u64_obj *a, *b; } touching[MAX_TOUCH]; static int ntouch;
 static int touch_find(u64_obj *a, u64_obj *b) { for (int i = 0; i < ntouch; i++) if (touching[i].a == a && touching[i].b == b) return i; return -1; }
+// First-person hero animation: one ABP_Hero1P instance per hero, updated every tick (BlueprintUpdateAnimation + state machine + pose of the weapon socket chain).
+static struct { u64_obj *hero; u64_an_inst *a; u64_obj *inst; } anims[8];
+static void anim_tick(float dt)
+{
+  const u64_an_graph *g = u64_anim_find_graph("ABP_Hero1P");
+  if (!g) return;
+  for (int i = 0; i < 8; i++) if (anims[i].a && !u64_obj_alive(anims[i].hero)) { u64_anim_free(anims[i].a); memset(&anims[i], 0, sizeof anims[i]); }
+  for (int j = 0; j < u64_obj_count(); j++) {
+    u64_obj *h = u64_obj_at(j);
+    if (!u64_obj_alive(h) || !u64_obj_is_actor(h) || !is_class(h, "GSHeroCharacter")) continue;
+    int k = -1, free_ = -1;
+    for (int i = 0; i < 8; i++) { if (anims[i].a && anims[i].hero == h) k = i; if (!anims[i].a && free_ < 0) free_ = i; }
+    if (k < 0) {
+      if (free_ < 0) continue;
+      u64_v cm = u64_comp(h, "CharacterMovement"); *u64_ivar(h, "CharacterMovement") = cm;
+      if (u64_ivar(cm.u.o, "MaxWalkSpeed")->t != U64_FLOAT) *u64_ivar(cm.u.o, "MaxWalkSpeed") = u64_float(600.0f);          // UCharacterMovementComponent default (the Blueprint sets none)
+      u64_obj *inst = u64_new("ABP_Hero1P_inst", "ABP_Hero1P"); *u64_ivar(inst, "Pawn") = u64_objv(h); *u64_ivar(h, "AnimInstance1P") = u64_objv(inst);
+      anims[free_].hero = h; anims[free_].inst = inst; anims[free_].a = u64_anim_new(g, inst); k = free_;
+    }
+    if (anims[k].a) u64_anim_update(anims[k].a, dt);
+  }
+}
+u64_an_inst *u64_gs_anim_of(u64_obj *hero) { for (int i = 0; i < 8; i++) if (anims[i].a && anims[i].hero == hero) return anims[i].a; return 0; }
 static void interact_tick(void);
 static void gs_world_tick(float dt)
 {
-  (void)dt;
+  anim_tick(dt);
   interact_tick();
   for (int i = 0; i < u64_obj_count(); i++) {
     u64_obj *o = u64_obj_at(i);

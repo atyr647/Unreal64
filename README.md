@@ -29,3 +29,9 @@ Output goes to `viewer/assets/` and `viewer/level_index.h`, which the viewer's M
 shapes, movement tuning and class defaults; `runtime/` is the N64-side Unreal runtime (GAS, movement, collision, notifies,
 ports of the project's C++); `game/` is a playable ROM (see docs/PLAN.md and docs/img/ares_game*.png). Run the checks with
 `tools/run_bp_tests.sh <Project>/Content`.
+
+## Linux vs ares comparison
+
+`tools/hostrender` renders the same deterministic autoplay on Linux and in ares (ROM frozen on a chosen frame). The
+per-frame game state (HP/mana/stamina/position/object count, 549 frames) is identical on both; screenshots differ only by
+the N64 VI resampling blur (MAE ≈ 3/255). See `docs/img/compare_ares_linux_1.png` / `_2.png` and `tools/hostrender/README.md`.

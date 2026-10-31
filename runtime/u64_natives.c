@@ -91,10 +91,15 @@ u64_v u64_native(u64_obj *self, const char *fn, int argc, const u64_v *a)
   if (IS("K2_GetActorLocation")) { HIT; return loc_of(self); }
   if (IS("GetTransform")) { HIT; u64_v *r = u64_ivar(self, "Rotation"); return u64_xform_new(loc_of(self), r->t == U64_VEC ? *r : u64_vec(0, 0, 0)); }
   if (IS("K2_SetActorLocation") || IS("K2_SetRelativeLocation")) { HIT; *u64_ivar(self, "Location") = x; return u64_bool(1); }
-  if (IS("GetOwner") || IS("GetInstigator") || IS("GetOwningActorFromActorInfo")) {
+  if (IS("GetInstigator")) {                                                    // AActor::GetInstigator: who caused this actor to exist
+    HIT; u64_v *i = u64_ivar(self, "Instigator");
+    return i->t == U64_OBJ ? *i : u64_objv(self);
+  }
+  if (IS("GetOwner") || IS("GetOwningActorFromActorInfo")) {
     HIT;
     if (!strcmp(u64_obj_class(self), "Component")) return *u64_ivar(self, "Owner");     // a component's owner is its actor
-    return u64_objv(self);
+    u64_v *o = u64_ivar(self, "Owner");
+    return o->t == U64_OBJ ? *o : u64_objv(self);
   }
   if (IS("BeginDeferredActorSpawnFromClass")) { HIT; return u64_objv(spawn(y, arg(argc, a, 2))); }
   if (IS("FinishSpawningActor")) { HIT; if (x.t == U64_OBJ && x.u.o) { u64_actor_init(x.u.o); u64_call(x.u.o, "ReceiveBeginPlay", 0, 0); } return x; }

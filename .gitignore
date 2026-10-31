@@ -19,3 +19,4 @@ game/src/gen/
 game/build/
 bpdemo/src/*.c
 !bpdemo/src/main.c
+game/src/freeze.h

@@ -232,6 +232,13 @@ int u64_run_scenarios(int verbose_)
   u64_input_press(gunner, "EGDAbilityInputID::Ability1");
   run(0.6f);
   CHECK(NEAR(hp0 - u64_attr_get(da, "Health"), 12.0f * 100.0f / (100.0f + armor)));   // Damage 12 (GDGA_FireGun) mitigated by the target's Armor
+  CHECK(NEAR(u64_attr_get(u64_asc_of(gunner), "Health"), 100));              // a projectile never damages its own instigator
+  {                                                                           // the projectile Blueprint relies on GetInstigator/GetOwner
+    u64_obj *pj = u64_new("InstTest", "BP_GunProjectile");
+    *iv(pj, "Instigator") = u64_objv(gunner); *iv(pj, "Owner") = u64_objv(gunner);
+    CHECK(u64_asobj(u64_call(pj, "GetInstigator", 0, 0)) == gunner);
+    CHECK(u64_asobj(u64_call(pj, "GetOwner", 0, 0)) == gunner);
+  }
   int live_proj = 0;
   for (int i = 0; i < u64_obj_count(); i++) if (!strcmp(u64_obj_class(u64_obj_at(i)), "BP_GunProjectile") && u64_obj_alive(u64_obj_at(i)) && iv(u64_obj_at(i), "Location")->u.v[1] > 59000) live_proj++;
   CHECK(live_proj == 0);                                                                // the projectile was consumed by the hit

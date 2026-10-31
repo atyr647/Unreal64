@@ -76,6 +76,7 @@ int u64_obj_alive(u64_obj *o);
 int u64_native_hits(const char *fn);                   // times a native ran; -1 if never implemented
 
 // Natives implemented in u64_gas.c (Gameplay Ability System, UI, animation, tasks).
+int u64_native_math(u64_obj *self, const char *fn, int argc, const u64_v *a, u64_v *out);   // 1 if handled
 u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *argv);
 void u64_timer_broadcast(float t, u64_obj *task, const char *delegate_name, u64_v arg);
 void u64_timer_latent(float t, u64_v delegate);

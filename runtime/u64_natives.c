@@ -134,9 +134,7 @@ u64_v u64_native(u64_obj *self, const char *fn, int argc, const u64_v *a)
   if (IS("Add_VectorVector")) { HIT; return u64_vec(x.u.v[0] + y.u.v[0], x.u.v[1] + y.u.v[1], x.u.v[2] + y.u.v[2]); }
   if (IS("Multiply_VectorFloat")) { HIT; return u64_vec(x.u.v[0] * F(y), x.u.v[1] * F(y), x.u.v[2] * F(y)); }
   if (IS("VSize")) { HIT; return u64_float(sqrtf(x.u.v[0] * x.u.v[0] + x.u.v[1] * x.u.v[1] + x.u.v[2] * x.u.v[2])); }
-  // --- arrays (arrays are not modelled yet: length 0)
-  if (IS("Array_Length")) { HIT; return u64_int(0); }
-  if (IS("Array_Get")) { HIT; return u64_objv(0); }
+  { u64_v out = {U64_NONE}; if (u64_native_math(self, fn, argc, a, &out)) { HIT; return out; } }   // u64_math.c: math + arrays
   return u64_native_gas(self, fn, argc, a);
 }
 

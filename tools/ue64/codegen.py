@@ -19,6 +19,19 @@ def last(path):
     return ident(str(path).split(".")[-1])
 
 
+def quat_to_rotator(x, y, z, w):
+    """FQuat::Rotator(): (pitch, yaw, roll) in degrees, including the gimbal-lock poles."""
+    import math
+    test = z * x - w * y
+    yaw_y, yaw_x = 2 * (w * z + x * y), 1 - 2 * (y * y + z * z)
+    norm = lambda d: d - 360.0 * math.floor((d + 180.0) / 360.0)
+    if test < -0.4999995:
+        yaw = math.degrees(math.atan2(yaw_y, yaw_x)); return (-90.0, yaw, norm(-yaw - 2 * math.degrees(math.atan2(x, w))))
+    if test > 0.4999995:
+        yaw = math.degrees(math.atan2(yaw_y, yaw_x)); return (90.0, yaw, norm(yaw - 2 * math.degrees(math.atan2(x, w))))
+    return (math.degrees(math.asin(2 * test)), math.degrees(math.atan2(yaw_y, yaw_x)), math.degrees(math.atan2(-2 * (w * x + y * z), 1 - 2 * (x * x + y * y))))
+
+
 class Gen:
     def __init__(self, ubergraph=False):
         self.locals, self.natives, self.unsupported = set(), set(), []
@@ -64,6 +77,9 @@ class Gen:
         if o == "Self": return f"u64_objv({s})"
         if o == "ObjectConst": return f"u64_objv(u64_find({cstr(a[0])}))"
         if o in ("VectorConst", "Vector3fConst", "RotationConst"): return f"u64_vec({a[0]!r}f, {a[1]!r}f, {a[2]!r}f)"
+        if o == "TransformConst":                                  # (rotation quat xyzw, translation, scale): keeps location + rotation
+            return f"u64_xform_new(u64_vec({a[4]!r}f, {a[5]!r}f, {a[6]!r}f), u64_vec({', '.join(repr(v) + 'f' for v in quat_to_rotator(*a[:4]))}))"
+        if o == "ArrayGetByRef": return f"u64_array_get({self.ex(a[0], s)}, u64_as_int({self.ex(a[1], s)}))"
         if o == "Nothing": return "u64_int(0)"
         if o == "PrimitiveCast": return self.ex(a[1], s)
         if o in ("MetaCast", "DynamicCast", "ObjToInterfaceCast", "CrossInterfaceCast", "InterfaceToObjCast"): return self.ex(a[1], s)
@@ -100,7 +116,8 @@ class Gen:
 
     def arg(self, p, s, name, i):
         # Out-parameters: LocalOutVariable always; Break* natives also write their trailing args.
-        if p.op == "LocalOutVariable" or (name.startswith("Break") and i > 0 and p.op in ("LocalVariable", "InstanceVariable")):
+        if p.op == "LocalOutVariable" or (name.startswith("Array_") and i == 0 and p.op in ("LocalVariable", "InstanceVariable", "DefaultVariable", "StructMemberContext")) \
+                or (name.startswith("Break") and i > 0 and p.op in ("LocalVariable", "InstanceVariable")):
             return f"u64_ref(&{self.lv(p, s)})"
         return self.ex(p, s)
 

@@ -296,8 +296,6 @@ u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
   }
   if (IS("BeginSpawningActor")) return u64_objv(u64_spawn_actor(nm(y), u64_vec(0, 0, 0)));
   // ---------------- arrays ----------------
-  if (IS("Array_Length")) return u64_int(u64_array_len(x));
-  if (IS("Array_Get")) { u64_v item = u64_array_get(x, y.u.i); u64_out(z, item); return item; }
   // ---------------- Gameplay Ability System ----------------
   if (IS("GetAbilitySystemComponent")) return u64_objv(u64_asc_of(x.t == U64_OBJ ? x.u.o : self));
   if (IS("GetActorInfo")) {

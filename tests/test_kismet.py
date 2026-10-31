@@ -48,3 +48,15 @@ class KismetTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class QuatTests(unittest.TestCase):
+    def test_quat_to_rotator(self):
+        import codegen, math
+        h = math.sqrt(0.5)
+        p, y, r = codegen.quat_to_rotator(0, 0, h, h)                 # +90 yaw
+        self.assertAlmostEqual(y, 90, places=4); self.assertAlmostEqual(p, 0, places=4); self.assertAlmostEqual(r, 0, places=4)
+        p, y, r = codegen.quat_to_rotator(0, h, 0, h)                 # UE quat (0,y,0,w): rotation about Y by +90 -> pitch is -90 (gimbal pole)
+        self.assertAlmostEqual(abs(p), 90, places=3)
+        p, y, r = codegen.quat_to_rotator(0, 0, 0, 1)
+        self.assertEqual((round(p, 6), round(y, 6), round(r, 6)), (0, 0, 0))

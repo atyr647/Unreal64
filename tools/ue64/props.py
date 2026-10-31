@@ -142,22 +142,12 @@ def _value(r, ctx, typ, size, sub, inner, start):
             if n == 0:
                 r.p = start + size            # an empty array may still carry its inner tag header
                 return ("array", [])
-            h = _tag_header(r, ctx)               # one shared header describes the elements
-            _, _, _, _, sname, _ = h
-            elems = []
-            esize = (h[2]) // max(n, 1) if False else None
-            end_all = r.p + h[2]
-            for _ in range(n):
-                if sname in BINARY_STRUCTS or sname == "GameplayTag":
-                    k = BINARY_STRUCTS.get(sname) or 8     # (RichCurveKey: 27)
-                    elems.append(_struct(r, ctx, sname, k, r.p))
-                else:
-                    save = r.p
-                    try:
-                        elems.append(("struct", read_stream(r, ctx, end_all), sname))
-                    except Exception:
-                        UNPARSED[sname] = UNPARSED.get(sname, 0) + 1
-                        raise
+            body = r.p
+            try:
+                return _struct_array(r, ctx, n, True)
+            except Exception:
+                r.p = body                         # some (older) saves have no shared inner header: the elements are plain tag streams
+                return _struct_array(r, ctx, n, False, start + size)
             return ("array", elems)
         return ("array", [_scalar(r, ctx, inner, 8 if inner in ("NameProperty",) else 0) for _ in range(n)])
     if typ == "MapProperty":
@@ -174,6 +164,26 @@ def _value(r, ctx, typ, size, sub, inner, start):
     if typ == "SetProperty":
         raise ValueError(typ)
     return _scalar(r, ctx, typ, size, sub)
+
+
+def _struct_array(r, ctx, n, shared, end_all=None):
+    sname = None
+    if shared:
+        h = _tag_header(r, ctx)               # one shared header describes the elements
+        sname = h[4]
+        end_all = r.p + h[2]
+    elems = []
+    for _ in range(n):
+        if sname in BINARY_STRUCTS or sname == "GameplayTag":
+            k = BINARY_STRUCTS.get(sname) or (12 if sname in ("Vector", "Rotator") else 8)     # (RichCurveKey: 27; Vector/Rotator: 3 floats pre-LWC)
+            elems.append(_struct(r, ctx, sname, k, r.p))
+        else:
+            try:
+                elems.append(("struct", read_stream(r, ctx, end_all), sname))
+            except Exception:
+                UNPARSED[sname] = UNPARSED.get(sname, 0) + 1
+                raise
+    return ("array", elems)
 
 
 def read_object(p, data, e):

@@ -27,7 +27,7 @@ static const char *nm(u64_v v)
 static const char *strip_c(const char *s) { static char b[4][64]; static int i; char *o = b[i++ & 3]; snprintf(o, 64, "%s", s); size_t n = strlen(o); if (n > 2 && !strcmp(o + n - 2, "_C")) o[n - 2] = 0; return o; }
 static int tag_matches(const char *have, const char *query) { size_t q = strlen(query); return !strncmp(have, query, q) && (have[q] == 0 || have[q] == '.'); }
 static u64_obj *avatar_of(u64_obj *ab) { u64_v *av = u64_ivar(ab, "Avatar"); return av->t == U64_OBJ ? av->u.o : 0; }
-static u64_obj *asc_for(u64_obj *o) { return o && !strcmp(u64_obj_class(o), "AbilitySystemComponent") ? o : u64_asc_of(o); }
+static u64_obj *asc_for(u64_obj *o) { return o && (u64_is_asc(o) || !strcmp(u64_obj_class(o), "AbilitySystemComponent")) ? o : u64_asc_of(o); }
 
 // ---------------------------------------------------------------------------------------------------- target data
 static u64_v td_hit(u64_obj *hit) { u64_obj *d = u64_new("TargetDataHit", "TargetDataHit"); *u64_ivar(d, "HitResult") = u64_objv(hit); return u64_objv(d); }
@@ -337,6 +337,11 @@ int u64_native_gas_extra(u64_obj *self, const char *fn, int argc, const u64_v *a
       for (int i = 0; i < u64_array_len(specs); i++) { u64_v h = apply_spec_to_handle(u64_array_get(specs, i), td, asc_for(avatar_of(self))); for (int k = 0; k < u64_array_len(h); k++) u64_array_push(&all, u64_array_get(h, k)); } }
     *out = all; return 1;
   }
+  if (IS("BP_ApplyGameplayEffectToTarget") && u64_class_is(u64_obj_class(self), "AbilitySystemComponent")) {   // UAbilitySystemComponent: (GEClass, Target ASC, level, context)
+    u64_obj *target = O(y) ? asc_for(O(y)) : 0;
+    if (target) { *out = u64_int(u64_apply_ge(target, self, u64_intern(strip_c(nm(x))), z.t == U64_FLOAT ? z.u.f : 1.0f, 0)); return 1; }
+    *out = u64_int(0); return 1;
+  }
   if (IS("BP_ApplyGameplayEffectToTarget")) {                              // UGameplayAbility: (TargetData, GEClass, level, stacks)
     u64_obj *spec = u64_new("EffectSpec", "GameplayEffectSpec");
     *u64_ivar(spec, "GEClass") = u64_name(u64_intern(strip_c(nm(y)))); *u64_ivar(spec, "Level") = z; *u64_ivar(spec, "Source") = u64_objv(asc_for(avatar_of(self)));
@@ -420,6 +425,8 @@ int u64_native_gas_extra(u64_obj *self, const char *fn, int argc, const u64_v *a
     u64_out(A(argc, a, 8), arr); *out = u64_bool(n > 0); return 1;
   }
   // --- scene component setters used by the tasks and abilities
+  if (IS("Activate") && self && !strcmp(u64_obj_class(self), "Component")) { *u64_ivar(self, "bIsActive") = u64_bool(1); return 1; }        // components: movement / particle systems
+  if (IS("Deactivate")) { if (self) *u64_ivar(self, "bIsActive") = u64_bool(0); return 1; }
   if (IS("SetFieldOfView")) { if (self) *u64_ivar(self, "FieldOfView") = x; return 1; }
   if (IS("SetBoolPropertyByName") || IS("SetObjectPropertyByName") || IS("SetStructurePropertyByName") || IS("SetFloatPropertyByName") || IS("SetIntPropertyByName")) {
     if (O(x)) *u64_ivar(O(x), u64_intern(nm(y))) = z;                       // KismetSystemLibrary::Set*PropertyByName: the variable of that name on the object

@@ -30,6 +30,12 @@ typedef struct { const char *prop; int nkeys; const u64_curve_key *keys; } u64_t
 typedef struct { const char *cls, *var; float length; int loop, autoplay; const char *update, *finished, *direction; int ntracks; const u64_tl_track *tracks; } u64_timeline_def;
 extern const u64_timeline_def u64_timelines[];                             // Timeline nodes: terminated by a null class
 float u64_curve_eval(const u64_curve_key *keys, int n, float t);
+typedef struct { int n; const float *planes; } u64_hull;                                  // convex hull: n planes (nx, ny, nz, d), inside n.x <= d
+typedef struct { const char *name; int nhulls; const u64_hull *hulls; } u64_mesh_def;      // a static mesh's simple collision (mesh space)
+typedef struct { const char *chan; int resp; } u64_resp;                                    // 0 ignore, 1 overlap, 2 block
+typedef struct { const char *cls, *comp, *mesh, *parent; float loc[3], rot[3], scale[3]; int enabled, nresp; const u64_resp *resp; } u64_comp_def;
+extern const u64_mesh_def u64_meshes[];                                                     // null-name terminated
+extern const u64_comp_def u64_comp_defs[];
 typedef struct { const char *cls, *parent; } u64_class_parent_def;
 extern const u64_class_parent_def u64_class_parents[];
 extern const u64_ge_def u64_ge_defs[]; extern const int u64_ge_count;      // generated: u64_gas_data.c
@@ -99,6 +105,8 @@ extern const u64_gas_hooks *u64_gas_hooks_active;
 void u64_adjust_for_max_change(u64_obj *asc, const char *affected, const char *maxattr, float new_max);   // AdjustAttributeForMaxChange
 u64_obj *u64_give_ability(u64_obj *asc, const char *cls, int level, const char *input_id, u64_obj *source);
 void u64_clear_ability(u64_obj *asc, u64_obj *ability);
+void u64_ability_triggers(u64_obj *asc, const char *tag, u64_v payload);
+int u64_is_asc(u64_obj *o);
 int u64_asc_abilities(u64_obj *asc, u64_obj **out, int max);
 void u64_tag_add_loose(u64_obj *asc, const char *tag, int delta);
 int u64_tag_count(u64_obj *asc, const char *tag);
@@ -119,3 +127,10 @@ u64_obj *u64_effect_handle_source(int handle);
 int u64_trace_multi(const float start[3], const float end[3], float radius, u64_obj *ignore, u64_obj **hits, int max);
 int u64_actor_capsule(u64_obj *o, float *cx, float *cy, float *cz, float *r, float *hh);
 int u64_actor_is_pawn(u64_obj *o);
+typedef struct { u64_obj *actor, *comp; float t, loc[3], normal[3]; int blocking; } u64_world_hit_t;
+int u64_world_trace(const float start[3], const float end[3], const char *channel, u64_obj *ignore_actor, u64_world_hit_t *out, int max);   // static-mesh collision (u64_collision.c)
+int u64_comp_response(u64_obj *comp, const char *channel);                    // 0 ignore, 1 overlap, 2 block
+void u64_comp_world(u64_obj *actor, const char *comp, float loc_out[3]);
+extern const u64_resp u64_channel_defaults[];
+typedef struct { const char *name, *object_type; } u64_profile_def;
+extern const u64_profile_def u64_profiles[];                                  // collision profiles of the project: name -> object type (trace channel)

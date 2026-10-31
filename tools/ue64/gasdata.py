@@ -118,7 +118,114 @@ def ge_definition(p, data, export):
     return ge
 
 
+COMPONENTS = []      # static-mesh components of Blueprints: dicts (class, comp, mesh, parent, transform, collision responses)
+CHANNELS = {}        # project collision channel -> default response (Config/DefaultEngine.ini)
+PROFILES = {}        # project collision profile -> object type
+MESHES = {}          # static mesh name -> [hull planes]; hull = [(nx, ny, nz, d)] with n.x <= d inside
+
 TIMELINES = []      # [(class, template dict, [(property name, [keys])])] filled by collect(), emitted by emit_gas_data_c
+
+
+def hull_planes(points, eps=1e-3):
+    """Planes (nx, ny, nz, d) of the convex hull of a point set, n.x <= d inside: every plane through three points that has all
+    points on one side. Chunked over the triples; point sets are deduplicated first (hulls here have tens to ~200 points)."""
+    import itertools
+    import numpy as np
+    P = np.unique(np.round(np.array(points, dtype=np.float64), 4), axis=0)
+    n = len(P)
+    if n < 4:
+        return []
+    planes, seen = [], set()
+    tri = itertools.combinations(range(n), 3)
+    while True:
+        chunk = np.array(list(itertools.islice(tri, 20000)))
+        if len(chunk) == 0:
+            break
+        A, B, C = P[chunk[:, 0]], P[chunk[:, 1]], P[chunk[:, 2]]
+        N = np.cross(B - A, C - A)
+        L = np.linalg.norm(N, axis=1)
+        ok = L > 1e-9
+        N, A, L = N[ok] / L[ok, None], A[ok], L[ok]
+        D = np.einsum("ij,ij->i", N, A)
+        side = P @ N.T - D[None, :]
+        pos, neg = (side > eps).any(axis=0), (side < -eps).any(axis=0)
+        for i in np.where(~(pos & neg))[0]:
+            n_, d_ = (-N[i], -D[i]) if pos[i] else (N[i], D[i])
+            key = tuple(np.round(np.append(n_, d_), 2))
+            if key not in seen:
+                seen.add(key)
+                planes.append((float(n_[0]), float(n_[1]), float(n_[2]), float(d_)))
+    return planes
+
+
+def _elem_transform(p, tr):
+    """FTransform of a convex element as (quat xyzw, translation, scale). Older saves keep it as a tagged-property blob that the
+    property reader leaves raw: Rotation (Quat), Translation, Scale3D, each 8-byte FName header + 49 bytes of tag + payload."""
+    import struct as _st
+    q, t, sc = (0.0, 0.0, 0.0, 1.0), (0.0, 0.0, 0.0), (1.0, 1.0, 1.0)
+    if tr is None:
+        return q, t, sc
+    if tr[0] == "struct":
+        d = tr[1]
+        g = lambda k, dflt: tuple(d[k][1]) if k in d and isinstance(d[k], tuple) and d[k][0] in ("vec", "quat") else dflt
+        return g("Rotation", q), g("Translation", t), g("Scale3D", sc)
+    if tr[0] != "raw":
+        return q, t, sc
+    b, pos = tr[1], 0
+    while pos + 8 <= len(b):
+        ni = _st.unpack_from("<i", b, pos)[0]
+        name = p.names[ni] if 0 <= ni < len(p.names) else "None"
+        name = name if isinstance(name, str) else str(name[0] if isinstance(name, (tuple, list)) else getattr(name, "name", name))
+        if name == "None" or pos + 49 > len(b):
+            break
+        size = _st.unpack_from("<i", b, pos + 16)[0]
+        pay = pos + 49
+        if name == "Rotation" and size == 16:
+            q = _st.unpack_from("<4f", b, pay)
+        elif name == "Translation" and size == 12:
+            t = _st.unpack_from("<3f", b, pay)
+        elif name == "Scale3D" and size == 12:
+            sc = _st.unpack_from("<3f", b, pay)
+        pos = pay + size
+    return q, t, sc
+
+
+def _xform_points(pts, q, t, sc):
+    x, y, z, w = q
+    r = [[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+         [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+         [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]]
+    out = []
+    for px, py, pz in pts:
+        v = (px * sc[0], py * sc[1], pz * sc[2])
+        out.append(tuple(r[i][0] * v[0] + r[i][1] * v[1] + r[i][2] * v[2] + t[i] for i in range(3)))
+    return out
+
+
+def _body_hulls(p, data, e):
+    """[(planes)] for a BodySetup export (convex elements), plus box / sphere / sphyl elements as planes where they are boxes."""
+    o = props.read_object(p, data, e)
+    ag = o.get("AggGeom", ("struct", {}, None))[1]
+    hulls = []
+    for el in ag.get("ConvexElems", ("array", []))[1]:
+        vd = el[1].get("VertexData", ("array", []))
+        if vd[0] == "raw":                                   # older saves: count + packed float triples
+            import struct as _st
+            n = _st.unpack_from("<i", vd[1], 0)[0]
+            pts = [_st.unpack_from("<3f", vd[1], 4 + 12 * i) for i in range(n)] if 4 + 12 * n <= len(vd[1]) else []
+        else:
+            pts = [v[1] for v in vd[1] if v[0] == "vec"]
+        q, t, sc = _elem_transform(p, el[1].get("Transform"))      # the element's own transform places the hull in mesh space
+        pts = _xform_points(pts, q, t, sc)
+        pl = hull_planes(pts)
+        if pl:
+            hulls.append(pl)
+    for el in ag.get("BoxElems", ("array", []))[1]:
+        d = el[1]
+        c = d.get("Center", ("vec", (0, 0, 0)))[1]
+        hx, hy, hz = float(d.get("X", 0)) / 2, float(d.get("Y", 0)) / 2, float(d.get("Z", 0)) / 2
+        hulls.append([(1, 0, 0, c[0] + hx), (-1, 0, 0, -(c[0] - hx)), (0, 1, 0, c[1] + hy), (0, -1, 0, -(c[1] - hy)), (0, 0, 1, c[2] + hz), (0, 0, -1, -(c[2] - hz))])
+    return hulls
 
 
 def _curve_keys(p, data, idx):
@@ -137,15 +244,37 @@ def collect(content_root):
     """Walk a project; return ({ge name: def}, {montage: length}, {class: {box: (x,y,z), capsule: (r, hh)}})."""
     import glob
     ges, montages, shapes, moves, projs, parents, bound = {}, {}, {}, {}, {}, {}, []
-    TIMELINES.clear()
+    TIMELINES.clear(); COMPONENTS.clear(); MESHES.clear(); CHANNELS.clear(); PROFILES.clear()
+    ini = os.path.join(content_root, "..", "Config", "DefaultEngine.ini")
+    if os.path.exists(ini):
+        import re as _re
+        for m in _re.finditer(r'DefaultChannelResponses=\(Channel=\w+,DefaultResponse=ECR_(\w+),[^)]*Name="(\w+)"', open(ini, errors="ignore").read()):
+            CHANNELS[m.group(2)] = {"Ignore": 0, "Overlap": 1, "Block": 2}[m.group(1)]
+        for m in _re.finditer(r'\+Profiles=\(Name="(\w+)",[^\n]*?ObjectTypeName="(\w+)"', open(ini, errors="ignore").read()):
+            PROFILES[m.group(1)] = m.group(2)
+    import math as _m
+    MESHES["Cylinder"] = [[(_m.cos(2 * _m.pi * i / 32), _m.sin(2 * _m.pi * i / 32), 0, 50 * _m.cos(_m.pi / 32)) for i in range(32)] + [(0, 0, 1, 50), (0, 0, -1, 50)]]   # /Engine/BasicShapes/Cylinder (r 50, h 100)
+    MESHES["Cube"] = [[(1, 0, 0, 50), (-1, 0, 0, 50), (0, 1, 0, 50), (0, -1, 0, 50), (0, 0, 1, 50), (0, 0, -1, 50)]]      # /Engine/BasicShapes/Cube (100 uu)
     for f in glob.glob(content_root + "/**/*.uasset", recursive=True):
         try:
             p = uasset.parse_tables(f)
             data = open(f, "rb").read()
         except Exception:
             continue
+        if any(uasset.class_name(p, x.cls) == "SCS_Node" for x in p.exports):
+            _collect_components(p, data, os.path.splitext(os.path.basename(f))[0])
         for e in p.exports:
             cn = uasset.class_name(p, e.cls)
+            if cn == "StaticMesh":                                  # the mesh's simple collision (a BodySetup export of the same package)
+                try:
+                    for x in p.exports:
+                        if uasset.class_name(p, x.cls) == "BodySetup":
+                            hs = _body_hulls(p, data, x)
+                            if hs:
+                                MESHES[e.name] = hs
+                            break
+                except Exception:
+                    pass
             if cn == "TimelineTemplate":                      # a Timeline node's template: length, curve tracks, update / finished functions
                 try:
                     t = props.read_object(p, data, e)
@@ -262,7 +391,58 @@ def collect(content_root):
     return ges, montages, shapes, moves, projs, parents, bound
 
 
+def _collect_components(p, data, cls):
+    """Static-mesh components of a Blueprint from its SimpleConstructionScript: hierarchy, mesh, transform, collision responses."""
+    nodes = {}
+    for e in p.exports:
+        if uasset.class_name(p, e.cls) == "SCS_Node":
+            try:
+                nodes[e.index + 1] = props.read_object(p, data, e)
+            except Exception:
+                pass
+    parent_of = {}
+    for idx, o in nodes.items():
+        for ch in (o.get("ChildNodes") or ("array", []))[1]:
+            if ch[0] == "obj":
+                parent_of[ch[2]] = idx
+    for idx, o in nodes.items():
+        ct = o.get("ComponentTemplate")
+        if not (isinstance(ct, tuple) and ct[0] == "obj" and ct[2] > 0):
+            continue
+        t = p.exports[ct[2] - 1]
+        if uasset.class_name(p, t.cls) != "StaticMeshComponent":
+            continue
+        try:
+            c = props.read_object(p, data, t)
+        except Exception:
+            continue
+        mesh = c.get("StaticMesh")
+        if not (isinstance(mesh, tuple) and mesh[0] == "obj"):
+            continue
+        par = nodes.get(parent_of.get(idx))
+        pname = par["InternalVariableName"][1] if par and "InternalVariableName" in par else ""
+        bi = c.get("BodyInstance")
+        responses, profile, enabled = [], "BlockAll", 2
+        if isinstance(bi, tuple) and bi[0] == "struct":
+            profile = bi[1].get("CollisionProfileName", ("name", "BlockAll"))[1]
+            ce = bi[1].get("CollisionEnabled")
+            if isinstance(ce, tuple):
+                enabled = {"NoCollision": 0, "QueryOnly": 1, "PhysicsOnly": 3, "QueryAndPhysics": 2}.get(str(ce[1]).split("::")[-1], 2)
+            cr = bi[1].get("CollisionResponses")
+            if isinstance(cr, tuple) and cr[0] == "struct":
+                for r in cr[1].get("ResponseArray", ("array", []))[1]:
+                    responses.append((r[1]["Channel"][1], {"ECR_Ignore": 0, "ECR_Overlap": 1, "ECR_Block": 2}.get(str(r[1]["Response"][1]), 2)))
+        vec = lambda k, d: tuple(c[k][1]) if k in c and c[k][0] == "vec" else d
+        COMPONENTS.append({"cls": cls, "comp": o["InternalVariableName"][1], "mesh": mesh[1], "parent": pname,
+                           "loc": vec("RelativeLocation", (0, 0, 0)), "rot": vec("RelativeRotation", (0, 0, 0)), "scale": vec("RelativeScale3D", (1, 1, 1)),
+                           "profile": profile, "enabled": enabled, "responses": responses})
+
+
 # ---- C emission ----------------------------------------------------------------------------------------------------
+def _f(v):
+    return repr(float(v)) + "f"
+
+
 def _cs(s):
     return '"' + str(s).replace("\\", "\\\\").replace('"', '\\"') + '"'
 
@@ -287,6 +467,25 @@ def emit_gas_data_c(ges, montages, shapes, moves=None, projs=None, parents=None,
         tr = ", ".join("{%s, %d, tlk_%d_%d}" % (_cs(prop), len(keys), i, j) for j, (prop, keys) in enumerate(tracks))
         out.append(f"static const u64_tl_track tlt_{i}[] = {{{tr}{', ' if tr else ''}{{0}}}};")
         tl.append("{%s, %s, %rf, %d, %d, %s, %s, %s, %d, tlt_%d}" % (_cs(cls), _cs(t["var"]), t["length"], int(t["loop"]), int(t["autoplay"]), _cs(t["update"]), _cs(t["finished"]), _cs(t["direction"]), len(tracks), i))
+    # static-mesh collision: hulls per mesh, components per Blueprint class
+    meshes = []
+    for mi, (mname, hulls) in enumerate(sorted(MESHES.items())):
+        hs = []
+        for hi, pl in enumerate(hulls):
+            out.append("static const float mh_%d_%d[] = {%s};" % (mi, hi, ", ".join(_f(v) for q in pl for v in q)))
+            hs.append("{%d, mh_%d_%d}" % (len(pl), mi, hi))
+        out.append("static const u64_hull mhs_%d[] = {%s%s{0}};" % (mi, ", ".join(hs), ", " if hs else ""))
+        meshes.append("{%s, %d, mhs_%d}" % (_cs(mname), len(hulls), mi))
+    out.append("const u64_mesh_def u64_meshes[] = {%s%s{0}};" % (", ".join(meshes), ", " if meshes else ""))
+    comps = []
+    for ci, c in enumerate(COMPONENTS):
+        out.append("static const u64_resp cr_%d[] = {%s%s{0}};" % (ci, ", ".join("{%s, %d}" % (_cs(k), v) for k, v in c["responses"]), ", " if c["responses"] else ""))
+        comps.append("{%s, %s, %s, %s, {%s}, {%s}, {%s}, %d, %d, cr_%d}" % (
+            _cs(c["cls"]), _cs(c["comp"]), _cs(c["mesh"]), _cs(c["parent"]), ", ".join(_f(v) for v in c["loc"]), ", ".join(_f(v) for v in c["rot"]),
+            ", ".join(_f(v) for v in c["scale"]), c["enabled"], len(c["responses"]), ci))
+    out.append("const u64_profile_def u64_profiles[] = {%s%s{0}};" % (", ".join("{%s, %s}" % (_cs(k), _cs(v)) for k, v in sorted(PROFILES.items())), ", " if PROFILES else ""))
+    out.append("const u64_resp u64_channel_defaults[] = {%s%s{0}};" % (", ".join("{%s, %d}" % (_cs(k), v) for k, v in sorted(CHANNELS.items())), ", " if CHANNELS else ""))
+    out.append("const u64_comp_def u64_comp_defs[] = {%s%s{0}};" % (", ".join(comps), ", " if comps else ""))
     out.append("const u64_timeline_def u64_timelines[] = {%s%s{0}};" % (", ".join(tl), ", " if tl else ""))
     defs = []
     for n in sorted(ges):

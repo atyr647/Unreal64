@@ -26,6 +26,11 @@ def cval(v, owner="o"):
         if v[0] == "enum": return f"u64_name({codegen.cstr(v[1])})"
         if v[0] == "struct" and len(v) > 2 and v[2] == "GameplayTag" and isinstance(v[1], dict) and v[1].get("TagName", (None,))[0] == "name":
             return f"u64_name({codegen.cstr(v[1]['TagName'][1])})"                 # 4.26 saves the tag as a struct with TagName
+        if v[0] == "struct" and len(v) > 2 and v[2] == "AbilityTriggerData" and isinstance(v[1], dict):   # [trigger tag, source enum]
+            tg, src = cval(v[1].get("TriggerTag", ("name", "None")), owner), cval(v[1].get("TriggerSource", ("enum", "EGameplayAbilityTriggerSource::GameplayEvent")), owner)
+            if tg and src:
+                return f"u64_array_const({next(_ids)}, 2, (u64_v[]){{u64_int(0), {tg}, {src}}} + 1)"
+            return None
         if v[0] == "struct" and len(v) > 2 and v[2] == "GameplayTagContainer" and isinstance(v[1], dict) and isinstance(v[1].get("GameplayTags"), tuple):
             return cval(("array", v[1]["GameplayTags"][1]) if v[1]["GameplayTags"][0] == "array" else v[1]["GameplayTags"], owner)
         if v[0] == "map":                                          # flat array: key, value, key, value ... (struct keys/values: see struct_cval)

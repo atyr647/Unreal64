@@ -160,6 +160,11 @@ a real map, 91 Blueprints and ~8k lines of C++. Run its tests with `tools/run_sh
   trigger, the 3 s hold ends in `PostInteract` (GE_ChestOpen, 5 s, + loot). Collision comes from the assets: convex hulls in `BodySetup`
   (each element carries its own transform: the chest meshes are rotated 90 degrees), the component hierarchy of the Blueprint (SCS) and
   per-component responses.
+* Collision as the engine does it: `LineTraceMultiByProfile` (`u64_trace_profile`): channel = the profile's object type, a component answers
+  min(profile response to the component's object type, component response to the channel), hits sorted, ending at the first block. Static
+  meshes (convex hulls), the character Mesh (the PhysicsAsset's box / sphere / sphyl bodies in the reference pose, with the bone name in the hit)
+  and the capsule (which in GASShooter ignores Ability / Projectile, so bullets hit the mesh). Headshots (`b_head`, x1.5) and the revive
+  interaction (the Mesh overlaps Interactable) follow from that; the door timeline moves the Door component.
 * Engine layer written for this: target data handles, effect contexts with hit results, effect containers, per-frame ability tasks
   (FOV, move component, repeat, delay-one-frame, wait input / event / tag / target data), RegisterGameplayTagEvent listeners,
   timelines (curve keys parsed from the assets), parent-function calls, dynamic casts, 4.26 function parameters, a garbage collector.
@@ -169,9 +174,11 @@ a real map, 91 Blueprints and ~8k lines of C++. Run its tests with `tools/run_sh
 * Interaction: doors (the timeline moves a component; `u64_comp_world` honours moved components, not tested) and reviving are untested
   scenarios. Profile traces use the shape's response to the trace channel and the project's channel defaults; the *profile's* own
   response to the component's object type is not modelled (the data has the responses; only needed for profiles that ignore a type).
-* World geometry: BSP brushes and static-mesh actors of the map (the floor is still the spawn height).
-* Animation: sequences, AnimBP state machines, sockets (the muzzle and the weapon attach point use the owner's location), bone hit
-  detection (headshots need the physics asset's body shapes).
+* World geometry: the map's four arena walls are `Cube` static mesh actors and the floor is `/Engine/Maps/Templates/SM_Template_Map_Floor`
+  (engine content: not in the project, so it comes with the editor export); BSP brushes (`Model` / `Polys`) are not parsed. The floor is
+  still the spawn height and placed meshes do not take part in queries yet.
+* Animation: sequences, AnimBP state machines, sockets (the muzzle and the weapon attach point use the owner's location; the physics bodies are in
+  the reference pose, not the animated one).
 * HUD / player controller widgets (ignored), audio, networking, AI behaviour of the placed heroes.
 * Unverified engine assumption: the first execution of a periodic effect happens on the next tick (see below).
 

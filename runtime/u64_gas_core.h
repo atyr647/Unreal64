@@ -39,6 +39,8 @@ typedef struct { const char *cls, *comp, *mesh, *parent; float loc[3], rot[3], s
 typedef struct { const char *bone; int kind; float t[3], r[9], a, b, c; } u64_phys_body;
 typedef struct { const char *name; int n; const u64_phys_body *bodies; } u64_phys_mesh;
 typedef struct { const char *cls, *comp, *mesh; float loc[3], rot[3], scale[3]; int enabled, nresp; const u64_resp *resp; } u64_skel_comp_def;
+typedef struct { const char *mesh; float loc[3], rot[3], scale[3]; } u64_world_mesh;   // a static mesh actor placed in the map (default collision: blocks everything)
+extern const u64_world_mesh u64_world_meshes[];
 extern const u64_phys_mesh u64_phys_meshes[];
 extern const u64_skel_comp_def u64_skel_comps[];
 extern const u64_mesh_def u64_meshes[];                                                     // null-name terminated

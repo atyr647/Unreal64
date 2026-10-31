@@ -183,6 +183,26 @@ int u64_trace_profile(const float s[3], const float e[3], const char *profile, u
   float d[3] = {e[0] - s[0], e[1] - s[1], e[2] - s[2]};
   u64_world_hit_t found[32]; int nf = 0;
   int q_static = profile_response(pd, "WorldStatic"), q_pawn = profile_response(pd, "Pawn");
+  for (const u64_world_mesh *wm = u64_world_meshes; wm->mesh && nf < 30; wm++) {      // placed static meshes: WorldStatic, default responses
+    int resp = resp_in(2, 0, 0, channel); if (q_static < resp) resp = q_static;
+    const u64_mesh_def *mesh = find_mesh(wm->mesh);
+    if (resp == 0 || !mesh) continue;
+    xf_t m, inv; xf_from(wm->loc, wm->rot, wm->scale, &m);
+    if (!xf_inverse(&m, &inv)) continue;
+    float lp[3], ld[3], best = 2; int bp = -1; const u64_hull *bh = 0;
+    for (int k = 0; k < 3; k++) {
+      lp[k] = inv.r[k * 3] * s[0] + inv.r[k * 3 + 1] * s[1] + inv.r[k * 3 + 2] * s[2] + inv.t[k];
+      ld[k] = inv.r[k * 3] * d[0] + inv.r[k * 3 + 1] * d[1] + inv.r[k * 3 + 2] * d[2];
+    }
+    for (int hi = 0; hi < mesh->nhulls; hi++) { float t; int pi; if (ray_hull(lp, ld, &mesh->hulls[hi], &t, &pi) && t < best) { best = t; bp = pi; bh = &mesh->hulls[hi]; } }
+    if (!bh) continue;
+    u64_world_hit_t *h = &found[nf++]; h->actor = 0; h->comp = 0; h->t = best; h->blocking = resp == 2; h->bone = 0;
+    for (int k = 0; k < 3; k++) h->loc[k] = s[k] + d[k] * best;
+    const float *pl = bh->planes + bp * 4;
+    float nw[3] = {inv.r[0] * pl[0] + inv.r[3] * pl[1] + inv.r[6] * pl[2], inv.r[1] * pl[0] + inv.r[4] * pl[1] + inv.r[7] * pl[2], inv.r[2] * pl[0] + inv.r[5] * pl[1] + inv.r[8] * pl[2]};
+    float l = sqrtf(nw[0] * nw[0] + nw[1] * nw[1] + nw[2] * nw[2]); if (l < 1e-9f) l = 1;
+    for (int k = 0; k < 3; k++) h->normal[k] = nw[k] / l;
+  }
   for (int i = 0; i < u64_obj_count() && nf < 30; i++) {
     u64_obj *a = u64_obj_at(i);
     if (a == ignore || !u64_obj_is_actor(a)) continue;

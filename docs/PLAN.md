@@ -176,7 +176,7 @@ a real map, 91 Blueprints and ~8k lines of C++. Run its tests with `tools/run_sh
   response to the component's object type is not modelled (the data has the responses; only needed for profiles that ignore a type).
 * World geometry: the map's four arena walls are `Cube` static mesh actors and the floor is `/Engine/Maps/Templates/SM_Template_Map_Floor`
   (engine content: not in the project, so it comes with the editor export); BSP brushes (`Model` / `Polys`) are not parsed. The floor is
-  still the spawn height and placed meshes do not take part in queries yet.
+  still the spawn height. Placed meshes with project data (the four wall cubes) take part in trace queries (`u64_world_meshes`); the floor is skipped until its mesh is available.
 * Animation: sequences, AnimBP state machines, sockets (the muzzle and the weapon attach point use the owner's location; the physics bodies are in
   the reference pose, not the animated one).
 * HUD / player controller widgets (ignored), audio, networking, AI behaviour of the placed heroes.

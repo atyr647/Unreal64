@@ -123,6 +123,7 @@ CHANNELS = {}        # project collision channel -> default response (Config/Def
 PROFILES = {}        # project collision profile -> (object type, [(channel, response)])
 PHYS = {}            # physics asset name -> [(bone, kind, center, rotation(pitch,yaw,roll), dims)]; kind 0 box (full extents), 1 sphere (radius), 2 sphyl (radius, length)
 SKELMESHES = {}      # skeletal mesh name -> bodies in mesh space [(bone, kind, t(3), r(3x3 row-major), a, b, c)]: box half extents, sphere radius, sphyl radius + half cylinder length
+WORLDMESHES = []     # static meshes placed in the map (StaticMeshActor root components): (mesh, loc, rot, scale)
 SKELCOMPS = []       # skeletal mesh components (the character Mesh) of Blueprints: dicts (class, comp, mesh, transform, collision responses)
 MESHES = {}          # static mesh name -> [hull planes]; hull = [(nx, ny, nz, d)] with n.x <= d inside
 
@@ -301,7 +302,7 @@ def collect(content_root):
     """Walk a project; return ({ge name: def}, {montage: length}, {class: {box: (x,y,z), capsule: (r, hh)}})."""
     import glob
     ges, montages, shapes, moves, projs, parents, bound = {}, {}, {}, {}, {}, {}, []
-    TIMELINES.clear(); COMPONENTS.clear(); PHYS.clear(); SKELMESHES.clear(); SKELCOMPS.clear(); MESHES.clear(); CHANNELS.clear(); PROFILES.clear()
+    TIMELINES.clear(); COMPONENTS.clear(); PHYS.clear(); WORLDMESHES.clear(); SKELMESHES.clear(); SKELCOMPS.clear(); MESHES.clear(); CHANNELS.clear(); PROFILES.clear()
     ini = os.path.join(content_root, "..", "Config", "DefaultEngine.ini")
     if os.path.exists(ini):
         import re as _re
@@ -496,6 +497,24 @@ def collect(content_root):
                     ges[e.name[len("Default__"):-2]] = ge_definition(p, data, e)
                 except Exception as ex:
                     ges[e.name[len("Default__"):-2]] = dict(name=e.name[len("Default__"):-2], error=str(ex))
+    for f in glob.glob(content_root + "/**/*.umap", recursive=True):             # static mesh actors of the maps
+        try:
+            p = uasset.parse_tables(f); data = open(f, "rb").read()
+            roots = set()
+            for e in p.exports:
+                if uasset.class_name(p, e.cls) == "StaticMeshActor":
+                    rc = props.read_object(p, data, e).get("RootComponent")
+                    if isinstance(rc, tuple) and rc[0] == "obj" and rc[2] > 0:
+                        roots.add(rc[2] - 1)
+            for i in sorted(roots):
+                c = props.read_object(p, data, p.exports[i])
+                m = c.get("StaticMesh")
+                if not (isinstance(m, tuple) and m[0] == "obj"):
+                    continue
+                v = lambda k, d: tuple(c[k][1]) if k in c and c[k][0] == "vec" else d
+                WORLDMESHES.append((m[1], v("RelativeLocation", (0, 0, 0)), v("RelativeRotation", (0, 0, 0)), v("RelativeScale3D", (1, 1, 1))))
+        except Exception:
+            continue
     for mname, pname, bones in pending_skel:                        # physics bodies of skeletal meshes, placed by the reference pose
         if pname in PHYS and PHYS[pname]:
             SKELMESHES[mname] = _skeletal_bodies(bones, PHYS[pname])
@@ -610,6 +629,8 @@ def emit_gas_data_c(ges, montages, shapes, moves=None, projs=None, parents=None,
     for pi, (k, (ot, rs)) in enumerate(sorted(PROFILES.items())):
         out.append("static const u64_resp pr_%d[] = {%s%s{0}};" % (pi, ", ".join("{%s, %d}" % (_cs(c), r) for c, r in rs), ", " if rs else ""))
         pdefs.append("{%s, %s, %d, pr_%d}" % (_cs(k), _cs(ot), len(rs), pi))
+    wm = ", ".join("{%s, {%s}, {%s}, {%s}}" % (_cs(m), ", ".join(_f(x) for x in l), ", ".join(_f(x) for x in r), ", ".join(_f(x) for x in sc)) for m, l, r, sc in WORLDMESHES)
+    out.append("const u64_world_mesh u64_world_meshes[] = {%s%s{0}};" % (wm, ", " if wm else ""))
     out.append("const u64_profile_def u64_profiles[] = {%s%s{0}};" % (", ".join(pdefs), ", " if pdefs else ""))
     out.append("const u64_resp u64_channel_defaults[] = {%s%s{0}};" % (", ".join("{%s, %d}" % (_cs(k), v) for k, v in sorted(CHANNELS.items())), ", " if CHANNELS else ""))
     out.append("const u64_comp_def u64_comp_defs[] = {%s%s{0}};" % (", ".join(comps), ", " if comps else ""))

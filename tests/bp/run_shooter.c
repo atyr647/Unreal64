@@ -356,6 +356,14 @@ int u64_run_shooter_scenarios(int verbose)
     CHECK(!u64_tag_has(dasc, "State.KnockedDown") && fabsf(attr("Health") - 25.0f) < 0.01f);
     hero = me;
   }
+  // --- placed static meshes: the arena wall Cube at (4930, 0, 1010) scaled (1, 100, 20) (a 100 uu cube: 100 x 10000 x 2000) blocks "Projectile" traces at x = 4930 - 50
+  {
+    float st[3] = {0, 0, 300}, en[3] = {6000, 0, 300}; u64_world_hit_t h[4];
+    int n = u64_trace_profile(st, en, "Projectile", 0, h, 4);
+    CHECK(n >= 1 && h[n - 1].blocking && !h[n - 1].actor && fabsf(h[n - 1].loc[0] - 4880.0f) < 0.01f && fabsf(h[n - 1].normal[0] + 1.0f) < 1e-4f);
+    float en2[3] = {4000, 0, 300};
+    CHECK(u64_trace_profile(st, en2, "Projectile", 0, h, 4) == 0 || !h[0].blocking);                   // short of the wall (the origin hero is ignored by a miss here)
+  }
   // --- garbage collection: 3000 spawn/destroy cycles (plus arrays and temporaries) would exhaust the 1024-object pool without it
   {
     int live0 = u64_gc_live();

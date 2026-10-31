@@ -20,3 +20,5 @@ game/build/
 bpdemo/src/*.c
 !bpdemo/src/main.c
 game/src/freeze.h
+shooterdemo/build/
+shooterdemo/*.z64

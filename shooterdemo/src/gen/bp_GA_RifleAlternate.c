@@ -1,0 +1,113 @@
+#include "u64_rt.h"
+
+void bp_GA_RifleAlternate__ExecuteUbergraph_GA_RifleAlternate(u64_obj *self, const u64_v *args, int argc) {
+  (void)args; (void)argc;
+  struct { u64_v ReturnValue; u64_v _unsupported; } L; memset(&L, 0, sizeof L); (void)L;
+  U64_FLOW_DECL; (void)flow_n;
+  if (argc > 0) (*u64_pframe(self, "EntryPoint")) = args[0];
+  L_0:; u64_dispatch: switch (u64_as_int((*u64_pframe(self, "EntryPoint")))) { case 0: goto L_0; case 10: goto L_10; case 39: goto L_39; case 40: goto L_40; case 41: goto L_41; case 55: goto L_55; case 56: goto L_56; case 134: goto L_134; case 135: goto L_135; case 136: goto L_136; case 150: goto L_150; case 151: goto L_151; case 152: goto L_152; case 219: goto L_219; case 220: goto L_220; case 221: goto L_221; case 270: goto L_270; case 271: goto L_271; case 300: goto L_300; case 301: goto L_301; case 302: goto L_302; case 316: goto L_316; case 317: goto L_317; case 318: goto L_318; case 381: goto L_381; case 382: goto L_382; case 383: goto L_383; case 397: goto L_397; case 398: goto L_398; case 403: goto L_403; case 431: goto L_431; case 432: goto L_432; case 477: goto L_477; case 506: goto L_506; case 507: goto L_507; case 521: goto L_521; case 522: goto L_522; case 523: goto L_523; case 542: goto L_542; case 543: goto L_543; case 548: goto L_548; case 626: goto L_626; case 627: goto L_627; case 628: goto L_628; case 642: goto L_642; case 643: goto L_643; case 644: goto L_644; case 711: goto L_711; case 712: goto L_712; case 713: goto L_713; case 762: goto L_762; case 763: goto L_763; case 768: goto L_768; case 846: goto L_846; case 847: goto L_847; case 848: goto L_848; case 862: goto L_862; case 863: goto L_863; case 864: goto L_864; case 931: goto L_931; case 932: goto L_932; case 933: goto L_933; case 982: goto L_982; case 983: goto L_983; case 988: goto L_988; case 989: goto L_989; case 990: goto L_990; case 1019: goto L_1019; case 1020: goto L_1020; case 1021: goto L_1021; case 1035: goto L_1035; case 1036: goto L_1036; case 1041: goto L_1041; case 1061: goto L_1061; case 1062: goto L_1062; case 1098: goto L_1098; case 1127: goto L_1127; case 1128: goto L_1128; case 1142: goto L_1142; case 1143: goto L_1143; case 1144: goto L_1144; case 1163: goto L_1163; case 1164: goto L_1164; case 1169: goto L_1169; case 1170: goto L_1170; case 1271: goto L_1271; case 1272: goto L_1272; case 1274: goto L_1274; }
+  L_10:; (*u64_pframe(self, "CallFunc_IsValid_ReturnValue")) = U64_CALL(self, "IsValid", (*u64_ivar(self, "PlayerController")));
+  L_39:; 
+  L_40:; 
+  L_41:; if (!u64_true((*u64_pframe(self, "CallFunc_IsValid_ReturnValue")))) goto L_403;
+  L_55:; 
+  L_56:; (*u64_pframe(self, "CallFunc_EqualEqual_GameplayTag_ReturnValue_2")) = U64_CALL(self, "EqualEqual_GameplayTag", ({ u64_v _o = (*u64_ivar(self, "Weapon")); (*u64_ivar(u64_asobj(_o), "FireMode")); }), u64_name("Weapon.Rifle.FireMode.Burst"));
+  L_134:; 
+  L_135:; 
+  L_136:; if (!u64_true((*u64_pframe(self, "CallFunc_EqualEqual_GameplayTag_ReturnValue_2")))) goto L_548;
+  L_150:; 
+  L_151:; 
+  L_152:; (*u64_ivar(u64_asobj((*u64_ivar(self, "Weapon"))), "FireMode")) = u64_name("Weapon.Rifle.FireMode.FullAuto");
+  L_219:; 
+  L_220:; 
+  L_221:; (*u64_ivar(u64_asobj((*u64_ivar(self, "Weapon"))), "StatusText")) = (*u64_ivar(self, "FullAutoStatus"));
+  L_270:; 
+  L_271:; (*u64_pframe(self, "CallFunc_IsValid_ReturnValue_1")) = U64_CALL(self, "IsValid", (*u64_ivar(self, "PlayerController")));
+  L_300:; 
+  L_301:; 
+  L_302:; if (!u64_true((*u64_pframe(self, "CallFunc_IsValid_ReturnValue_1")))) goto L_382;
+  L_316:; 
+  L_317:; 
+  L_318:; ({ u64_v _o = (*u64_ivar(self, "PlayerController")); U64_CALL(u64_asobj(_o), "SetEquippedWeaponStatusText", ({ u64_v _o = (*u64_ivar(self, "Weapon")); (*u64_ivar(u64_asobj(_o), "StatusText")); })); });
+  L_381:; 
+  L_382:; 
+  L_383:; U64_CALL(self, "K2_EndAbility");
+  L_397:; 
+  L_398:; goto L_1272;
+  L_403:; (*u64_pframe(self, "CallFunc_GetActorInfo_ReturnValue")) = U64_CALL(self, "GetActorInfo");
+  L_431:; 
+  L_432:; (*u64_pframe(self, "K2Node_DynamicCast_AsGSPlayer_Controller")) = u64_cast((*u64_member(&(*u64_pframe(self, "CallFunc_GetActorInfo_ReturnValue")), "PlayerController")), "GSPlayerController");
+  L_477:; (*u64_pframe(self, "K2Node_DynamicCast_bSuccess_1")) = (*u64_pframe(self, "K2Node_DynamicCast_AsGSPlayer_Controller"));
+  L_506:; 
+  L_507:; if (!u64_true((*u64_pframe(self, "K2Node_DynamicCast_bSuccess_1")))) goto L_56;
+  L_521:; 
+  L_522:; 
+  L_523:; (*u64_ivar(self, "PlayerController")) = (*u64_pframe(self, "K2Node_DynamicCast_AsGSPlayer_Controller"));
+  L_542:; 
+  L_543:; goto L_56;
+  L_548:; (*u64_pframe(self, "CallFunc_EqualEqual_GameplayTag_ReturnValue_1")) = U64_CALL(self, "EqualEqual_GameplayTag", ({ u64_v _o = (*u64_ivar(self, "Weapon")); (*u64_ivar(u64_asobj(_o), "FireMode")); }), u64_name("Weapon.Rifle.FireMode.FullAuto"));
+  L_626:; 
+  L_627:; 
+  L_628:; if (!u64_true((*u64_pframe(self, "CallFunc_EqualEqual_GameplayTag_ReturnValue_1")))) goto L_768;
+  L_642:; 
+  L_643:; 
+  L_644:; (*u64_ivar(u64_asobj((*u64_ivar(self, "Weapon"))), "FireMode")) = u64_name("Weapon.Rifle.FireMode.SemiAuto");
+  L_711:; 
+  L_712:; 
+  L_713:; (*u64_ivar(u64_asobj((*u64_ivar(self, "Weapon"))), "StatusText")) = (*u64_ivar(self, "SemiAutoStatus"));
+  L_762:; 
+  L_763:; goto L_271;
+  L_768:; (*u64_pframe(self, "CallFunc_EqualEqual_GameplayTag_ReturnValue")) = U64_CALL(self, "EqualEqual_GameplayTag", ({ u64_v _o = (*u64_ivar(self, "Weapon")); (*u64_ivar(u64_asobj(_o), "FireMode")); }), u64_name("Weapon.Rifle.FireMode.SemiAuto"));
+  L_846:; 
+  L_847:; 
+  L_848:; if (!u64_true((*u64_pframe(self, "CallFunc_EqualEqual_GameplayTag_ReturnValue")))) goto L_1272;
+  L_862:; 
+  L_863:; 
+  L_864:; (*u64_ivar(u64_asobj((*u64_ivar(self, "Weapon"))), "FireMode")) = u64_name("Weapon.Rifle.FireMode.Burst");
+  L_931:; 
+  L_932:; 
+  L_933:; (*u64_ivar(u64_asobj((*u64_ivar(self, "Weapon"))), "StatusText")) = (*u64_ivar(self, "BurstStatus"));
+  L_982:; 
+  L_983:; goto L_271;
+  L_988:; 
+  L_989:; 
+  L_990:; (*u64_pframe(self, "CallFunc_IsValid_ReturnValue_2")) = U64_CALL(self, "IsValid", (*u64_ivar(self, "Weapon")));
+  L_1019:; 
+  L_1020:; 
+  L_1021:; if (!u64_true((*u64_pframe(self, "CallFunc_IsValid_ReturnValue_2")))) goto L_1041;
+  L_1035:; 
+  L_1036:; goto L_10;
+  L_1041:; (*u64_pframe(self, "CallFunc_GetCurrentSourceObject_ReturnValue")) = U64_CALL(self, "GetCurrentSourceObject");
+  L_1061:; 
+  L_1062:; (*u64_pframe(self, "K2Node_DynamicCast_AsGSWeapon")) = u64_cast((*u64_pframe(self, "CallFunc_GetCurrentSourceObject_ReturnValue")), "GSWeapon");
+  L_1098:; (*u64_pframe(self, "K2Node_DynamicCast_bSuccess")) = (*u64_pframe(self, "K2Node_DynamicCast_AsGSWeapon"));
+  L_1127:; 
+  L_1128:; if (!u64_true((*u64_pframe(self, "K2Node_DynamicCast_bSuccess")))) goto L_1169;
+  L_1142:; 
+  L_1143:; 
+  L_1144:; (*u64_ivar(self, "Weapon")) = (*u64_pframe(self, "K2Node_DynamicCast_AsGSWeapon"));
+  L_1163:; 
+  L_1164:; goto L_10;
+  L_1169:; 
+  L_1170:; U64_CALL(self, "PrintString", u64_objv(self), u64_str("Error: Failed to cast Source Object to GSWeapon"), u64_bool(1), u64_bool(1), u64_int(0) /* struct const */, u64_float(2.0f));
+  L_1271:; 
+  L_1272:; goto u64_ret;
+  L_1274:; 
+  u64_ret:; u64_set_return(L.ReturnValue);
+
+}
+
+void bp_GA_RifleAlternate__K2_ActivateAbility(u64_obj *self, const u64_v *args, int argc) {
+  (void)args; (void)argc;
+  struct { u64_v ReturnValue; u64_v _unsupported; } L; memset(&L, 0, sizeof L); (void)L;
+  U64_FLOW_DECL; (void)flow_n;
+  L_0:; 
+  L_1:; 
+  L_2:; 
+  L_3:; U64_CALL(self, "ExecuteUbergraph_GA_RifleAlternate", u64_int(988));
+  L_18:; 
+  L_19:; goto u64_ret;
+  L_21:; 
+  u64_ret:; u64_set_return(L.ReturnValue);
+
+}

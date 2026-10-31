@@ -6,7 +6,8 @@
 #include <stdarg.h>
 const u64_bpfn *u64_bp_registry(void); int u64_bp_registry_count(void);
 static int fails;
-#define CHECK(c) do { if (c) printf("ok   %s\n", #c); else { printf("FAIL %s\n", #c); fails++; } } while (0)
+static int verbose_ = 1;
+#define CHECK(c) do { if (c) { if (verbose_) printf("ok   %s\n", #c); } else { printf("FAIL line %d: %s\n", __LINE__, #c); fails++; } } while (0)
 static void tick(int n) { for (int i = 0; i < n; i++) u64_world_tick(1.0f / 30.0f); }
 static void err_log(const char *f, ...) { va_list a; va_start(a, f); if (strstr(f, "error")) { vprintf(f, a); putchar('\n'); } va_end(a); }
 static u64_obj *hero;
@@ -15,8 +16,9 @@ static const char *s(u64_v v) { return v.u.s ? v.u.s : ""; }
 static u64_obj *asc_of_hero(void) { return u64_asc_of(hero); }
 static u64_v call(u64_obj *o, const char *fn) { return u64_call(o, fn, 0, 0); }
 
-int main(void)
+int u64_run_shooter_scenarios(int verbose)
 {
+  verbose_ = verbose;
   u64_gc_stress = 1; u64_log = err_log;                       // collect after every tick: any dangling reference shows up as a failure
   u64_bp_table = u64_bp_registry(); u64_bp_count = u64_bp_registry_count();
   u64_level_load();
@@ -165,7 +167,6 @@ int main(void)
     u64_input_release_id(me, "EGSAbilityInputID::PrimaryFire");
     tick(30);
     hero = enemy;
-    printf("DBG shotgun shield %f -> %f\n", sh0, attr("Shield"));
     CHECK(fabsf((sh0 - attr("Shield")) - 8 * (6.0f * 100.0f / 120.0f)) < 0.01f);                         // 8 pellets * 6 * 100/120
     hero = me;
   }
@@ -261,5 +262,9 @@ int main(void)
   }
   CHECK(u64_rt_overflows == 0);
   printf(fails ? "shooter: %d FAILED\n" : "shooter: ALL PASSED\n", fails);
-  return fails != 0;
+  return fails;
 }
+
+#ifndef U64_NO_MAIN
+int main(void) { return u64_run_shooter_scenarios(1) != 0; }
+#endif

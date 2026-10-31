@@ -7,6 +7,7 @@
 #include "u64_gas_core.h"
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 static const char *nm(u64_v v)
 {

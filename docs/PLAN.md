@@ -59,45 +59,49 @@ both spawners spawn at t=2.0 (the Blue one with its per-instance `MinionClass` o
 `MinionDied`, which re-arms the timer and respawns at t+2.0 — identical on host and in ares (docs/img/ares_world.png).
 The compiler reports exactly which engine functions remain unimplemented (`compat_report.txt`).
 
-**Engine function coverage: 127/129** of the functions this project's Blueprints call (the other two are Blueprint
-ubergraphs in old-dialect assets that cannot be decoded).
+**Everything the project's Blueprints and C++ call is ported: 140/140 engine functions, 153/153 Blueprint functions decoded,
+and the project's C++ gameplay classes.** Run live, the whole chain works on the emulated N64 (docs/img/ares_game*.png):
+controller -> C++ `UGDGA_FireGun` -> montage notifies -> gameplay events -> projectile (swept, 7000 u/s) -> the Blueprint's
+overlap event -> trace -> damage spec -> `GDDamageExecCalculation` -> attribute set -> health bar.
 
-**The Gameplay Ability System is ported from real data and the project's C++, not approximated**
-(`runtime/u64_gas_core.c`, `tools/ue64/gasdata.py`, `props.py`):
-- All 21 GameplayEffect assets are read (modifiers, op, magnitude type, duration, period, stacking, granted/asset/remove
-  tags, application and ongoing tag requirements, executions) and compiled to tables.
-- Attribute values are `aggregate(base, active modifiers)` (Additive/Multiplicative/Division/Override, stack-scaled);
-  instant and periodic effects change the base. Periodic effects execute on application and every period; Duration effects
-  expire; ongoing tag requirements inhibit modifiers *and* granted tags (so `GE_HealthRegen` stops while `State.Dead`).
-- `GDAttributeSetBase` is ported: `PreAttributeChange` (MoveSpeed clamp 150-1000; `AdjustAttributeForMaxChange`, which is
-  what takes Health 0 -> 100 when `GE_HeroAttributes` overrides MaxHealth), `PostGameplayEffectExecute` (Damage meta
-  attribute, Health/Mana/Stamina clamps, bounty to the source).
-- `GDDamageExecCalculation` is ported exactly (target Armor, source Damage, SetByCaller `Data.Damage`, `100/(100+Armor)`).
-- Startup follows `GDHeroCharacter::PossessedBy` / `GDMinionCharacter::BeginPlay`: DefaultAttributes -> max-out ->
-  StartupEffects -> CharacterAbilities. Death follows `Die`/`FinishDying` (OnCharacterDied, cancel abilities, remove
-  `Effect.RemoveOnDeath` effects, add `State.Dead`, destroy after the death montage's real length).
-- Abilities: cost check (`CanApplyAttributeModifiers`), cooldown (the cooldown effect's granted tags), activation
-  blocked/required tags, `CancelAbilitiesWithTag`, owned tags, `BlockAbilitiesWithTag`, Commit applies cost + cooldown,
-  stun cancels abilities (`StunTagChanged`), input press/release by `AbilityInputID`.
-- Tasks mirror the C++ async tasks (attribute changed, cooldown begin/end, effect stack change) and the montage task
-  fires BlendOut then Completed at the montage's **real** length and blend-out time read from the AnimMontage asset.
-- Movement speed follows `GetMaxSpeed` (0 when dead/stunned, x1.4 sprinting, x0.5 aiming). Overlaps use the real
-  collision shapes (BoxExtent x RelativeScale3D; capsule radii/half heights, engine defaults where not overridden).
-- Components are real objects owned by their actor; arrays are real; out-parameters write through references.
+What is ported, and from what:
+- **Blueprints:** all 153 functions decode with every jump and the in-memory size validated, across the UE 4.0-5.0 bytecode
+  dialects (incl. the pre-4.1x `Let`/`Context` form). Parameters bind in declaration order (taken from the event stub's pin
+  order, since export order differs), out-parameters write back, return values return.
+- **C++ (hand-translated from Source/):** `UGDGameplayAbility`, `UGDGA_FireGun`, `UGDGA_CharacterJump`, `AGDHeroCharacter`
+  (input axes, `FinishDying`), `AGDProjectile`, `AGASDocumentationGameMode` (HeroDied/RespawnHero at the PlayerStart /
+  EnemyHeroSpawn), `GDAttributeSetBase`, `GDDamageExecCalculation`, `GDCharacterMovementComponent`, the async tasks.
+  Blueprint classes inherit through the real parent-class table (constructor defaults, then BP defaults, root first).
+- **Gameplay Ability System** (`u64_gas_core.c`): effects read from all 21 GameplayEffect assets (modifiers, ops, magnitudes,
+  duration, period, stacking, tags, requirements, executions, **conditional effects**, attribute **snapshots**), aggregation,
+  Pre/PostGameplayEffectExecute, abilities (cost, cooldown, blocked/required/cancel tags, input), tasks, tag events.
+- **Character movement** (`u64_movement.c`): `CalcVelocity`, `ApplyVelocityBraking`, `PhysFalling` (air control, average-
+  velocity integration), jump/landing, rotation, with each character's tuning values read from its CharacterMovementComponent.
+- **Collision:** exact vertical-capsule vs yawed-box/sphere overlap, line traces with full hit results, swept spheres,
+  `OnComponentBeginOverlap/EndOverlap` events dispatched to the handlers named by the graph's `K2Node_ComponentBoundEvent`s.
+- **Animation notifies:** read from each montage with their real times; the `Die` notify (1.526 s) is what destroys a dead
+  character; `GenericEventByTag` notifies send gameplay events that reach the montage task.
+- **Game:** `runtime/u64_game_loop.c` + `game/` ROM: top-down view of the live world with real collision-shape sizes, health
+  bars, HUD from the real attributes, joypad input (stick = move, C-left/right = turn, A jump, B sprint, Z dash, L aim,
+  R fire, C-down meteor, C-up armor), and an autoplay script so it runs unattended.
 
-Verified by scenarios that check exact values derived from the assets (e.g. 25 dmg vs Armor 15 = 21.739; regen +1 per
-second; stack limit 4 -> Armor 55; Dash cost -15 applied by the Blueprint's own CommitAbility; Dash montage cancelled on
-end; sprint speed 840) plus the project's own compiled Sprint/Dash abilities. Same checks pass on host (also under
-AddressSanitizer) and in ares (docs/img/ares_gas.png).
+Verification: 24 Python tests; 60+ exact-value scenario checks in `tests/bp/run_gas.c` (derived from the assets and the
+C++, e.g. jump apex 420^2/(2*980), `100/(100+Armor)`, regen +1/s, stack limit 4, Dash cost -15, trace hit at x=166, rotated-box
+overlap, the whole shooting chain, respawn after 5 s); they pass on the host (also under AddressSanitizer) **and on the
+emulated N64** (docs/img/ares_suite.png). The runtime counts storage exhaustion and the tests fail if any pool overflows.
 
-**Not ported (reported, not guessed):**
-- Collision queries that need geometry: `LineTraceMultiForObjects` and hit results (need collision meshes from the editor
-  export). Overlaps use actor-level shapes: component relative transforms and rotation are ignored.
-- Animation: montage notifies (`EventReceived` from AnimNotifies) are not read; no skeletal pose / anim graph evaluation.
-- `ScalableFloat` curve tables, custom magnitude calculation classes, conditional/overflow effects: the data extractor
-  flags them as unsupported (none are used by this project). Attribute capture snapshotting is not modelled.
-- No replication/networking; UI widgets only keep state (Text/Percent/Visibility), nothing is drawn.
-- Hit-react and damage-number effects are Blueprint/C++ events that are called when they exist but have no visuals.
+**Still not ported (reported, not guessed):**
+- **Skeletal data:** socket locations (the fire gun's muzzle uses the gun component's position, not the `Muzzle` socket),
+  animation graphs / state machines, pose evaluation and skinning. These need skeleton reference poses and, for UE5
+  editor-saved assets, the anim-graph nodes; not parsed.
+- **World geometry:** the data has no level collision meshes, so the floor is the height an actor starts at and traces/
+  overlaps only see characters, projectiles and trigger volumes. (The editor export on a Mac mini provides geometry.)
+- `ScalableFloat` curve tables, custom magnitude calculation classes and effect `Components`: the extractor flags them as
+  unsupported (this project uses none). Pre-UE4.20 asset tag layouts (a few old template assets) keep defaults unread.
+- UE5 editor-saved Blueprints contain only graph nodes, not bytecode (they need a cook or a graph compiler); networking;
+  UI drawing beyond the HUD bars; audio; hit-react/damage-number visuals; AI behaviour (minions stand still).
+- Lumen, Nanite and the rest of the rendering pipeline (see the pipeline section; geometry/lighting conversion is
+  separate from gameplay).
 
 Bugs found by this work: argument expressions of a `Context` call were evaluated against the callee instead of the caller
 (`Self` as an argument pointed at the wrong object) — fixed in `codegen.py`.
@@ -111,6 +115,7 @@ Known gaps: out-parameters are passed by value; struct members use a placeholder
 |---|---|
 | `tools/n64fit` converter | 14 unit tests pass on a synthetic Unreal-style level (room, pillar, high-poly sphere, sun + point light). Baked output inspected visually: lamp falloff, pillar and sphere shadows, corner occlusion, bounce light all present |
 | Material JSON vs Tiny3D importer | Checked by reading the importer source and a real Fast64 file, **not** by running the importer |
+| `game/` ROM | The converted level running live on the N64 (ares): world, shooting, health bars, HUD, input, autoplay |
 | `viewer/` ROM | **Builds** (real MIPS build against Pak-pinned libdragon + Tiny3D) and **runs in ares**: textured floor, baked-lit walls (docs/img/ares_viewer.png). Camera/input/culling untested; test-scene walls show a winding issue |
 | `tools/ue64/uasset.py`, `kismet.py`, `codegen.py` | All 259 packages' import/export tables parse (gated per package version, with a bounds oracle that rejects misparses); 150/153 functions decode and validate; generated C compiles on host and MIPS; runs in ares |
 | `viewer/src/main.c` (older note) | Pass a syntax/type check (`gcc -fsyntax-only -DN64`) against libdragon `preview` + Tiny3D headers. The check was confirmed able to fail. **Never compiled for MIPS, never run** |

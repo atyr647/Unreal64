@@ -14,3 +14,8 @@ bpdemo/src/scenarios.c
 bpdemo/src/u64_gas_core.c
 bpdemo/src/u64_gas_core.h
 bpdemo/src/u64_rt.h
+game/src/u64_*.c
+game/src/gen/
+game/build/
+bpdemo/src/*.c
+!bpdemo/src/main.c

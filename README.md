@@ -22,3 +22,10 @@ cd tools && python3 -m n64fit ../level.gltf ../viewer --tris 1500
 ```
 Output goes to `viewer/assets/` and `viewer/level_index.h`, which the viewer's Makefile consumes
 (needs libdragon `preview`, Tiny3D, and the MIPS toolchain; none of which have been run in CI here).
+
+## Gameplay (the converted project running)
+
+`tools/ue64/bpc.py <Project>/Content out/` compiles the project's Blueprints to C and extracts effects, montages, collision
+shapes, movement tuning and class defaults; `runtime/` is the N64-side Unreal runtime (GAS, movement, collision, notifies,
+ports of the project's C++); `game/` is a playable ROM (see docs/PLAN.md and docs/img/ares_game*.png). Run the checks with
+`tools/run_bp_tests.sh <Project>/Content`.

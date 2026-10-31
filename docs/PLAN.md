@@ -155,15 +155,20 @@ a real map, 91 Blueprints and ~8k lines of C++. Run its tests with `tools/run_sh
 * Firing: rifle (aim from the camera, 1 deg spread, 10 damage x 100/120 armor), shotgun (8 pellets x 6), rocket launcher (projectile,
   sphere explosion radius 200, 60 damage), reload (clip + reserve conserved), aim down sights (FOV task 90 -> 60 -> 90, aiming tags),
   sprint / ADS movement speed (x1.4 / x0.8), ammo / health pickups with respawn.
+* Interaction: the chest. `GA_InteractPassive` traces with the `InteractTrace` profile (overlaps everything, so the first component hit
+  decides), finds the lock (the only component overlapping "Interactable"), Interact starts `GA_InteractActive` through its GameplayEvent
+  trigger, the 3 s hold ends in `PostInteract` (GE_ChestOpen, 5 s, + loot). Collision comes from the assets: convex hulls in `BodySetup`
+  (each element carries its own transform: the chest meshes are rotated 90 degrees), the component hierarchy of the Blueprint (SCS) and
+  per-component responses.
 * Engine layer written for this: target data handles, effect contexts with hit results, effect containers, per-frame ability tasks
   (FOV, move component, repeat, delay-one-frame, wait input / event / tag / target data), RegisterGameplayTagEvent listeners,
   timelines (curve keys parsed from the assets), parent-function calls, dynamic casts, 4.26 function parameters, a garbage collector.
 
 **Not done (honest list):**
 
-* Interaction: chests, doors and reviving. `GSAT_WaitInteractableTarget` traces against *components* with the interactable channel set to
-  overlap, which needs static-mesh collision (the assets carry convex hulls in `BodySetup`; not parsed yet) and per-component collision
-  responses. Same blocker for hit components, line traces against world geometry and the camera boom probe.
+* Interaction: doors (the timeline moves a component; `u64_comp_world` honours moved components, not tested) and reviving are untested
+  scenarios. Profile traces use the shape's response to the trace channel and the project's channel defaults; the *profile's* own
+  response to the component's object type is not modelled (the data has the responses; only needed for profiles that ignore a type).
 * World geometry: BSP brushes and static-mesh actors of the map (the floor is still the spawn height).
 * Animation: sequences, AnimBP state machines, sockets (the muzzle and the weapon attach point use the owner's location), bone hit
   detection (headshots need the physics asset's body shapes).

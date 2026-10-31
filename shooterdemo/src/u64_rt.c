@@ -124,16 +124,21 @@ u64_obj *u64_find(const char *name)
 u64_v u64_delegate(u64_v obj, const char *fn)  { u64_v r = {U64_DELEGATE}; r.u.s = fn; r.dobj = obj.u.o; return r; }
 
 // Multicast delegates: bindings keyed by the address of the (stable) variable slot.
-#define MAX_BINDS 64
+#define MAX_BINDS 384
+#define MAX_LISTENERS 48                                            // bindings of one delegate that a single broadcast calls
 static struct { u64_v *m; u64_v d; } binds[MAX_BINDS];
 static int nbinds;
-void u64_mc_add(u64_v *m, u64_v d)    { if (nbinds < MAX_BINDS) { binds[nbinds].m = m; binds[nbinds++].d = d; } }
+void u64_mc_add(u64_v *m, u64_v d)
+{
+  if (nbinds < MAX_BINDS) { binds[nbinds].m = m; binds[nbinds++].d = d; return; }
+  u64_rt_overflows++;                                                  // never drop a binding silently
+}
 void u64_mc_remove(u64_v *m, u64_v d) { for (int i = 0; i < nbinds; i++) if (binds[i].m == m && binds[i].d.dobj == d.dobj && !strcmp(binds[i].d.u.s, d.u.s)) { binds[i] = binds[--nbinds]; return; } }
 void u64_mc_clear(u64_v *m)           { for (int i = 0; i < nbinds; ) { if (binds[i].m == m) binds[i] = binds[--nbinds]; else i++; } }
 void u64_mc_broadcast(u64_v *m, int argc, const u64_v *argv)
 {
-  u64_v snap[MAX_BINDS]; int n = 0;
-  for (int i = 0; i < nbinds; i++) if (binds[i].m == m) snap[n++] = binds[i].d;
+  u64_v snap[MAX_LISTENERS]; int n = 0;
+  for (int i = 0; i < nbinds; i++) if (binds[i].m == m) { if (n < MAX_LISTENERS) snap[n++] = binds[i].d; else u64_rt_overflows++; }
   for (int i = 0; i < n; i++) u64_call(snap[i].dobj, snap[i].u.s, argc, argv);
 }
 const char *u64_obj_name(u64_obj *o)  { return o->name; }
@@ -142,7 +147,8 @@ int u64_obj_count(void)               { return nobjs; }
 u64_obj *u64_obj_at(int i)            { return &objs[i]; }
 int u64_obj_alive(u64_obj *o)         { return o && o->alive; }
 void u64_obj_set_alive(u64_obj *o, int v) { if (o) o->alive = v; }
-int u64_obj_is_actor(u64_obj *o)      { u64_v *l = o && o->alive ? vars_find(&o->iv, "Location") : 0; return l && l->t == U64_VEC; }   // actors have a location; components and tasks do not
+// actors have a location; components, tasks and plain value objects (a HitResult also carries a Location) do not
+int u64_obj_is_actor(u64_obj *o)      { if (o && o->cls[0] == 'H' && !strcmp(o->cls, "HitResult")) return 0; u64_v *l = o && o->alive ? vars_find(&o->iv, "Location") : 0; return l && l->t == U64_VEC; }
 void u64_obj_destroy(u64_obj *o)      { if (o) { o->alive = 0; if (u64_log) u64_log("  [destroy] %s", o->name); } }
 u64_v u64_array_of(int n, const u64_v *items);
 void u64_array_set(u64_v *a, int n, const u64_v *e) { *a = u64_array_of(n, e); }

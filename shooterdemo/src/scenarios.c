@@ -167,7 +167,6 @@ int u64_run_shooter_scenarios(int verbose)
     u64_input_release_id(me, "EGSAbilityInputID::PrimaryFire");
     tick(30);
     hero = enemy;
-    printf("DBG shotgun shield %f -> %f\n", sh0, attr("Shield"));
     CHECK(fabsf((sh0 - attr("Shield")) - 8 * (6.0f * 100.0f / 120.0f)) < 0.01f);                         // 8 pellets * 6 * 100/120
     hero = me;
   }
@@ -247,6 +246,34 @@ int u64_run_shooter_scenarios(int verbose)
     *u64_ivar(hero, "Location") = u64_vec(al.u.v[0], al.u.v[1], 112.0f);
     tick(2);
     CHECK(attr("RifleReserveAmmo") == 130);                                               // GE_Pickup_AmmoRifle: +30
+  }
+  // --- interaction: GA_InteractPassive traces (InteractTrace profile: overlaps everything, so the first component hit decides) and finds the
+  // chest's lock (the only component overlapping "Interactable"); Interact starts GA_InteractActive (a GameplayEvent trigger), which holds for
+  // BP_Chest.OpenInteractionDuration (3 s), then PostInteract applies GE_ChestOpen (5 s, grants Object.Chest.State.Open) and spawns the loot
+  {
+    hero = u64_player_pawn();                                                              // the earlier scenarios may have respawned the hero
+    u64_obj *ch = u64_find("BP_Chest_2"); float lx[3]; u64_comp_world(ch, "SM_Forge_Chest_Lock", lx);
+    CHECK(fabsf(lx[0] - 393) < 0.01f && fabsf(lx[1] + 355) < 0.01f && fabsf(lx[2] - 47) < 0.01f);                                  // chest at (438,-355,20) yaw -180: the lock is at +45 in the chest's x
+    int cnt_rocket0 = 0, cnt_hp0 = 0;
+    for (int i = 0; i < u64_obj_count(); i++) { u64_obj *o = u64_obj_at(i); if (!u64_obj_is_actor(o)) continue; if (!strcmp(u64_obj_class(o), "BP_RocketLauncher")) cnt_rocket0++; if (!strcmp(u64_obj_class(o), "BP_Pickup_Health")) cnt_hp0++; }
+    *u64_ivar(hero, "Location") = u64_vec(lx[0] - 150, lx[1], 112);
+    u64_obj *cam = u64_comp(hero, "FirstPersonCamera").u.o; u64_v rel = *u64_ivar(cam, "RelativeLocation");
+    float cx = lx[0] - 150 + rel.u.v[0], cy = lx[1] + rel.u.v[1], cz = 112 + rel.u.v[2], dx = lx[0] - cx, dy = lx[1] - cy, dz = lx[2] - cz;
+    *u64_ivar(hero, "ControlRotation") = u64_vec(atan2f(dz, sqrtf(dx * dx + dy * dy)) * 57.29578f, atan2f(dy, dx) * 57.29578f, 0);   // look at the lock
+    tick(12);
+    CHECK(!u64_tag_has(u64_asc_of(ch), "Object.Chest.State.Open"));
+    u64_input_press(hero, "EGSAbilityInputID::Interact");
+    tick(2 * 30);
+    CHECK(u64_tag_has(asc_of_hero(), "State.Interacting") && !u64_tag_has(u64_asc_of(ch), "Object.Chest.State.Open"));   // still holding after 2 s
+    tick(1 * 30 + 6);
+    CHECK(u64_tag_has(u64_asc_of(ch), "Object.Chest.State.Open") && !u64_tag_has(asc_of_hero(), "State.Interacting"));    // done after the 3 s hold
+    int cnt_rocket1 = 0, cnt_hp1 = 0;
+    for (int i = 0; i < u64_obj_count(); i++) { u64_obj *o = u64_obj_at(i); if (!u64_obj_is_actor(o)) continue; if (!strcmp(u64_obj_class(o), "BP_RocketLauncher")) cnt_rocket1++; if (!strcmp(u64_obj_class(o), "BP_Pickup_Health")) cnt_hp1++; }
+    CHECK(cnt_rocket1 == cnt_rocket0 + 1 && cnt_hp1 == cnt_hp0 + 1);                      // the chest's loot: a rocket launcher and a health pickup
+    tick(4 * 30);
+    CHECK(u64_tag_has(u64_asc_of(ch), "Object.Chest.State.Open"));                       // GE_ChestOpen lasts 5 s
+    tick(2 * 30);
+    CHECK(!u64_tag_has(u64_asc_of(ch), "Object.Chest.State.Open"));
   }
   // --- garbage collection: 3000 spawn/destroy cycles (plus arrays and temporaries) would exhaust the 1024-object pool without it
   {

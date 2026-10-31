@@ -241,8 +241,9 @@ void u64_apply_defaults(u64_obj *o, const char *cls) {
     *u64_ivar(o, "AbilityTags") = u64_array_const(18, 1, (u64_v[]){u64_int(0), u64_name("Ability.Interaction")} + 1);
     *u64_ivar(o, "bServerRespectsRemoteAbilityCancellation") = u64_bool(0);
     *u64_ivar(o, "NetSecurityPolicy") = u64_name("EGameplayAbilityNetSecurityPolicy::ServerOnlyTermination");
-    *u64_ivar(o, "ActivationOwnedTags") = u64_array_const(19, 0, (u64_v[]){u64_int(0)} + 1);
-    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(20, 3, (u64_v[]){u64_int(0), u64_name("State.Dead"), u64_name("State.KnockedDown"), u64_name("Ability.BlocksInteraction")} + 1);
+    *u64_ivar(o, "AbilityTriggers") = u64_array_const(20, 1, (u64_v[]){u64_int(0), u64_array_const(19, 2, (u64_v[]){u64_int(0), u64_name("Ability.Interaction"), u64_name("EGameplayAbilityTriggerSource::GameplayEvent")} + 1)} + 1);
+    *u64_ivar(o, "ActivationOwnedTags") = u64_array_const(21, 0, (u64_v[]){u64_int(0)} + 1);
+    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(22, 3, (u64_v[]){u64_int(0), u64_name("State.Dead"), u64_name("State.KnockedDown"), u64_name("Ability.BlocksInteraction")} + 1);
   }
   if (!strcmp(cls, "GA_InteractPassive")) {
     *u64_ivar(o, "ActiveBlockedTag") = u64_name("Ability.BlocksInteraction");
@@ -252,40 +253,40 @@ void u64_apply_defaults(u64_obj *o, const char *cls) {
     *u64_ivar(o, "bActivateAbilityOnGranted") = u64_bool(1);
     *u64_ivar(o, "bCannotActivateWhileInteracting") = u64_bool(0);
     *u64_ivar(o, "NetExecutionPolicy") = u64_name("EGameplayAbilityNetExecutionPolicy::LocalOnly");
-    *u64_ivar(o, "ActivationOwnedTags") = u64_array_const(21, 0, (u64_v[]){u64_int(0)} + 1);
+    *u64_ivar(o, "ActivationOwnedTags") = u64_array_const(23, 0, (u64_v[]){u64_int(0)} + 1);
   }
   if (!strcmp(cls, "GA_NextWeapon")) {
     *u64_ivar(o, "AbilityInputID") = u64_name("EGSAbilityInputID::NextWeapon");
     *u64_ivar(o, "AbilityID") = u64_name("EGSAbilityInputID::NextWeapon");
-    *u64_ivar(o, "AbilityTags") = u64_array_const(22, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging")} + 1);
+    *u64_ivar(o, "AbilityTags") = u64_array_const(24, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging")} + 1);
     *u64_ivar(o, "bServerRespectsRemoteAbilityCancellation") = u64_bool(0);
-    *u64_ivar(o, "BlockAbilitiesWithTag") = u64_array_const(23, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon")} + 1);
-    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(24, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
+    *u64_ivar(o, "BlockAbilitiesWithTag") = u64_array_const(25, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon")} + 1);
+    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(26, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
   }
   if (!strcmp(cls, "GA_PreviousWeapon")) {
     *u64_ivar(o, "AbilityInputID") = u64_name("EGSAbilityInputID::PrevWeapon");
     *u64_ivar(o, "AbilityID") = u64_name("EGSAbilityInputID::PrevWeapon");
-    *u64_ivar(o, "AbilityTags") = u64_array_const(25, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging")} + 1);
+    *u64_ivar(o, "AbilityTags") = u64_array_const(27, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging")} + 1);
     *u64_ivar(o, "bServerRespectsRemoteAbilityCancellation") = u64_bool(0);
-    *u64_ivar(o, "BlockAbilitiesWithTag") = u64_array_const(26, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon")} + 1);
-    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(27, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
+    *u64_ivar(o, "BlockAbilitiesWithTag") = u64_array_const(28, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon")} + 1);
+    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(29, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
   }
   if (!strcmp(cls, "GA_Revive")) {
     *u64_ivar(o, "Montage") = u64_cls("Revive_Montage");
     *u64_ivar(o, "bCannotActivateWhileInteracting") = u64_bool(0);
-    *u64_ivar(o, "AbilityTags") = u64_array_const(28, 1, (u64_v[]){u64_int(0), u64_name("Ability.Revive")} + 1);
+    *u64_ivar(o, "AbilityTags") = u64_array_const(30, 1, (u64_v[]){u64_int(0), u64_name("Ability.Revive")} + 1);
     *u64_ivar(o, "NetExecutionPolicy") = u64_name("EGameplayAbilityNetExecutionPolicy::ServerInitiated");
     *u64_ivar(o, "NetSecurityPolicy") = u64_name("EGameplayAbilityNetSecurityPolicy::ServerOnly");
-    *u64_ivar(o, "ActivationRequiredTags") = u64_array_const(29, 1, (u64_v[]){u64_int(0), u64_name("State.KnockedDown")} + 1);
-    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(30, 1, (u64_v[]){u64_int(0), u64_name("State.Dead")} + 1);
+    *u64_ivar(o, "ActivationRequiredTags") = u64_array_const(31, 1, (u64_v[]){u64_int(0), u64_name("State.KnockedDown")} + 1);
+    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(32, 1, (u64_v[]){u64_int(0), u64_name("State.Dead")} + 1);
   }
   if (!strcmp(cls, "GA_RifleAlternate")) {
     *u64_ivar(o, "AbilityInputID") = u64_name("EGSAbilityInputID::AlternateFire");
     *u64_ivar(o, "AbilityID") = u64_name("EGSAbilityInputID::AlternateFire");
     *u64_ivar(o, "bSourceObjectMustEqualCurrentWeaponToActivate") = u64_bool(1);
-    *u64_ivar(o, "AbilityTags") = u64_array_const(31, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Alternate")} + 1);
+    *u64_ivar(o, "AbilityTags") = u64_array_const(33, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Alternate")} + 1);
     *u64_ivar(o, "NetExecutionPolicy") = u64_name("EGameplayAbilityNetExecutionPolicy::LocalOnly");
-    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(32, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
+    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(34, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
   }
   if (!strcmp(cls, "GA_RiflePrimary")) {
     *u64_ivar(o, "TimeBetweenShots") = u64_float(0.10000000149011612f);
@@ -293,12 +294,12 @@ void u64_apply_defaults(u64_obj *o, const char *cls) {
     *u64_ivar(o, "AbilityInputID") = u64_name("EGSAbilityInputID::PrimaryFire");
     *u64_ivar(o, "AbilityID") = u64_name("EGSAbilityInputID::PrimaryFire");
     *u64_ivar(o, "bSourceObjectMustEqualCurrentWeaponToActivate") = u64_bool(1);
-    *u64_ivar(o, "AbilityTags") = u64_array_const(33, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Primary")} + 1);
+    *u64_ivar(o, "AbilityTags") = u64_array_const(35, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Primary")} + 1);
     *u64_ivar(o, "NetExecutionPolicy") = u64_name("EGameplayAbilityNetExecutionPolicy::LocalOnly");
-    *u64_ivar(o, "CancelAbilitiesWithTag") = u64_array_const(34, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Reload")} + 1);
-    *u64_ivar(o, "BlockAbilitiesWithTag") = u64_array_const(35, 2, (u64_v[]){u64_int(0), u64_name("Ability.Sprint"), u64_name("Ability.Weapon.IsChanging")} + 1);
-    *u64_ivar(o, "ActivationOwnedTags") = u64_array_const(36, 2, (u64_v[]){u64_int(0), u64_name("Ability.CancelsSprint"), u64_name("Ability.BlocksInteraction")} + 1);
-    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(37, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
+    *u64_ivar(o, "CancelAbilitiesWithTag") = u64_array_const(36, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Reload")} + 1);
+    *u64_ivar(o, "BlockAbilitiesWithTag") = u64_array_const(37, 2, (u64_v[]){u64_int(0), u64_name("Ability.Sprint"), u64_name("Ability.Weapon.IsChanging")} + 1);
+    *u64_ivar(o, "ActivationOwnedTags") = u64_array_const(38, 2, (u64_v[]){u64_int(0), u64_name("Ability.CancelsSprint"), u64_name("Ability.BlocksInteraction")} + 1);
+    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(39, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
   }
   if (!strcmp(cls, "GA_RiflePrimaryInstant")) {
     *u64_ivar(o, "AmmoCost") = u64_int(1);
@@ -313,21 +314,21 @@ void u64_apply_defaults(u64_obj *o, const char *cls) {
     *u64_ivar(o, "AimingRemovalTag") = u64_name("Weapon.Rifle.AimingRemoval");
     *u64_ivar(o, "AbilityID") = u64_name("EGSAbilityInputID::PrimaryFire");
     *u64_ivar(o, "bSourceObjectMustEqualCurrentWeaponToActivate") = u64_bool(1);
-    *u64_ivar(o, "EffectContainerMap") = u64_array_const(40, 2, (u64_v[]){u64_int(0), u64_name("Ability"), u64_array_const(39, 4, (u64_v[]){u64_int(0), u64_name("TargetType"), u64_cls("None"), u64_name("TargetGameplayEffectClasses"), u64_array_const(38, 1, (u64_v[]){u64_int(0), u64_cls("GE_RifleDamage")} + 1)} + 1)} + 1);
-    *u64_ivar(o, "AbilityTags") = u64_array_const(41, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Primary.Instant")} + 1);
-    *u64_ivar(o, "ActivationOwnedTags") = u64_array_const(42, 2, (u64_v[]){u64_int(0), u64_name("Weapon.IsFiring"), u64_name("Ability.BlocksInteraction")} + 1);
-    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(43, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
+    *u64_ivar(o, "EffectContainerMap") = u64_array_const(42, 2, (u64_v[]){u64_int(0), u64_name("Ability"), u64_array_const(41, 4, (u64_v[]){u64_int(0), u64_name("TargetType"), u64_cls("None"), u64_name("TargetGameplayEffectClasses"), u64_array_const(40, 1, (u64_v[]){u64_int(0), u64_cls("GE_RifleDamage")} + 1)} + 1)} + 1);
+    *u64_ivar(o, "AbilityTags") = u64_array_const(43, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Primary.Instant")} + 1);
+    *u64_ivar(o, "ActivationOwnedTags") = u64_array_const(44, 2, (u64_v[]){u64_int(0), u64_name("Weapon.IsFiring"), u64_name("Ability.BlocksInteraction")} + 1);
+    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(45, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
   }
   if (!strcmp(cls, "GA_RifleReload")) {
     *u64_ivar(o, "AbilityInputID") = u64_name("EGSAbilityInputID::Reload");
     *u64_ivar(o, "AbilityID") = u64_name("EGSAbilityInputID::Reload");
     *u64_ivar(o, "bSourceObjectMustEqualCurrentWeaponToActivate") = u64_bool(1);
-    *u64_ivar(o, "EffectContainerMap") = u64_array_const(46, 2, (u64_v[]){u64_int(0), u64_name("Ability"), u64_array_const(45, 4, (u64_v[]){u64_int(0), u64_name("TargetType"), u64_cls("GSTargetType_UseOwner"), u64_name("TargetGameplayEffectClasses"), u64_array_const(44, 1, (u64_v[]){u64_int(0), u64_cls("GE_RifleReload")} + 1)} + 1)} + 1);
-    *u64_ivar(o, "AbilityTags") = u64_array_const(47, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Reload")} + 1);
-    *u64_ivar(o, "CancelAbilitiesWithTag") = u64_array_const(48, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Primary")} + 1);
-    *u64_ivar(o, "BlockAbilitiesWithTag") = u64_array_const(49, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging")} + 1);
-    *u64_ivar(o, "ActivationOwnedTags") = u64_array_const(50, 2, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Reload"), u64_name("Ability.BlocksInteraction")} + 1);
-    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(51, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
+    *u64_ivar(o, "EffectContainerMap") = u64_array_const(48, 2, (u64_v[]){u64_int(0), u64_name("Ability"), u64_array_const(47, 4, (u64_v[]){u64_int(0), u64_name("TargetType"), u64_cls("GSTargetType_UseOwner"), u64_name("TargetGameplayEffectClasses"), u64_array_const(46, 1, (u64_v[]){u64_int(0), u64_cls("GE_RifleReload")} + 1)} + 1)} + 1);
+    *u64_ivar(o, "AbilityTags") = u64_array_const(49, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Reload")} + 1);
+    *u64_ivar(o, "CancelAbilitiesWithTag") = u64_array_const(50, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Primary")} + 1);
+    *u64_ivar(o, "BlockAbilitiesWithTag") = u64_array_const(51, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging")} + 1);
+    *u64_ivar(o, "ActivationOwnedTags") = u64_array_const(52, 2, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Reload"), u64_name("Ability.BlocksInteraction")} + 1);
+    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(53, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
   }
   if (!strcmp(cls, "GA_RifleSecondary")) {
     *u64_ivar(o, "Targeting1PFOV") = u64_float(60.0f);
@@ -336,10 +337,10 @@ void u64_apply_defaults(u64_obj *o, const char *cls) {
     *u64_ivar(o, "AbilityInputID") = u64_name("EGSAbilityInputID::SecondaryFire");
     *u64_ivar(o, "AbilityID") = u64_name("EGSAbilityInputID::SecondaryFire");
     *u64_ivar(o, "bSourceObjectMustEqualCurrentWeaponToActivate") = u64_bool(1);
-    *u64_ivar(o, "AbilityTags") = u64_array_const(52, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Secondary")} + 1);
-    *u64_ivar(o, "BlockAbilitiesWithTag") = u64_array_const(53, 2, (u64_v[]){u64_int(0), u64_name("Ability.Sprint"), u64_name("Ability.Weapon.IsChanging")} + 1);
-    *u64_ivar(o, "ActivationOwnedTags") = u64_array_const(54, 2, (u64_v[]){u64_int(0), u64_name("Ability.CancelsSprint"), u64_name("Ability.BlocksInteraction")} + 1);
-    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(55, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.KnockedDown"), u64_name("State.Dead")} + 1);
+    *u64_ivar(o, "AbilityTags") = u64_array_const(54, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Secondary")} + 1);
+    *u64_ivar(o, "BlockAbilitiesWithTag") = u64_array_const(55, 2, (u64_v[]){u64_int(0), u64_name("Ability.Sprint"), u64_name("Ability.Weapon.IsChanging")} + 1);
+    *u64_ivar(o, "ActivationOwnedTags") = u64_array_const(56, 2, (u64_v[]){u64_int(0), u64_name("Ability.CancelsSprint"), u64_name("Ability.BlocksInteraction")} + 1);
+    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(57, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.KnockedDown"), u64_name("State.Dead")} + 1);
   }
   if (!strcmp(cls, "GA_RocketLauncherPrimary")) {
     *u64_ivar(o, "TimeBetweenShots") = u64_float(0.4000000059604645f);
@@ -347,31 +348,31 @@ void u64_apply_defaults(u64_obj *o, const char *cls) {
     *u64_ivar(o, "AbilityInputID") = u64_name("EGSAbilityInputID::PrimaryFire");
     *u64_ivar(o, "AbilityID") = u64_name("EGSAbilityInputID::PrimaryFire");
     *u64_ivar(o, "bSourceObjectMustEqualCurrentWeaponToActivate") = u64_bool(1);
-    *u64_ivar(o, "AbilityTags") = u64_array_const(56, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Primary")} + 1);
+    *u64_ivar(o, "AbilityTags") = u64_array_const(58, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Primary")} + 1);
     *u64_ivar(o, "NetExecutionPolicy") = u64_name("EGameplayAbilityNetExecutionPolicy::LocalOnly");
-    *u64_ivar(o, "CancelAbilitiesWithTag") = u64_array_const(57, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Reload")} + 1);
-    *u64_ivar(o, "BlockAbilitiesWithTag") = u64_array_const(58, 2, (u64_v[]){u64_int(0), u64_name("Ability.Sprint"), u64_name("Ability.Weapon.IsChanging")} + 1);
-    *u64_ivar(o, "ActivationOwnedTags") = u64_array_const(59, 2, (u64_v[]){u64_int(0), u64_name("Ability.CancelsSprint"), u64_name("Ability.BlocksInteraction")} + 1);
-    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(60, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
+    *u64_ivar(o, "CancelAbilitiesWithTag") = u64_array_const(59, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Reload")} + 1);
+    *u64_ivar(o, "BlockAbilitiesWithTag") = u64_array_const(60, 2, (u64_v[]){u64_int(0), u64_name("Ability.Sprint"), u64_name("Ability.Weapon.IsChanging")} + 1);
+    *u64_ivar(o, "ActivationOwnedTags") = u64_array_const(61, 2, (u64_v[]){u64_int(0), u64_name("Ability.CancelsSprint"), u64_name("Ability.BlocksInteraction")} + 1);
+    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(62, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
   }
   if (!strcmp(cls, "GA_RocketLauncherPrimaryInstant")) {
     *u64_ivar(o, "RocketDamage") = u64_float(60.0f);
     *u64_ivar(o, "AmmoCost") = u64_int(1);
     *u64_ivar(o, "AbilityID") = u64_name("EGSAbilityInputID::PrimaryFire");
     *u64_ivar(o, "bSourceObjectMustEqualCurrentWeaponToActivate") = u64_bool(1);
-    *u64_ivar(o, "EffectContainerMap") = u64_array_const(63, 2, (u64_v[]){u64_int(0), u64_name("Ability"), u64_array_const(62, 4, (u64_v[]){u64_int(0), u64_name("TargetType"), u64_cls("None"), u64_name("TargetGameplayEffectClasses"), u64_array_const(61, 1, (u64_v[]){u64_int(0), u64_cls("GE_RocketLauncherDamage")} + 1)} + 1)} + 1);
-    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(64, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
+    *u64_ivar(o, "EffectContainerMap") = u64_array_const(65, 2, (u64_v[]){u64_int(0), u64_name("Ability"), u64_array_const(64, 4, (u64_v[]){u64_int(0), u64_name("TargetType"), u64_cls("None"), u64_name("TargetGameplayEffectClasses"), u64_array_const(63, 1, (u64_v[]){u64_int(0), u64_cls("GE_RocketLauncherDamage")} + 1)} + 1)} + 1);
+    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(66, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
   }
   if (!strcmp(cls, "GA_RocketLauncherReload")) {
     *u64_ivar(o, "AbilityInputID") = u64_name("EGSAbilityInputID::Reload");
     *u64_ivar(o, "AbilityID") = u64_name("EGSAbilityInputID::Reload");
     *u64_ivar(o, "bSourceObjectMustEqualCurrentWeaponToActivate") = u64_bool(1);
-    *u64_ivar(o, "EffectContainerMap") = u64_array_const(67, 2, (u64_v[]){u64_int(0), u64_name("Ability"), u64_array_const(66, 4, (u64_v[]){u64_int(0), u64_name("TargetType"), u64_cls("GSTargetType_UseOwner"), u64_name("TargetGameplayEffectClasses"), u64_array_const(65, 1, (u64_v[]){u64_int(0), u64_cls("GE_RocketLauncherReload")} + 1)} + 1)} + 1);
-    *u64_ivar(o, "AbilityTags") = u64_array_const(68, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Reload")} + 1);
-    *u64_ivar(o, "CancelAbilitiesWithTag") = u64_array_const(69, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Primary")} + 1);
-    *u64_ivar(o, "BlockAbilitiesWithTag") = u64_array_const(70, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging")} + 1);
-    *u64_ivar(o, "ActivationOwnedTags") = u64_array_const(71, 2, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Reload"), u64_name("Ability.BlocksInteraction")} + 1);
-    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(72, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
+    *u64_ivar(o, "EffectContainerMap") = u64_array_const(69, 2, (u64_v[]){u64_int(0), u64_name("Ability"), u64_array_const(68, 4, (u64_v[]){u64_int(0), u64_name("TargetType"), u64_cls("GSTargetType_UseOwner"), u64_name("TargetGameplayEffectClasses"), u64_array_const(67, 1, (u64_v[]){u64_int(0), u64_cls("GE_RocketLauncherReload")} + 1)} + 1)} + 1);
+    *u64_ivar(o, "AbilityTags") = u64_array_const(70, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Reload")} + 1);
+    *u64_ivar(o, "CancelAbilitiesWithTag") = u64_array_const(71, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Primary")} + 1);
+    *u64_ivar(o, "BlockAbilitiesWithTag") = u64_array_const(72, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging")} + 1);
+    *u64_ivar(o, "ActivationOwnedTags") = u64_array_const(73, 2, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Reload"), u64_name("Ability.BlocksInteraction")} + 1);
+    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(74, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
   }
   if (!strcmp(cls, "GA_RocketLauncherSecondary")) {
     *u64_ivar(o, "Targeting1PFOV") = u64_float(60.0f);
@@ -388,21 +389,21 @@ void u64_apply_defaults(u64_obj *o, const char *cls) {
     *u64_ivar(o, "AbilityInputID") = u64_name("EGSAbilityInputID::SecondaryFire");
     *u64_ivar(o, "AbilityID") = u64_name("EGSAbilityInputID::SecondaryFire");
     *u64_ivar(o, "bSourceObjectMustEqualCurrentWeaponToActivate") = u64_bool(1);
-    *u64_ivar(o, "EffectContainerMap") = u64_array_const(75, 2, (u64_v[]){u64_int(0), u64_name("Ability"), u64_array_const(74, 4, (u64_v[]){u64_int(0), u64_name("TargetType"), u64_cls("None"), u64_name("TargetGameplayEffectClasses"), u64_array_const(73, 1, (u64_v[]){u64_int(0), u64_cls("GE_RocketLauncherDamage")} + 1)} + 1)} + 1);
-    *u64_ivar(o, "AbilityTags") = u64_array_const(76, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Secondary")} + 1);
+    *u64_ivar(o, "EffectContainerMap") = u64_array_const(77, 2, (u64_v[]){u64_int(0), u64_name("Ability"), u64_array_const(76, 4, (u64_v[]){u64_int(0), u64_name("TargetType"), u64_cls("None"), u64_name("TargetGameplayEffectClasses"), u64_array_const(75, 1, (u64_v[]){u64_int(0), u64_cls("GE_RocketLauncherDamage")} + 1)} + 1)} + 1);
+    *u64_ivar(o, "AbilityTags") = u64_array_const(78, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Secondary")} + 1);
     *u64_ivar(o, "bServerRespectsRemoteAbilityCancellation") = u64_bool(0);
-    *u64_ivar(o, "CancelAbilitiesWithTag") = u64_array_const(77, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Reload")} + 1);
-    *u64_ivar(o, "BlockAbilitiesWithTag") = u64_array_const(78, 4, (u64_v[]){u64_int(0), u64_name("Ability.Sprint"), u64_name("Ability.Weapon.Primary"), u64_name("Ability.Weapon.IsChanging"), u64_name("Ability.Weapon.Reload")} + 1);
-    *u64_ivar(o, "ActivationOwnedTags") = u64_array_const(79, 2, (u64_v[]){u64_int(0), u64_name("Ability.CancelsSprint"), u64_name("Ability.BlocksInteraction")} + 1);
-    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(80, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
+    *u64_ivar(o, "CancelAbilitiesWithTag") = u64_array_const(79, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Reload")} + 1);
+    *u64_ivar(o, "BlockAbilitiesWithTag") = u64_array_const(80, 4, (u64_v[]){u64_int(0), u64_name("Ability.Sprint"), u64_name("Ability.Weapon.Primary"), u64_name("Ability.Weapon.IsChanging"), u64_name("Ability.Weapon.Reload")} + 1);
+    *u64_ivar(o, "ActivationOwnedTags") = u64_array_const(81, 2, (u64_v[]){u64_int(0), u64_name("Ability.CancelsSprint"), u64_name("Ability.BlocksInteraction")} + 1);
+    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(82, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
   }
   if (!strcmp(cls, "GA_ShotgunAlternate")) {
     *u64_ivar(o, "AbilityInputID") = u64_name("EGSAbilityInputID::AlternateFire");
     *u64_ivar(o, "AbilityID") = u64_name("EGSAbilityInputID::AlternateFire");
     *u64_ivar(o, "bSourceObjectMustEqualCurrentWeaponToActivate") = u64_bool(1);
-    *u64_ivar(o, "AbilityTags") = u64_array_const(81, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Alternate")} + 1);
+    *u64_ivar(o, "AbilityTags") = u64_array_const(83, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Alternate")} + 1);
     *u64_ivar(o, "NetExecutionPolicy") = u64_name("EGameplayAbilityNetExecutionPolicy::LocalOnly");
-    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(82, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
+    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(84, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
   }
   if (!strcmp(cls, "GA_ShotgunPrimary")) {
     *u64_ivar(o, "TimeBetweenShots") = u64_float(0.4000000059604645f);
@@ -410,12 +411,12 @@ void u64_apply_defaults(u64_obj *o, const char *cls) {
     *u64_ivar(o, "AbilityInputID") = u64_name("EGSAbilityInputID::PrimaryFire");
     *u64_ivar(o, "AbilityID") = u64_name("EGSAbilityInputID::PrimaryFire");
     *u64_ivar(o, "bSourceObjectMustEqualCurrentWeaponToActivate") = u64_bool(1);
-    *u64_ivar(o, "AbilityTags") = u64_array_const(83, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Primary")} + 1);
+    *u64_ivar(o, "AbilityTags") = u64_array_const(85, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Primary")} + 1);
     *u64_ivar(o, "NetExecutionPolicy") = u64_name("EGameplayAbilityNetExecutionPolicy::LocalOnly");
-    *u64_ivar(o, "CancelAbilitiesWithTag") = u64_array_const(84, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Reload")} + 1);
-    *u64_ivar(o, "BlockAbilitiesWithTag") = u64_array_const(85, 2, (u64_v[]){u64_int(0), u64_name("Ability.Sprint"), u64_name("Ability.Weapon.IsChanging")} + 1);
-    *u64_ivar(o, "ActivationOwnedTags") = u64_array_const(86, 2, (u64_v[]){u64_int(0), u64_name("Ability.CancelsSprint"), u64_name("Ability.BlocksInteraction")} + 1);
-    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(87, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
+    *u64_ivar(o, "CancelAbilitiesWithTag") = u64_array_const(86, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Reload")} + 1);
+    *u64_ivar(o, "BlockAbilitiesWithTag") = u64_array_const(87, 2, (u64_v[]){u64_int(0), u64_name("Ability.Sprint"), u64_name("Ability.Weapon.IsChanging")} + 1);
+    *u64_ivar(o, "ActivationOwnedTags") = u64_array_const(88, 2, (u64_v[]){u64_int(0), u64_name("Ability.CancelsSprint"), u64_name("Ability.BlocksInteraction")} + 1);
+    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(89, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
   }
   if (!strcmp(cls, "GA_ShotgunPrimaryInstant")) {
     *u64_ivar(o, "AmmoCost") = u64_int(1);
@@ -429,21 +430,21 @@ void u64_apply_defaults(u64_obj *o, const char *cls) {
     *u64_ivar(o, "AimingRemovalTag") = u64_name("Weapon.Shotgun.AimingRemoval");
     *u64_ivar(o, "AbilityID") = u64_name("EGSAbilityInputID::PrimaryFire");
     *u64_ivar(o, "bSourceObjectMustEqualCurrentWeaponToActivate") = u64_bool(1);
-    *u64_ivar(o, "EffectContainerMap") = u64_array_const(90, 2, (u64_v[]){u64_int(0), u64_name("Ability"), u64_array_const(89, 4, (u64_v[]){u64_int(0), u64_name("TargetType"), u64_cls("None"), u64_name("TargetGameplayEffectClasses"), u64_array_const(88, 1, (u64_v[]){u64_int(0), u64_cls("GE_RifleDamage")} + 1)} + 1)} + 1);
-    *u64_ivar(o, "AbilityTags") = u64_array_const(91, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Primary.Instant")} + 1);
-    *u64_ivar(o, "ActivationOwnedTags") = u64_array_const(92, 2, (u64_v[]){u64_int(0), u64_name("Weapon.IsFiring"), u64_name("Ability.BlocksInteraction")} + 1);
-    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(93, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
+    *u64_ivar(o, "EffectContainerMap") = u64_array_const(92, 2, (u64_v[]){u64_int(0), u64_name("Ability"), u64_array_const(91, 4, (u64_v[]){u64_int(0), u64_name("TargetType"), u64_cls("None"), u64_name("TargetGameplayEffectClasses"), u64_array_const(90, 1, (u64_v[]){u64_int(0), u64_cls("GE_RifleDamage")} + 1)} + 1)} + 1);
+    *u64_ivar(o, "AbilityTags") = u64_array_const(93, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Primary.Instant")} + 1);
+    *u64_ivar(o, "ActivationOwnedTags") = u64_array_const(94, 2, (u64_v[]){u64_int(0), u64_name("Weapon.IsFiring"), u64_name("Ability.BlocksInteraction")} + 1);
+    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(95, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
   }
   if (!strcmp(cls, "GA_ShotgunReload")) {
     *u64_ivar(o, "AbilityInputID") = u64_name("EGSAbilityInputID::Reload");
     *u64_ivar(o, "AbilityID") = u64_name("EGSAbilityInputID::Reload");
     *u64_ivar(o, "bSourceObjectMustEqualCurrentWeaponToActivate") = u64_bool(1);
-    *u64_ivar(o, "EffectContainerMap") = u64_array_const(96, 2, (u64_v[]){u64_int(0), u64_name("Ability"), u64_array_const(95, 4, (u64_v[]){u64_int(0), u64_name("TargetType"), u64_cls("GSTargetType_UseOwner"), u64_name("TargetGameplayEffectClasses"), u64_array_const(94, 1, (u64_v[]){u64_int(0), u64_cls("GE_ShotgunReload")} + 1)} + 1)} + 1);
-    *u64_ivar(o, "AbilityTags") = u64_array_const(97, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Reload")} + 1);
-    *u64_ivar(o, "CancelAbilitiesWithTag") = u64_array_const(98, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Primary")} + 1);
-    *u64_ivar(o, "BlockAbilitiesWithTag") = u64_array_const(99, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging")} + 1);
-    *u64_ivar(o, "ActivationOwnedTags") = u64_array_const(100, 2, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Reload"), u64_name("Ability.BlocksInteraction")} + 1);
-    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(101, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
+    *u64_ivar(o, "EffectContainerMap") = u64_array_const(98, 2, (u64_v[]){u64_int(0), u64_name("Ability"), u64_array_const(97, 4, (u64_v[]){u64_int(0), u64_name("TargetType"), u64_cls("GSTargetType_UseOwner"), u64_name("TargetGameplayEffectClasses"), u64_array_const(96, 1, (u64_v[]){u64_int(0), u64_cls("GE_ShotgunReload")} + 1)} + 1)} + 1);
+    *u64_ivar(o, "AbilityTags") = u64_array_const(99, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Reload")} + 1);
+    *u64_ivar(o, "CancelAbilitiesWithTag") = u64_array_const(100, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Primary")} + 1);
+    *u64_ivar(o, "BlockAbilitiesWithTag") = u64_array_const(101, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging")} + 1);
+    *u64_ivar(o, "ActivationOwnedTags") = u64_array_const(102, 2, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Reload"), u64_name("Ability.BlocksInteraction")} + 1);
+    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(103, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
   }
   if (!strcmp(cls, "GA_ShotgunSecondary")) {
     *u64_ivar(o, "Targeting1PFOV") = u64_float(60.0f);
@@ -452,17 +453,17 @@ void u64_apply_defaults(u64_obj *o, const char *cls) {
     *u64_ivar(o, "AbilityInputID") = u64_name("EGSAbilityInputID::SecondaryFire");
     *u64_ivar(o, "AbilityID") = u64_name("EGSAbilityInputID::SecondaryFire");
     *u64_ivar(o, "bSourceObjectMustEqualCurrentWeaponToActivate") = u64_bool(1);
-    *u64_ivar(o, "AbilityTags") = u64_array_const(102, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Secondary")} + 1);
-    *u64_ivar(o, "BlockAbilitiesWithTag") = u64_array_const(103, 2, (u64_v[]){u64_int(0), u64_name("Ability.Sprint"), u64_name("Ability.Weapon.IsChanging")} + 1);
-    *u64_ivar(o, "ActivationOwnedTags") = u64_array_const(104, 2, (u64_v[]){u64_int(0), u64_name("Ability.CancelsSprint"), u64_name("Ability.BlocksInteraction")} + 1);
-    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(105, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
+    *u64_ivar(o, "AbilityTags") = u64_array_const(104, 1, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.Secondary")} + 1);
+    *u64_ivar(o, "BlockAbilitiesWithTag") = u64_array_const(105, 2, (u64_v[]){u64_int(0), u64_name("Ability.Sprint"), u64_name("Ability.Weapon.IsChanging")} + 1);
+    *u64_ivar(o, "ActivationOwnedTags") = u64_array_const(106, 2, (u64_v[]){u64_int(0), u64_name("Ability.CancelsSprint"), u64_name("Ability.BlocksInteraction")} + 1);
+    *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(107, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
   }
   if (!strcmp(cls, "GA_Sprint")) {
     *u64_ivar(o, "AbilityInputID") = u64_name("EGSAbilityInputID::Sprint");
     *u64_ivar(o, "AbilityID") = u64_name("EGSAbilityInputID::Sprint");
-    *u64_ivar(o, "AbilityTags") = u64_array_const(106, 1, (u64_v[]){u64_int(0), u64_name("Ability.Sprint")} + 1);
+    *u64_ivar(o, "AbilityTags") = u64_array_const(108, 1, (u64_v[]){u64_int(0), u64_name("Ability.Sprint")} + 1);
     *u64_ivar(o, "CostGameplayEffectClass") = u64_cls("GE_SprintCost");
-    *u64_ivar(o, "ActivationOwnedTags") = u64_array_const(107, 0, (u64_v[]){u64_int(0)} + 1);
+    *u64_ivar(o, "ActivationOwnedTags") = u64_array_const(109, 0, (u64_v[]){u64_int(0)} + 1);
   }
   if (!strcmp(cls, "GC_KnockedDown")) {
     *u64_ivar(o, "KnockedDownSound") = u64_cls("Stinger_PlayerDeath_Stereo_Cue");

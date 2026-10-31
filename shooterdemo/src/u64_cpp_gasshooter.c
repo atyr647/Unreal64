@@ -848,9 +848,11 @@ static u64_v w_pickup_on_touch(u64_obj *w, int c, const u64_v *a)
 #define MAX_TOUCH 96
 static struct { u64_obj *a, *b; } touching[MAX_TOUCH]; static int ntouch;
 static int touch_find(u64_obj *a, u64_obj *b) { for (int i = 0; i < ntouch; i++) if (touching[i].a == a && touching[i].b == b) return i; return -1; }
+static void interact_tick(void);
 static void gs_world_tick(float dt)
 {
   (void)dt;
+  interact_tick();
   for (int i = 0; i < u64_obj_count(); i++) {
     u64_obj *o = u64_obj_at(i);
     if (!u64_obj_is_actor(o)) continue;
@@ -866,6 +868,170 @@ static void gs_world_tick(float dt)
     }
   }
   for (int i = 0; i < ntouch; ) { if (!u64_obj_alive(touching[i].a) || !u64_obj_alive(touching[i].b)) touching[i] = touching[--ntouch]; else i++; }
+}
+
+// ---------------------------------------------------------------------------------------------------- IGSInteractable + UGSAT_WaitInteractableTarget
+// Interface defaults (IGSInteractable): nothing is interactable until a class overrides it. Interacters are stored as pairs
+// [component, actor, ...] in the "Interacters" variable.
+static u64_v ia_false(u64_obj *s, int c, const u64_v *a) { (void)s; (void)c; (void)a; return u64_bool(0); }
+static u64_v ia_zero(u64_obj *s, int c, const u64_v *a) { (void)s; (void)c; (void)a; return u64_float(0.0f); }
+static u64_v ia_sync_type(u64_obj *s, int c, const u64_v *a)             // GetPreInteractSyncType / GetPostInteractSyncType(&bShouldSync, &Type, Component)
+{ (void)s; u64_out(A(c, a, 0), u64_bool(0)); u64_out(A(c, a, 1), u64_int(0)); return NONE_; }                      // false, OnlyServerWait
+static u64_v ia_register(u64_obj *s, int c, const u64_v *a)              // RegisterInteracter(Component, InteractingActor)
+{
+  u64_v *list = u64_ivar(s, "Interacters");
+  for (int i = 0; i + 1 < u64_array_len(*list); i += 2) if (O(u64_array_get(*list, i)) == O(A(c, a, 0)) && O(u64_array_get(*list, i + 1)) == O(A(c, a, 1))) return NONE_;
+  u64_array_push(list, A(c, a, 0)); u64_array_push(list, A(c, a, 1));
+  return NONE_;
+}
+static u64_v ia_unregister(u64_obj *s, int c, const u64_v *a)
+{
+  u64_v *list = u64_ivar(s, "Interacters"), keep[128]; int n = 0;
+  for (int i = 0; i + 1 < u64_array_len(*list) && n + 2 <= 128; i += 2) {
+    if (O(u64_array_get(*list, i)) == O(A(c, a, 0)) && O(u64_array_get(*list, i + 1)) == O(A(c, a, 1))) continue;
+    keep[n++] = u64_array_get(*list, i); keep[n++] = u64_array_get(*list, i + 1);
+  }
+  *list = u64_array_of(n, keep);
+  return NONE_;
+}
+static u64_v ia_cancel(u64_obj *s, int c, const u64_v *a)                // InteractableCancelInteraction(Component): cancel Ability.Interaction on everyone interacting with it
+{
+  u64_v *list = u64_ivar(s, "Interacters"), keep[128]; int n = 0;
+  for (int i = 0; i + 1 < u64_array_len(*list) && n + 2 <= 128; i += 2) {
+    if (O(u64_array_get(*list, i)) != O(A(c, a, 0))) { keep[n++] = u64_array_get(*list, i); keep[n++] = u64_array_get(*list, i + 1); continue; }
+    u64_obj *asc = u64_asc_of(O(u64_array_get(*list, i + 1)));
+    if (asc) u64_cancel_abilities(asc, "Ability.Interaction");
+  }
+  *list = u64_array_of(n, keep);
+  return NONE_;
+}
+// AGSHeroCharacter implements it for reviving a knocked down hero
+static u64_v h_ia_available(u64_obj *s, int c, const u64_v *a)
+{
+  (void)c; (void)a; u64_obj *asc = u64_asc_of(s);
+  return u64_bool(asc && u64_tag_count(asc, "State.KnockedDown") && !u64_tag_count(asc, "State.Interacting"));
+}
+static u64_v h_ia_duration(u64_obj *s, int c, const u64_v *a)
+{ (void)c; (void)a; u64_obj *asc = u64_asc_of(s); return asc && u64_tag_count(asc, "State.KnockedDown") ? *u64_ivar(s, "ReviveDuration") : u64_float(0.0f); }
+static u64_v h_ia_pre(u64_obj *s, int c, const u64_v *a)                 // PreInteract: start the Revive ability
+{
+  (void)c; (void)a; u64_obj *asc = u64_asc_of(s);
+  if (asc && u64_tag_count(asc, "State.KnockedDown")) u64_call(asc, "TryActivateAbilitiesByTag", 1, (u64_v[]){u64_array_of(1, (u64_v[]){u64_name("Ability.Revive")})});
+  return NONE_;
+}
+static u64_v h_ia_post(u64_obj *s, int c, const u64_v *a)                // PostInteract: the Revive effect
+{
+  (void)c; (void)a; u64_obj *asc = u64_asc_of(s);
+  if (asc && u64_tag_count(asc, "State.KnockedDown")) u64_apply_ge(asc, asc, nm(*u64_ivar(s, "ReviveEffect")), 1.0f, 0);
+  return NONE_;
+}
+static u64_v h_ia_sync_type(u64_obj *s, int c, const u64_v *a)
+{
+  u64_obj *asc = u64_asc_of(s);
+  if (asc && u64_tag_count(asc, "State.KnockedDown")) { u64_out(A(c, a, 0), u64_bool(1)); u64_out(A(c, a, 1), u64_int(1)); return NONE_; }   // true, OnlyClientWait
+  return ia_sync_type(s, c, a);
+}
+static u64_v h_ia_cancel_interaction(u64_obj *s, int c, const u64_v *a)  // CancelInteraction: cancel the Revive ability of a knocked down hero
+{
+  (void)c; (void)a; u64_obj *asc = u64_asc_of(s);
+  if (asc && u64_tag_count(asc, "State.KnockedDown")) u64_cancel_abilities(asc, "Ability.Revive");
+  return NONE_;
+}
+
+typedef struct { u64_obj *actor, *comp; float t, loc[3]; int blocking; } ihit_t;
+// A trace by profile: the profile's object type is the channel. Pawn capsules overlap it, static-mesh components answer by their responses.
+static int profile_hits(const float s[3], const float e[3], const char *profile, u64_obj *ignore, ihit_t *out, int max)
+{
+  const char *channel = profile;
+  for (const u64_profile_def *p = u64_profiles; p->name; p++) if (!strcmp(p->name, profile)) { channel = p->object_type; break; }
+  u64_world_hit_t wh[16]; int nw = u64_world_trace(s, e, channel, ignore, wh, 16), n = 0;
+  u64_obj *ph[16]; int np = u64_trace_multi(s, e, 0.0f, ignore, ph, 16);
+  int i = 0, j = 0;
+  while ((i < nw || j < np) && n < max) {
+    float tw = i < nw ? wh[i].t : 9, tp = j < np ? u64_ivar(ph[j], "Time")->u.f : 9;
+    if (tw <= tp) { out[n].actor = wh[i].actor; out[n].comp = wh[i].comp; out[n].t = wh[i].t; memcpy(out[n].loc, wh[i].loc, sizeof out[n].loc); out[n].blocking = wh[i].blocking; n++; if (wh[i].blocking) break; i++; }
+    else { u64_obj *act = O(*u64_ivar(ph[j], "HitActor")); out[n].actor = act; out[n].comp = O(u64_comp(act, "CapsuleComponent")); out[n].t = tp; memcpy(out[n].loc, u64_ivar(ph[j], "Location")->u.v, sizeof out[n].loc); out[n].blocking = 0; n++; j++; }
+  }
+  return n;
+}
+static int implements_interactable(u64_obj *actor) { return actor && (u64_has_bp(actor, "IsAvailableForInteraction") || is_class(actor, "GSHeroCharacter")); }
+static u64_obj *hit_object(const ihit_t *h, v3 start, v3 end, int blocking)
+{
+  u64_obj *r = u64_new("HitResult", "HitResult");
+  *u64_ivar(r, "HitActor") = u64_objv(h ? h->actor : 0); *u64_ivar(r, "HitComponent") = u64_objv(h ? h->comp : 0);
+  *u64_ivar(r, "Location") = h ? u64_vec(h->loc[0], h->loc[1], h->loc[2]) : vv(end); *u64_ivar(r, "Time") = u64_float(h ? h->t : 1.0f);
+  *u64_ivar(r, "bBlockingHit") = u64_bool(blocking); *u64_ivar(r, "TraceStart") = vv(start); *u64_ivar(r, "TraceEnd") = h && !blocking ? u64_vec(h->loc[0], h->loc[1], h->loc[2]) : vv(end);
+  return r;
+}
+// UGSAT_WaitInteractableTarget::LineTrace(OutHitResult, Start, End, bLookForInteractableActor)
+static u64_obj *it_line_trace(u64_obj *task, v3 start, v3 end, int look)
+{
+  u64_obj *ab = O(*u64_ivar(task, "Ability")), *avatar = ab ? O(*u64_ivar(ab, "Avatar")) : 0;
+  float s3[3] = {start.x, start.y, start.z}, e3[3] = {end.x, end.y, end.z};
+  ihit_t hits[16]; int n = profile_hits(s3, e3, nm(*u64_ivar(task, "TraceProfile")), avatar, hits, 16);
+  u64_obj *res = hit_object(0, start, end, 0);
+  for (int i = 0; i < n; i++) {
+    if (hits[i].actor == avatar) continue;
+    if (look && hits[i].actor) {
+      if (hits[i].comp && u64_comp_response(hits[i].comp, "Interactable") == 1 && implements_interactable(hits[i].actor)) {
+        u64_v ok = u64_call(hits[i].actor, "IsAvailableForInteraction", 1, (u64_v[]){u64_objv(hits[i].comp)});
+        if (u64_true(ok)) return hit_object(&hits[i], start, end, 1);                          // an interactable component, treated as a blocking hit
+      }
+      return hit_object(0, start, (v3){hits[i].loc[0], hits[i].loc[1], hits[i].loc[2]}, 0);  // anything else ends the trace: empty result, TraceEnd at the hit
+    }
+    return hit_object(&hits[i], start, end, 1);
+  }
+  return res;
+}
+static u64_v interact_target_data(u64_obj *hit) { return u64_td_handle_from_hits(u64_array_of(1, (u64_v[]){u64_objv(hit)})); }
+static u64_obj *td_hit_actor(u64_v td) { u64_v d = u64_array_get(td, 0); u64_obj *h = d.t == U64_OBJ ? O(*u64_ivar(d.u.o, "HitResult")) : 0; return h ? O(*u64_ivar(h, "HitActor")) : 0; }
+static void it_perform(u64_obj *t)                                                              // UGSAT_WaitInteractableTarget::PerformTrace
+{
+  u64_obj *ab = O(*u64_ivar(t, "Ability")), *src = ab ? O(*u64_ivar(ab, "Avatar")) : 0;
+  if (!src) return;
+  v3 view_start, view_rot, start;
+  player_view(src, &view_start, &view_rot);                                                   // the weapon point / head socket needs the animated pose: the eye stands in
+  start = view_start;
+  float range = fv(*u64_ivar(t, "MaxRange"));
+  v3 view_dir = dir_of(view_rot), view_end = v3_add(view_start, v3_mul(view_dir, range));
+  { v3 to_center = v3_sub(start, view_start); float dot = v3_dot(to_center, view_dir);        // ClipCameraRayToAbilityRange
+    if (dot >= 0) { float d2 = v3_dot(to_center, to_center) - dot * dot, r2 = range * range; if (d2 <= r2) view_end = v3_add(view_start, v3_mul(view_dir, dot + sqrtf(r2 - d2))); } }
+  u64_obj *probe = it_line_trace(t, view_start, view_end, 0);
+  int use = u64_true(*u64_ivar(probe, "bBlockingHit")); v3 adj = view_end;
+  if (use) { v3 hl = v3_of(*u64_ivar(probe, "Location")), dd = v3_sub(start, hl); if (v3_dot(dd, dd) <= range * range) adj = hl; else use = 0; }
+  v3 aim = v3_norm(v3_sub(adj, start)); if (aim.x == 0 && aim.y == 0 && aim.z == 0) aim = view_dir;
+  v3 end = v3_add(start, v3_mul(aim, range));
+  u64_obj *ret = it_line_trace(t, start, end, 1);
+  u64_v old = *u64_ivar(t, "TargetData");
+  if (!u64_true(*u64_ivar(ret, "bBlockingHit"))) {
+    *u64_ivar(ret, "Location") = vv(end);
+    if (u64_array_len(old) > 0 && td_hit_actor(old)) u64_mc_broadcast(u64_ivar(t, "LostInteractableTarget"), 1, &old);
+    *u64_ivar(t, "TargetData") = interact_target_data(ret);
+  } else {
+    int broadcast_new = 1;
+    if (u64_array_len(old) > 0) {
+      u64_obj *old_target = td_hit_actor(old);
+      if (old_target == O(*u64_ivar(ret, "HitActor"))) broadcast_new = 0;
+      else if (old_target) u64_mc_broadcast(u64_ivar(t, "LostInteractableTarget"), 1, &old);
+    }
+    if (broadcast_new) { u64_v nd = interact_target_data(ret); *u64_ivar(t, "TargetData") = nd; u64_mc_broadcast(u64_ivar(t, "FoundNewInteractableTarget"), 1, &nd); }
+  }
+}
+static u64_v ga_wait_interactable(u64_obj *ab, int c, const u64_v *a)    // (Ability, Name, TraceProfile, MaxRange, TimerPeriod, bShowDebug)
+{
+  u64_obj *t = u64_task_new("GSAT_WaitInteractableTarget", O(A(c, a, 0)) ? O(A(c, a, 0)) : ab);
+  *u64_ivar(t, "TraceProfile") = A(c, a, 2); *u64_ivar(t, "MaxRange") = A(c, a, 3); *u64_ivar(t, "TimerPeriod") = A(c, a, 4);
+  *u64_ivar(t, "TargetData") = u64_array_of(0, 0); *u64_ivar(t, "NextTime") = u64_float(u64_world_time() + fv(A(c, a, 4)));
+  return u64_objv(t);
+}
+static void interact_tick(void)
+{
+  u64_obj *snap[96]; int n = u64_tasks_snapshot(snap, 96); float now = u64_world_time();
+  for (int i = 0; i < n; i++) {
+    if (strcmp(u64_obj_class(snap[i]), "GSAT_WaitInteractableTarget") || now + 1e-5f < fv(*u64_ivar(snap[i], "NextTime"))) continue;
+    *u64_ivar(snap[i], "NextTime") = u64_float(fv(*u64_ivar(snap[i], "NextTime")) + fv(*u64_ivar(snap[i], "TimerPeriod")));    // SetTimer(period, loop)
+    it_perform(snap[i]);
+  }
 }
 
 // ---------------------------------------------------------------------------------------------------- registration
@@ -904,6 +1070,14 @@ static const m_t methods[] = {
   {"GSCharacterBase", "StartSprinting", mv_start_sprinting}, {"GSCharacterBase", "StopSprinting", mv_stop_sprinting},
   {"GSCharacterBase", "StartAimDownSights", mv_start_ads}, {"GSCharacterBase", "StopAimDownSights", mv_stop_ads},
   {"GSPickup", "PickupOnTouch", pk_pickup_on_touch}, {"GSPickup", "RespawnPickup", pk_respawn}, {"GSWeapon", "PickUpOnTouch", w_pickup_on_touch},
+  {"GSASCActorBase", "RegisterInteracter", ia_register}, {"GSASCActorBase", "UnregisterInteracter", ia_unregister}, {"GSASCActorBase", "InteractableCancelInteraction", ia_cancel},
+  {"GSASCActorBase", "IsAvailableForInteraction", ia_false}, {"GSASCActorBase", "GetInteractionDuration", ia_zero},
+  {"GSASCActorBase", "GetPreInteractSyncType", ia_sync_type}, {"GSASCActorBase", "GetPostInteractSyncType", ia_sync_type},
+  {"GSHeroCharacter", "RegisterInteracter", ia_register}, {"GSHeroCharacter", "UnregisterInteracter", ia_unregister}, {"GSHeroCharacter", "InteractableCancelInteraction", ia_cancel},
+  {"GSHeroCharacter", "IsAvailableForInteraction", h_ia_available}, {"GSHeroCharacter", "GetInteractionDuration", h_ia_duration},
+  {"GSHeroCharacter", "PreInteract", h_ia_pre}, {"GSHeroCharacter", "PostInteract", h_ia_post},
+  {"GSHeroCharacter", "GetPreInteractSyncType", h_ia_sync_type}, {"GSHeroCharacter", "CancelInteraction", h_ia_cancel_interaction},
+  {"GSGameplayAbility", "WaitForInteractableTarget", ga_wait_interactable},
   {"GSGameplayAbility", "GSCheckCost", ga_gs_check_cost_default}, {"GSGameplayAbility", "GSApplyCost", ga_noop},
 };
 // UGSCharacterMovementComponent::GetMaxSpeed (SprintSpeedMultiplier 1.4, ADSSpeedMultiplier 0.8, KnockedDownSpeedMultiplier 0.4)

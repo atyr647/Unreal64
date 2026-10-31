@@ -149,6 +149,7 @@ static attr_t *attr(asc_t *a, const char *n)
   return &a->a[a->na++];
 }
 static int tag_count(asc_t *a, const char *q) { int n = 0; for (int i = 0; i < a->nt; i++) if (a->t[i].n > 0 && tag_match(a->t[i].tag, q)) n += a->t[i].n; return n; }
+int u64_is_asc(u64_obj *o) { return o && asc_from(o) != 0; }
 int u64_tag_has(u64_obj *asc, const char *q) { asc_t *a = asc_from(asc); return a && tag_count(a, q) > 0; }
 static int has_any(asc_t *a, const char *const *tags) { for (int i = 0; tags && tags[i]; i++) if (tag_count(a, tags[i])) return 1; return 0; }
 static int has_all(asc_t *a, const char *const *tags) { for (int i = 0; tags && tags[i]; i++) if (!tag_count(a, tags[i])) return 0; return 1; }
@@ -483,12 +484,13 @@ u64_obj *u64_asc_of(u64_obj *actor)
 {
   if (!actor) return 0;
   u64_v *slot = u64_ivar(actor, "AbilitySystemComponent");
-  if (slot->t == U64_OBJ && slot->u.o) return slot->u.o;
+  u64_obj *adopt = 0;                                  // an AbilitySystemComponent added in a Blueprint (SCS) exists as a plain component: it becomes the ASC
+  if (slot->t == U64_OBJ && slot->u.o) { if (asc_from(slot->u.o)) return slot->u.o; adopt = slot->u.o; }
   if (!u64_obj_is_actor(actor) && strcmp(u64_obj_class(actor), "Component")) { /* only actors own an ability system */ }
   for (int i = 0; i < MAX_ASC; i++) if (!ascs[i].used) {
     asc_t *a = &ascs[i]; memset(a, 0, sizeof *a); a->used = 1; a->owner = actor;
     char nmb[64]; snprintf(nmb, sizeof nmb, "%s.ASC", u64_obj_name(actor));
-    a->obj = u64_new(u64_intern(nmb), "AbilitySystemComponent");
+    a->obj = adopt ? adopt : u64_new(u64_intern(nmb), "AbilitySystemComponent");
     *u64_ivar(a->obj, "asc_idx") = u64_int(i + 1);
     *u64_ivar(a->obj, "Owner") = u64_objv(actor);
     *slot = u64_objv(a->obj);
@@ -622,7 +624,7 @@ static void cancel_abilities(asc_t *a, const char *include, const char *ignore, 
   for (int i = 0; i < n; i++) u64_ability_end(list[i], 1);
 }
 
-int u64_ability_try_activate(u64_obj *ab)               // UGameplayAbility::CanActivateAbility + CallActivateAbility
+static int ability_activate(u64_obj *ab, const u64_v *event)   // event: the TriggerEventData payload of a triggered activation, else 0
 {
   asc_t *a = asc_from(u64_ivar(ab, "ASC")->u.o);
   if (!a || u64_true(*u64_ivar(ab, "Active"))) return 0;
@@ -644,8 +646,24 @@ int u64_ability_try_activate(u64_obj *ab)               // UGameplayAbility::Can
   u64_v block = *u64_ivar(ab, "BlockAbilitiesWithTag");
   for (int i = 0; i < u64_array_len(block); i++) { char k[96]; snprintf(k, sizeof k, "blocked:%s", tag_i(block, i)); tag_add(a, k, 1); }
   if (u64_log) u64_log("  [ability] %s activated", u64_obj_name(ab));
-  if (!u64_cpp_ability_activate(ab)) u64_call(ab, "K2_ActivateAbility", 0, 0);       // a C++ override, else the Blueprint event
+  if (event && u64_has_bp(ab, "K2_ActivateAbilityFromEvent")) u64_call(ab, "K2_ActivateAbilityFromEvent", 1, event);   // CallActivateAbility with TriggerEventData
+  else if (!u64_cpp_ability_activate(ab)) u64_call(ab, "K2_ActivateAbility", 0, 0);       // a C++ override, else the Blueprint event
   return 1;
+}
+int u64_ability_try_activate(u64_obj *ab) { return ability_activate(ab, 0); }
+// Abilities with a GameplayEvent trigger whose tag matches (the trigger tag or a child of it): UAbilitySystemComponent::HandleGameplayEvent
+void u64_ability_triggers(u64_obj *asc, const char *tag, u64_v payload)
+{
+  u64_obj *list[64]; int n = u64_asc_abilities(asc, list, 64);
+  for (int i = 0; i < n; i++) {
+    u64_v trig = *u64_ivar(list[i], "AbilityTriggers");
+    for (int k = 0; k < u64_array_len(trig); k++) {
+      u64_v t = u64_array_get(trig, k);
+      if (u64_array_len(t) < 2 || !strstr(tag_i(t, 1), "GameplayEvent")) continue;
+      const char *want = tag_i(t, 0); size_t q = strlen(want);
+      if (!strncmp(tag, want, q) && (tag[q] == 0 || tag[q] == '.')) { ability_activate(list[i], &payload); break; }
+    }
+  }
 }
 int u64_ability_check_cost(u64_obj *ab)                  // UGameplayAbility::CheckCost (+ the project's override)
 {

@@ -168,6 +168,18 @@ int u64_run_shooter_scenarios(int verbose)
     CHECK(u64_input_press(hero, "EGSAbilityInputID::PrimaryFire"));
     for (int i = 0; i < 30 && u64_as_int(call(hero, "GetPrimaryClipAmmo")) == clip0; i++) tick(1);       // until the first round is fired
     u64_input_release_id(hero, "EGSAbilityInputID::PrimaryFire");
+    {   // the 1P fire montage (HerroFPP_RifleFire_Montage, slot UpperBody, plain FPP_RifleFire keys, no blend) pulls b_RightWeapon back: mesh-space y at montage time k/30 s from
+        // the independent Python evaluation of FPP_RifleFire: 25.8985, 23.6508, 22.2775, 23.6936, 25.1464 (k = 0..4)
+        extern u64_an_inst *u64_gs_anim_of(u64_obj *hero); extern float u64_anim_montage_eval_pos(const u64_an_inst *a);
+        static const float ys[5] = {25.8985f, 23.6508f, 22.2775f, 23.6936f, 25.1464f};
+        u64_an_inst *an = u64_gs_anim_of(hero); int seen = 0, matched = 0;
+        for (int i = 0; i < 6 && an; i++) {
+          float pos = u64_anim_montage_eval_pos(an), k = pos * 30.0f;
+          if (pos >= 0 && k < 4.5f && fabsf(k - floorf(k + 0.5f)) < 0.02f) { float t[3], q[4]; seen++; u64_anim_bone_cs(an, "b_RightWeapon", t, q); if (fabsf(t[1] - ys[(int)floorf(k + 0.5f)]) < 0.05f) matched++; }
+          tick(1);
+        }
+        CHECK(seen >= 3 && matched == seen);
+    }
     tick(20);
     CHECK(u64_as_int(call(hero, "GetPrimaryClipAmmo")) == clip0 - 1);                // AmmoCost 1 per shot, one shot (released at once)
     hero = enemy;

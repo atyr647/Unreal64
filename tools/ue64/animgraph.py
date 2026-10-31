@@ -34,11 +34,12 @@ def read_abp(path):
         kind = v[2][len("AnimNode_"):]
         f = v[1]
         link = lambda s: s[1]["LinkID"]
-        n = {"name": k, "kind": NODE_KIND.get(kind, -1), "links": [], "times": [], "seq": "", "rate": 1.0, "enum_map": [], "machine": -1, "loop": 1}
+        n = {"name": k, "kind": NODE_KIND.get(kind, -1), "links": [], "times": [], "seq": "", "rate": 1.0, "enum_map": [], "machine": -1, "loop": 1, "slot": ""}
         if kind in ("Root",):
             n["links"] = [link(f["Result"])]
         elif kind == "Slot":
             n["links"] = [link(f["Source"])]
+            n["slot"] = f.get("SlotName", ("name", ""))[1]
         elif kind == "StateResult":
             n["links"] = [link(f["Result"])]
         elif kind == "SequencePlayer":
@@ -88,6 +89,34 @@ def find_sequence(content, name):
     return None
 
 
+def find_montages(content, skeleton_name):
+    """[(name, slot, blend_in, blend_out, length, [(sequence, start, end, rate)])] of the montages made for a skeleton."""
+    out = []
+    for f in glob.glob(content + "/**/*.uasset", recursive=True):
+        try:
+            p, d = _load(f)
+        except Exception:
+            continue
+        for e in p.exports:
+            if uasset.class_name(p, e.cls) != "AnimMontage":
+                continue
+            o = props.read_object(p, d, e)
+            sk = o.get("Skeleton")
+            if not (isinstance(sk, tuple) and sk[0] == "obj" and sk[1] == skeleton_name):
+                continue
+            tr = o.get("SlotAnimTracks", ("array", []))[1]
+            if not tr:
+                continue
+            segs = []
+            for sg in tr[0][1]["AnimTrack"][1]["AnimSegments"][1]:
+                sg = sg[1]
+                ref = sg.get("AnimReference")
+                if isinstance(ref, tuple) and ref[0] == "obj":
+                    segs.append((ref[1], float(sg.get("AnimStartTime", 0.0)), float(sg.get("AnimEndTime", 0.0)), float(sg.get("AnimPlayRate", 1.0))))
+            out.append((e.name, tr[0][1]["SlotName"][1], float(o.get("BlendIn", ("struct", {}))[1].get("BlendTime", 0.25)), float(o.get("BlendOut", ("struct", {}))[1].get("BlendTime", 0.25)), float(o.get("SequenceLength", 0.0)), segs))
+    return out
+
+
 def chain(bones, bone):
     idx = {b[0]: i for i, b in enumerate(bones)}
     out, i = [], idx[bone]
@@ -120,7 +149,8 @@ def emit_c(content, abp_name, mesh_name, socket_bone):
     rows = ", ".join("{%s, %d, {%s}, {%s}}" % (_cs(bones[i][0]), k - 1 if k else -1, ", ".join(_f(x) for x in bones[i][2]), ", ".join(_f(x) for x in bones[i][3])) for k, i in enumerate(ch))
     pfx = "an_%s_" % abp_name
     out.append("static const u64_an_bone %sbones[] = {%s};" % (pfx, rows))
-    seqs = sorted({n["seq"] for n in abp["nodes"] if n["seq"]})
+    montages = find_montages(content, abp_skeleton(path))
+    seqs = sorted({n["seq"] for n in abp["nodes"] if n["seq"]} | {sg[0] for m in montages for sg in m[5]})
     srows = []
     for si, sname in enumerate(seqs):
         sq = find_sequence(content, sname)
@@ -141,9 +171,14 @@ def emit_c(content, abp_name, mesh_name, socket_bone):
         links = (n["links"] + [0] * 8)[:8]
         emap = (n["enum_map"] + [0] * 8)[:8]
         times = (n["times"] + [0.0] * 8)[:8]
-        nrows.append("{%s, %d, %d, {%s}, %d, %s, %d, %d, {%s}, {%s}}" % (
+        nrows.append("{%s, %d, %d, {%s}, %d, %s, %d, %d, {%s}, {%s}, %s}" % (
             _cs(n["name"]), n["kind"], len(n["links"]), ", ".join(map(str, links)), seqidx.get(n["seq"], -1), _f(n["rate"]), n["loop"], n["machine"],
-            ", ".join(map(str, emap)), ", ".join(_f(x) for x in times)))
+            ", ".join(map(str, emap)), ", ".join(_f(x) for x in times), _cs(n["slot"])))
+    mrows2 = []
+    for m in montages:
+        sg = m[5][0] if m[5] else None
+        mrows2.append("{%s, %s, %s, %s, %s, %d, %s, %s, %s}" % (_cs(m[0]), _cs(m[1]), _f(m[2]), _f(m[3]), _f(m[4]), seqidx[sg[0]] if sg else -1, _f(sg[1] if sg else 0), _f(sg[2] if sg else 0), _f(sg[3] if sg else 1)))
+    out.append("static const u64_an_montage %smontages[] = {%s};" % (pfx, ", ".join(mrows2) or "{0}"))
     out.append("static const u64_an_node %snodes[] = {%s};" % (pfx, ",\n  ".join(nrows)))
     mrows = []
     for mi, m in enumerate(abp["machines"]):
@@ -160,8 +195,8 @@ def emit_c(content, abp_name, mesh_name, socket_bone):
     frow = ", ".join(_cs(x) for x in abp["functions"])
     out.append("static const u64_an_copy %scopies[] = {%s};" % (pfx, crow))
     out.append("static const char *const %sfuncs[] = {%s};" % (pfx, frow))
-    out.append("const u64_an_graph u64_an_%s = {%s, %s, %d, %snodes, %d, %smachines, %d, %scopies, %d, %sfuncs, %d, %sbones, %d, %sseqs};" % (
-        abp_name, _cs(abp_name), _cs(mesh_name), len(abp["nodes"]), pfx, len(abp["machines"]), pfx, len(abp["copies"]), pfx, len(abp["functions"]), pfx, len(ch), pfx, len(seqs), pfx))
+    out.append("const u64_an_graph u64_an_%s = {%s, %s, %d, %snodes, %d, %smachines, %d, %scopies, %d, %sfuncs, %d, %sbones, %d, %sseqs, %d, %smontages};" % (
+        abp_name, _cs(abp_name), _cs(mesh_name), len(abp["nodes"]), pfx, len(abp["machines"]), pfx, len(abp["copies"]), pfx, len(abp["functions"]), pfx, len(ch), pfx, len(seqs), pfx, len(montages), pfx))
     return "\n".join(out) + "\n", abp
 
 
@@ -200,3 +235,10 @@ def emit_sockets(content):
                         pass
     return ("const u64_mesh_socket u64_mesh_sockets[] = {%s%s{0}};\nconst u64_weapon_mesh u64_weapon_meshes[] = {%s%s{0}};\n"
             % (", ".join(rows), ", " if rows else "", ", ".join(meshes), ", " if meshes else ""))
+
+
+def abp_skeleton(path):
+    p, d = _load(path)
+    cls = props.read_object(p, d, next(e for e in p.exports if uasset.class_name(p, e.cls) == "AnimBlueprintGeneratedClass"))
+    t = cls.get("TargetSkeleton")
+    return t[1] if isinstance(t, tuple) and t[0] == "obj" else ""

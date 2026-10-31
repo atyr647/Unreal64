@@ -181,7 +181,8 @@ a real map, 91 Blueprints and ~8k lines of C++. Run its tests with `tools/run_sh
   BlendListByBool / ByEnum, the Locomotion state machine with its crossfades, rules from the compiled transition functions and property-access copies,
   layered blend without filters), the weapon muzzle through camera -> mesh -> animated `b_RightWeapon` -> equipped offset -> mesh socket. The idle pose and the muzzle
   position are checked against an independent Python evaluation.
-  Animation, not done: montage slots (fire / reload poses pass the pose through), the third-person AnimBP (`ABP_Hero3P`: blend spaces, aim offset, Fabrik IK, cached poses,
+  Montages play through the AnimBP slots (blend in / out, plain segments; the rifle fire recoil is checked against Python).
+  Animation, not done: the third-person AnimBP (`ABP_Hero3P`: blend spaces, aim offset, Fabrik IK, cached poses,
   layered blends with bone filters), so the physics bodies (headshots) of heroes stay in the reference pose; AnimNotifies from sequences.
 * HUD / player controller widgets (ignored), audio, networking, AI behaviour of the placed heroes.
 * Unverified engine assumption: the first execution of a periodic effect happens on the next tick (see below).

@@ -12,6 +12,7 @@ struct u64_an_inst {
   float acc[MAX_NODES]; unsigned char inited[MAX_NODES];
   float bw[MAX_NODES][8]; int bcur[MAX_NODES];
   int m_cur[4], m_next[4]; float m_xf[4], m_xt[4];
+  int mont; float mont_pos, mont_rate, mont_eval;                                        // the playing montage (-1 = none)
   u64_an_pose out;
 };
 static u64_an_inst insts[8];
@@ -102,7 +103,18 @@ static void eval(u64_an_inst *a, int n, float dt, u64_an_pose *out)
 {
   const u64_an_node *nd = &a->g->nodes[n]; int nb = a->g->nbones;
   switch (nd->kind) {
-  case N_ROOT: case N_SLOT: case N_STATERESULT: eval(a, nd->links[0], dt, out); break;       // slots pass the pose through: montages are not evaluated yet
+  case N_ROOT: case N_STATERESULT: eval(a, nd->links[0], dt, out); break;
+  case N_SLOT: {                                                                                // a playing montage of this slot blends over the source pose
+    eval(a, nd->links[0], dt, out);
+    if (a->mont < 0) break;
+    const u64_an_montage *m = &a->g->montages[a->mont];
+    if (strcmp(m->slot, nd->slot)) break;
+    float w = 1, pos = a->mont_pos; a->mont_eval = pos;
+    if (m->blend_in > 0 && pos < m->blend_in) w = pos / m->blend_in;
+    float rem = m->length - pos; if (m->blend_out > 0 && rem < m->blend_out) { float wo = rem / m->blend_out; if (wo < w) w = wo; }
+    if (w < 0) w = 0; if (w > 1) w = 1;
+    u64_an_pose mp; sample_seq(a, &a->g->seqs[m->seq], m->start + pos * m->rate, &mp);
+    pose_blend(out, &mp, w, nb, out); break; }
   case N_SM: eval_machine(a, nd, dt, out); break;
   case N_SEQ: {
     const u64_an_seq *s = &a->g->seqs[nd->seq];
@@ -127,9 +139,14 @@ static void eval(u64_an_inst *a, int n, float dt, u64_an_pose *out)
   }
 }
 
+int u64_anim_montage_play(u64_an_inst *a, const char *montage, float rate)
+{
+  for (int i = 0; i < a->g->nmontages; i++) if (!strcmp(a->g->montages[i].name, montage)) { a->mont = i; a->mont_pos = 0; a->mont_rate = rate > 0 ? rate : 1; return 1; }
+  return 0;
+}
 u64_an_inst *u64_anim_new(const u64_an_graph *g, u64_obj *instance)
 {
-  for (int i = 0; i < 8; i++) if (!insts[i].used) { memset(&insts[i], 0, sizeof insts[i]); insts[i].used = 1; insts[i].g = g; insts[i].self = instance; return &insts[i]; }
+  for (int i = 0; i < 8; i++) if (!insts[i].used) { memset(&insts[i], 0, sizeof insts[i]); insts[i].used = 1; insts[i].g = g; insts[i].self = instance; insts[i].mont = -1; return &insts[i]; }
   return 0;
 }
 void u64_anim_update(u64_an_inst *a, float dt)
@@ -140,6 +157,7 @@ void u64_anim_update(u64_an_inst *a, float dt)
   for (int i = 0; i < g->nfuncs; i++) u64_call(a->self, g->funcs[i], 0, 0);                    // exposed inputs (transition rules)
   int root = -1; for (int i = 0; i < g->nnodes; i++) if (g->nodes[i].kind == N_ROOT) root = i;
   if (root >= 0) eval(a, root, dt, &a->out);
+  if (a->mont >= 0) { a->mont_pos += dt * a->mont_rate; if (a->mont_pos >= g->montages[a->mont].length) a->mont = -1; }    // after the pose: the first frame of a montage is at position 0
 }
 const u64_an_pose *u64_anim_pose(const u64_an_inst *a) { return &a->out; }
 int u64_anim_bone_cs(const u64_an_inst *a, const char *bone, float t[3], float q[4])
@@ -169,3 +187,4 @@ float u64_anim_time_from_end(u64_obj *instance, int index)
   return 0;
 }
 void u64_anim_free(u64_an_inst *a) { if (a) a->used = 0; }
+float u64_anim_montage_eval_pos(const u64_an_inst *a) { return a->mont >= 0 ? a->mont_eval : -1.0f; }   // position of the playing montage in the last evaluated pose

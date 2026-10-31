@@ -939,6 +939,10 @@ static void anim_tick(float dt)
     if (anims[k].a) u64_anim_update(anims[k].a, dt);
   }
 }
+void u64_cpp_montage_hook(u64_obj *actor, const char *name, float rate)       // PlayMontage on the first-person mesh: the AnimBP's slot blends it in
+{
+  for (int i = 0; i < 8; i++) if (anims[i].a && anims[i].hero == actor) u64_anim_montage_play(anims[i].a, name, rate);
+}
 u64_an_inst *u64_gs_anim_of(u64_obj *hero) { for (int i = 0; i < 8; i++) if (anims[i].a && anims[i].hero == hero) return anims[i].a; return 0; }
 static void interact_tick(void);
 static void gs_world_tick(float dt)

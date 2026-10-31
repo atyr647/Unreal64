@@ -592,8 +592,49 @@ static void player_view(u64_obj *hero, v3 *loc, v3 *rot)
     *loc = v3_sub(pivot, v3_mul(dir_of(ctrl), arm));
   }
 }
-// FGameplayAbilityTargetingLocationInfo::GetTargetingTransform().GetLocation(): literal transform, the source actor, or a socket on a
-// component. Sockets need the animated skeleton pose, which is not evaluated yet: the component's owner location stands in.
+// FRotator -> rotation matrix (columns: X, Y, Z axes), as FRotationMatrix
+static void rot_mat(v3 rot, float m[9])
+{
+  float p = rot.x * 0.017453292f, y = rot.y * 0.017453292f, r = rot.z * 0.017453292f, cp = cosf(p), sp = sinf(p), cy = cosf(y), sy = sinf(y), cr = cosf(r), sr = sinf(r);
+  float X[3] = {cp * cy, cp * sy, sp}, Y[3] = {sr * sp * cy - cr * sy, sr * sp * sy + cr * cy, -sr * cp}, Z[3] = {-(cr * sp * cy + sr * sy), cy * sr - cr * sp * sy, cr * cp};
+  for (int i = 0; i < 3; i++) { m[i * 3] = X[i]; m[i * 3 + 1] = Y[i]; m[i * 3 + 2] = Z[i]; }
+}
+static v3 mat_mul_v(const float m[9], v3 v) { return (v3){m[0] * v.x + m[1] * v.y + m[2] * v.z, m[3] * v.x + m[4] * v.y + m[5] * v.z, m[6] * v.x + m[7] * v.y + m[8] * v.z}; }
+static v3 quat_rot_v(const float q[4], v3 v)
+{
+  float tx = 2 * (q[1] * v.z - q[2] * v.y), ty = 2 * (q[2] * v.x - q[0] * v.z), tz = 2 * (q[0] * v.y - q[1] * v.x);
+  return (v3){v.x + q[3] * tx + (q[1] * tz - q[2] * ty), v.y + q[3] * ty + (q[2] * tx - q[0] * tz), v.z + q[3] * tz + (q[0] * ty - q[1] * tx)};
+}
+// World location of a socket on a weapon's first-person mesh: the weapon is attached to the hero's FirstPersonMesh socket WeaponPoint (identity on b_RightWeapon) with
+// WeaponMesh1PEquippedRelativeLocation; the FirstPersonMesh hangs off the FirstPersonCamera (control rotation, mesh offset / yaw -90); the bone comes from the animated pose.
+extern u64_an_inst *u64_gs_anim_of(u64_obj *hero);
+static int weapon_socket_world(u64_obj *wcomp, const char *socket, v3 *out)
+{
+  u64_obj *weapon = wcomp ? O(*u64_ivar(wcomp, "Owner")) : 0, *hero = weapon ? O(*u64_ivar(weapon, "OwningCharacter")) : 0;
+  u64_an_inst *an = hero ? u64_gs_anim_of(hero) : 0; float bt[3], bq[4];
+  if (!an || !u64_anim_bone_cs(an, "b_RightWeapon", bt, bq)) return 0;
+  v3 local = v3_of(*u64_ivar(weapon, "WeaponMesh1PEquippedRelativeLocation"));
+  const char *full = u64_obj_name(wcomp), *cn = strrchr(full, '.'); cn = cn ? cn + 1 : full;
+  const char *mesh = 0; for (const u64_weapon_mesh *wm = u64_weapon_meshes; wm->cls; wm++) if (u64_class_is(u64_obj_class(weapon), wm->cls) && !strcmp(wm->comp, cn)) { mesh = wm->mesh; break; }
+  for (const u64_mesh_socket *ms = u64_mesh_sockets; mesh && ms->mesh; ms++) if (!strcmp(ms->mesh, mesh) && !strcmp(ms->socket, socket)) { local = v3_add(local, (v3){ms->t[0], ms->t[1], ms->t[2]}); break; }
+  v3 pm = v3_add((v3){bt[0], bt[1], bt[2]}, quat_rot_v(bq, local));                       // in the first-person mesh's space
+  v3 base = v3_of(*u64_ivar(hero, "Location")), ctrl = v3_of(*u64_ivar(hero, "ControlRotation")), arot = v3_of(*u64_ivar(hero, "Rotation"));
+  u64_obj *cam = O(u64_comp(hero, "FirstPersonCamera")), *fpm = O(u64_comp(hero, "FirstPersonMesh"));
+  v3 cam_loc = v3_add(base, rotate_yaw(arot.y, cam ? v3_of(*u64_ivar(cam, "RelativeLocation")) : (v3){0, 0, 0}));
+  v3 mrel = fpm && u64_ivar(fpm, "RelativeLocation")->t == U64_VEC ? v3_of(*u64_ivar(fpm, "RelativeLocation")) : (v3){0, 0, -149.5f};
+  v3 mrot = fpm && u64_ivar(fpm, "RelativeRotation")->t == U64_VEC ? v3_of(*u64_ivar(fpm, "RelativeRotation")) : (v3){0, -90.0f, 0};
+  float rc[9], rm[9], rw[9]; rot_mat(ctrl, rc); rot_mat(mrot, rm);
+  for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) rw[i * 3 + j] = rc[i * 3] * rm[j] + rc[i * 3 + 1] * rm[3 + j] + rc[i * 3 + 2] * rm[6 + j];   // R_ctrl * R_meshrel
+  *out = v3_add(v3_add(cam_loc, mat_mul_v(rc, mrel)), mat_mul_v(rw, pm));
+  return 1;
+}
+int u64_gs_muzzle_world(u64_obj *hero, float out[3])             // the current weapon's MuzzleFlashSocket (first-person mesh), for tests and the HUD
+{
+  u64_obj *w = O(u64_call(hero, "GetCurrentWeapon", 0, 0)); v3 p;
+  if (!w || !weapon_socket_world(O(u64_comp(w, "WeaponMesh1P")), "MuzzleFlashSocket", &p)) return 0;
+  out[0] = p.x; out[1] = p.y; out[2] = p.z; return 1;
+}
+// FGameplayAbilityTargetingLocationInfo::GetTargetingTransform().GetLocation(): literal transform, the source actor, or a socket on a component
 static v3 targeting_location(u64_v info, u64_obj *source_actor)
 {
   u64_obj *io = O(info);
@@ -602,7 +643,8 @@ static v3 targeting_location(u64_v info, u64_obj *source_actor)
   if (type == 0) { u64_obj *lt = O(*u64_ivar(io, "LiteralTransform")); return lt ? v3_of(*u64_ivar(lt, "Location")) : (v3){0, 0, 0}; }
   if (type == 2) {
     u64_obj *comp = O(*u64_ivar(io, "SourceComponent")), *owner = comp ? O(*u64_ivar(comp, "Owner")) : 0;
-    u64_obj *wc = owner ? O(*u64_ivar(owner, "OwningCharacter")) : 0;           // a carried weapon is attached to its character
+    v3 w; if (comp && weapon_socket_world(comp, nm(*u64_ivar(io, "SourceSocketName")), &w)) return w;       // the animated socket
+    u64_obj *wc = owner ? O(*u64_ivar(owner, "OwningCharacter")) : 0;           // fallback: a carried weapon is attached to its character
     if (wc) owner = wc;
     if (owner) return v3_of(*u64_ivar(owner, "Location"));
   }

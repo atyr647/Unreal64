@@ -60,6 +60,17 @@ int u64_run_shooter_scenarios(int verbose)
     float t[3], q[4]; int ok = a && u64_anim_bone_cs(a, "b_RightWeapon", t, q);
     CHECK(ok && idle >= 0 && fabsf(u64_anim_debug_acc(a, idle) - 1.0f) < 0.04f);
     CHECK(ok && fabsf(t[0] + 14.0033f) < 0.1f && fabsf(t[1] - 25.8975f) < 0.1f && fabsf(t[2] - 126.3519f) < 0.1f);
+    // The rifle's MuzzleFlashSocket (Rifle mesh: RifleRoot bone, socket (0,-11.5,76.25) rotated into mesh space: (0, 76.25, 11.5)); no equipped offset for the rifle. In the
+    // first-person mesh's space that is (-13.4191, 26.9370, 49.2488) at idle 1.0 s (Python). The mesh hangs off the camera (+70, mesh z -149.5) with yaw -90: world = hero +
+    // (pm.y, -pm.x, 70 - 149.5 + pm.z) for zero control rotation.
+    {
+      extern int u64_gs_muzzle_world(u64_obj *hero, float out[3]);
+      u64_v hl = *u64_ivar(me, "Location"), cr = *u64_ivar(me, "ControlRotation"), ar = *u64_ivar(me, "Rotation");
+      float m[3]; int mo = u64_gs_muzzle_world(me, m);
+      int zero = fabsf(cr.u.v[0]) + fabsf(cr.u.v[1]) + fabsf(cr.u.v[2]) + fabsf(ar.u.v[0]) + fabsf(ar.u.v[1]) + fabsf(ar.u.v[2]) < 1e-4f;
+      CHECK(mo && zero);
+      CHECK(mo && fabsf(m[0] - (hl.u.v[0] + 26.9370f)) < 0.15f && fabsf(m[1] - (hl.u.v[1] + 13.4191f)) < 0.15f && fabsf(m[2] - (hl.u.v[2] + 70.0f - 149.5f + 49.2488f)) < 0.15f);
+    }
   }
   CHECK(rifle && !strcmp(u64_obj_class(rifle), "BP_Rifle"));
   CHECK(u64_as_int(call(hero, "GetPrimaryClipAmmo")) == 30 && u64_as_int(call(hero, "GetMaxPrimaryClipAmmo")) == 30);   // BP_Rifle: 30 / 30

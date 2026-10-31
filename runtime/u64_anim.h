@@ -23,4 +23,7 @@ void u64_anim_update(u64_an_inst *a, float dt);                                 
 const u64_an_pose *u64_anim_pose(const u64_an_inst *a);                                         // local bone poses of the chain
 int u64_anim_bone_cs(const u64_an_inst *a, const char *bone, float t[3], float q[4]);           // component-space transform of a chain bone
 const u64_an_graph *u64_anim_find_graph(const char *abp);
+typedef struct { const char *mesh, *socket; float t[3], q[4]; } u64_mesh_socket;            // socket transform in its skeletal mesh's space (reference pose)
+typedef struct { const char *cls, *comp, *mesh; } u64_weapon_mesh;                             // Blueprint WeaponMesh components -> mesh asset
+extern const u64_mesh_socket u64_mesh_sockets[]; extern const u64_weapon_mesh u64_weapon_meshes[];
 extern const u64_an_graph *const u64_an_graphs[];                                               // generated: null-terminated

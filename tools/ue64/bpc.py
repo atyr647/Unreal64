@@ -64,8 +64,9 @@ def main(content, out):
                 c, _ = animgraph.emit_c(content, abp, mesh, bone); anim_c.append(c); graphs.append(abp)
         text = "".join(anim_c) + '#include "u64_anim.h"\n' + "".join("extern const u64_an_graph u64_an_%s;\n" % g for g in graphs)
         text += "const u64_an_graph *const u64_an_graphs[] = {%s0};\n" % "".join("&u64_an_%s, " % g for g in graphs)
+        text += animgraph.emit_sockets(content)
     except Exception as ex:
-        text = '#include "u64_anim.h"\nconst u64_an_graph *const u64_an_graphs[] = {0};\n'
+        text = '#include "u64_anim.h"\nconst u64_an_graph *const u64_an_graphs[] = {0};\nconst u64_mesh_socket u64_mesh_sockets[] = {{0}};\nconst u64_weapon_mesh u64_weapon_meshes[] = {{0}};\n'
         print("animation data skipped:", ex)
     with open(os.path.join(out, "u64_anim_data.c"), "w") as fh:
         fh.write(text)

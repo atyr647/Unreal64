@@ -163,3 +163,40 @@ def emit_c(content, abp_name, mesh_name, socket_bone):
     out.append("const u64_an_graph u64_an_%s = {%s, %s, %d, %snodes, %d, %smachines, %d, %scopies, %d, %sfuncs, %d, %sbones, %d, %sseqs};" % (
         abp_name, _cs(abp_name), _cs(mesh_name), len(abp["nodes"]), pfx, len(abp["machines"]), pfx, len(abp["copies"]), pfx, len(abp["functions"]), pfx, len(ch), pfx, len(seqs), pfx))
     return "\n".join(out) + "\n", abp
+
+
+def emit_sockets(content):
+    """Sockets of every skeletal mesh (in the mesh's space, ref pose of the socket's bone chain) and the skeletal mesh component -> mesh asset of Blueprints."""
+    rows, meshes = [], []
+    for f in glob.glob(content + "/**/*.uasset", recursive=True):
+        try:
+            p, d = _load(f)
+        except Exception:
+            continue
+        cn = [uasset.class_name(p, e.cls) for e in p.exports]
+        if "SkeletalMeshSocket" in cn and "SkeletalMesh" in cn:
+            me = p.exports[cn.index("SkeletalMesh")]
+            try:
+                bones = skeleton.ref_skeleton(p, d, me)
+                cs = skeleton.component_space(bones)
+                idx = {b[0]: i for i, b in enumerate(bones)}
+                for sname, bone, loc, rot, sc in skeleton.sockets(p, d):
+                    if bone in idx:
+                        bt, bq = cs[idx[bone]]
+                        t = skeleton.quat_rot(bq, loc)
+                        q = skeleton.quat_mul(bq, skeleton.euler_to_quat(*rot))
+                        rows.append("{%s, %s, {%s}, {%s}}" % (_cs(me.name), _cs(sname), ", ".join(_f(bt[i] + t[i]) for i in range(3)), ", ".join(_f(x) for x in q)))
+            except Exception:
+                pass
+        if "BlueprintGeneratedClass" in cn and "SkeletalMeshComponent" in cn:
+            owner = p.exports[cn.index("BlueprintGeneratedClass")].name.removesuffix("_C")
+            for e in p.exports:
+                if uasset.class_name(p, e.cls) == "SkeletalMeshComponent" and e.name.startswith("WeaponMesh"):
+                    try:
+                        m = props.read_object(p, d, e).get("SkeletalMesh")
+                        if isinstance(m, tuple) and m[0] == "obj":
+                            meshes.append("{%s, %s, %s}" % (_cs(owner), _cs(e.name), _cs(m[1])))
+                    except Exception:
+                        pass
+    return ("const u64_mesh_socket u64_mesh_sockets[] = {%s%s{0}};\nconst u64_weapon_mesh u64_weapon_meshes[] = {%s%s{0}};\n"
+            % (", ".join(rows), ", " if rows else "", ", ".join(meshes), ", " if meshes else ""))

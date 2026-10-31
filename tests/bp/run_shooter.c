@@ -369,6 +369,9 @@ int u64_run_shooter_scenarios(int verbose)
     printf("live0=%d live=%d overflows=%d\n", live0, u64_gc_live(), u64_rt_overflows);
     CHECK(u64_gc_live() < live0 + 80 && u64_rt_overflows == 0);
   }
+#ifdef U64_CXX_AMMO
+  { extern int u64_cxx_ammo_calls; printf("ammo attribute rules run by the project's C++: %d calls\n", u64_cxx_ammo_calls); CHECK(u64_cxx_ammo_calls > 0); }
+#endif
   CHECK(u64_rt_overflows == 0);
   printf(fails ? "shooter: %d FAILED\n" : "shooter: ALL PASSED\n", fails);
   return fails;

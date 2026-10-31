@@ -615,6 +615,13 @@ static float current_spread(u64_obj *s)                              // AGSGATA_
   if (u64_true(*u64_ivar(s, "bUseAimingSpreadMod")) && *at && *rt && asc && u64_tag_count(asc, at) > u64_tag_count(rt ? asc : 0, rt)) f *= fv(*u64_ivar(s, "AimingSpreadMod"));
   return f;
 }
+// LineTraceWithFilter: LineTraceMultiByProfile with the actor's TraceProfile; HitResult objects (the filter handle only drops the source actor here)
+static int gs_line_hits(u64_obj *s, const float st[3], const float en[3], u64_obj *source, u64_obj **hits, int max)
+{
+  u64_world_hit_t wh[16]; int n = u64_trace_profile(st, en, nm(*u64_ivar(s, "TraceProfile")), source, wh, max < 16 ? max : 16);
+  for (int i = 0; i < n; i++) hits[i] = u64_hit_result_new(&wh[i], st, en);
+  return n;
+}
 // One trace of AGSGATA_Trace::PerformTrace. Returns the number of hit results (objects in hits[]).
 static int one_trace(u64_obj *s, u64_obj *source, v3 trace_start, u64_obj **hits, int max)
 {
@@ -630,7 +637,7 @@ static int one_trace(u64_obj *s, u64_obj *source, v3 trace_start, u64_obj **hits
       if (d2 <= r2) view_end = v3_add(view_start, v3_mul(view_dir, dot + sqrtf(r2 - d2))); }
   }
   u64_obj *probe[16]; float vs[3] = {view_start.x, view_start.y, view_start.z}, ve[3] = {view_end.x, view_end.y, view_end.z};
-  int pn = u64_trace_multi(vs, ve, 0.0f, source, probe, 16);
+  int pn = gs_line_hits(s, vs, ve, source, probe, 16);
   float inc = fv(*u64_ivar(s, "TargetingSpreadIncrement")), mx = fv(*u64_ivar(s, "TargetingSpreadMax")), cur = fv(*u64_ivar(s, "CurrentTargetingSpread"));
   *u64_ivar(s, "CurrentTargetingSpread") = u64_float(cur + inc < mx ? cur + inc : mx);
   int use = 0; v3 adj_end = view_end;
@@ -646,7 +653,8 @@ static int one_trace(u64_obj *s, u64_obj *source, v3 trace_start, u64_obj **hits
   *u64_ivar(s, "CurrentTraceEnd") = vv(end);
   float ts[3] = {trace_start.x, trace_start.y, trace_start.z}, te[3] = {end.x, end.y, end.z};
   float radius = is_class(s, "GSGATA_SphereTrace") ? fv(*u64_ivar(s, "TraceSphereRadius")) : 0.0f;
-  int n = u64_trace_multi(ts, te, radius, source, hits, max);                            // DoTrace + the filter: TraceStart / TraceEnd are recorded on each hit
+  int n = radius > 0 ? u64_trace_multi(ts, te, radius, source, hits, max)            // sphere sweeps: the characters' capsules
+                     : gs_line_hits(s, ts, te, source, hits, max);                      // DoTrace + the filter: TraceStart / TraceEnd are recorded on each hit
   for (int i = 0; i < n; i++) { *u64_ivar(hits[i], "TraceStart") = vv(trace_start); *u64_ivar(hits[i], "TraceEnd") = vv(end); }
   return n;
 }
@@ -939,20 +947,12 @@ static u64_v h_ia_cancel_interaction(u64_obj *s, int c, const u64_v *a)  // Canc
 }
 
 typedef struct { u64_obj *actor, *comp; float t, loc[3]; int blocking; } ihit_t;
-// A trace by profile: the profile's object type is the channel. Pawn capsules overlap it, static-mesh components answer by their responses.
+// A trace by profile (UWorld::LineTraceMultiByProfile): the world query of u64_collision.c, hits sorted by distance up to the first blocking one.
 static int profile_hits(const float s[3], const float e[3], const char *profile, u64_obj *ignore, ihit_t *out, int max)
 {
-  const char *channel = profile;
-  for (const u64_profile_def *p = u64_profiles; p->name; p++) if (!strcmp(p->name, profile)) { channel = p->object_type; break; }
-  u64_world_hit_t wh[16]; int nw = u64_world_trace(s, e, channel, ignore, wh, 16), n = 0;
-  u64_obj *ph[16]; int np = u64_trace_multi(s, e, 0.0f, ignore, ph, 16);
-  int i = 0, j = 0;
-  while ((i < nw || j < np) && n < max) {
-    float tw = i < nw ? wh[i].t : 9, tp = j < np ? u64_ivar(ph[j], "Time")->u.f : 9;
-    if (tw <= tp) { out[n].actor = wh[i].actor; out[n].comp = wh[i].comp; out[n].t = wh[i].t; memcpy(out[n].loc, wh[i].loc, sizeof out[n].loc); out[n].blocking = wh[i].blocking; n++; if (wh[i].blocking) break; i++; }
-    else { u64_obj *act = O(*u64_ivar(ph[j], "HitActor")); out[n].actor = act; out[n].comp = O(u64_comp(act, "CapsuleComponent")); out[n].t = tp; memcpy(out[n].loc, u64_ivar(ph[j], "Location")->u.v, sizeof out[n].loc); out[n].blocking = 0; n++; j++; }
-  }
-  return n;
+  u64_world_hit_t wh[16]; int nw = u64_trace_profile(s, e, profile, ignore, wh, max < 16 ? max : 16);
+  for (int i = 0; i < nw; i++) { out[i].actor = wh[i].actor; out[i].comp = wh[i].comp; out[i].t = wh[i].t; memcpy(out[i].loc, wh[i].loc, sizeof out[i].loc); out[i].blocking = wh[i].blocking; }
+  return nw;
 }
 static int implements_interactable(u64_obj *actor) { return actor && (u64_has_bp(actor, "IsAvailableForInteraction") || is_class(actor, "GSHeroCharacter")); }
 static u64_obj *hit_object(const ihit_t *h, v3 start, v3 end, int blocking)

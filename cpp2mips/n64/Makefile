@@ -7,11 +7,15 @@ GS ?= $(GASSHOOTER_SRC)
 N64_CXXFLAGS += -std=gnu++17 -fno-exceptions -fno-rtti -fno-threadsafe-statics -I../shim -I../build/gen -I$(GS)/Public -Wno-unused -Wno-invalid-offsetof
 N64_LDFLAGS += -lm
 
-src = main_n64.cpp $(GS)/Private/Characters/Abilities/AttributeSets/GSAmmoAttributeSet.cpp
-objs = $(BUILD_DIR)/main_n64.o $(BUILD_DIR)/GSAmmoAttributeSet.o
+src = main_n64.cpp ../fname.cpp $(GS)/Private/Characters/Abilities/AttributeSets/GSAmmoAttributeSet.cpp
+objs = $(BUILD_DIR)/main_n64.o $(BUILD_DIR)/fname.o $(BUILD_DIR)/GSAmmoAttributeSet.o
 
 all: cppammo.z64
 $(BUILD_DIR)/GSAmmoAttributeSet.o: $(GS)/Private/Characters/Abilities/AttributeSets/GSAmmoAttributeSet.cpp
+	@mkdir -p $(dir $@)
+	@echo "    [CXX] $<"
+	$(N64_CXX) $(N64_CXXFLAGS) -c -o $@ $<
+$(BUILD_DIR)/fname.o: ../fname.cpp
 	@mkdir -p $(dir $@)
 	@echo "    [CXX] $<"
 	$(N64_CXX) $(N64_CXXFLAGS) -c -o $@ $<

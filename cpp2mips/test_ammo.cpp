@@ -5,12 +5,6 @@
 
 static int fails;
 #define CHECK(c) do { if (c) printf("ok   %s\n", #c); else { printf("FAIL %s (line %d)\n", #c, __LINE__); fails++; } } while (0)
-const char *FName::intern(const char *n) {                         // a tiny string table: equal names share one pointer
-  static const char *tab[256]; static int cnt;
-  for (int i = 0; i < cnt; i++) if (!strcmp(tab[i], n)) return tab[i];
-  return tab[cnt++] = strdup(n);
-}
-
 struct MockASC : UAbilitySystemComponent {                          // stands in for the runtime's ability system: writes straight into the set
   UAttributeSet *set;
   void SetNumericAttributeBase(const FGameplayAttribute &a, float v) override { FGameplayAttributeData *d = set->FindAttributeData(a.Property->Name); if (d) { d->SetBaseValue(v); d->SetCurrentValue(v); } }

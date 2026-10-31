@@ -72,6 +72,9 @@ static int gs_post_execute(u64_obj *tgt, const char *name, u64_obj *src)        
   if (!strcmp(name, "Mana")) { u64_attr_set_base(tgt, "Mana", clampf(u64_attr_get(tgt, "Mana"), 0.0f, u64_attr_get(tgt, "MaxMana"))); return 1; }
   if (!strcmp(name, "Stamina")) { u64_attr_set_base(tgt, "Stamina", clampf(u64_attr_get(tgt, "Stamina"), 0.0f, u64_attr_get(tgt, "MaxStamina"))); return 1; }
   if (!strcmp(name, "Shield")) { u64_attr_set_base(tgt, "Shield", clampf(u64_attr_get(tgt, "Shield"), 0.0f, u64_attr_get(tgt, "MaxShield"))); return 1; }
+#ifdef U64_CXX_AMMO                                                // the project's own C++ (UGSAmmoAttributeSet.cpp, unmodified) instead of the port below: see cpp2mips/
+  { extern int u64_cxx_ammo_post_execute(u64_obj *, const char *); if (u64_cxx_ammo_post_execute(tgt, name)) return 1; }
+#endif
   static const char *const ammo[] = {"Rifle", "Rocket", "Shotgun"};
   for (int i = 0; i < 3; i++) {
     char cur[32], max[32]; snprintf(cur, sizeof cur, "%sReserveAmmo", ammo[i]); snprintf(max, sizeof max, "Max%sReserveAmmo", ammo[i]);

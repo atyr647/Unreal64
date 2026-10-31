@@ -100,7 +100,11 @@ u64_v u64_native(u64_obj *self, const char *fn, int argc, const u64_v *a)
   if (IS("IsValid")) { HIT; return u64_bool(x.t == U64_OBJ && u64_obj_alive(x.u.o)); }
   if (IS("K2_GetActorLocation")) { HIT; return loc_of(self); }
   if (IS("GetTransform")) { HIT; u64_v *r = u64_ivar(self, "Rotation"); return u64_xform_new(loc_of(self), r->t == U64_VEC ? *r : u64_vec(0, 0, 0)); }
-  if (IS("K2_SetActorLocation") || IS("K2_SetRelativeLocation")) { HIT; *u64_ivar(self, "Location") = x; return u64_bool(1); }
+  if (IS("K2_SetActorLocation")) { HIT; *u64_ivar(self, "Location") = x; return u64_bool(1); }
+  if (IS("K2_SetRelativeLocation")) {                                       // a component (it has an Owner): its location relative to the parent; else the actor
+    HIT; u64_v *ow = u64_ivar(self, "Owner");
+    *u64_ivar(self, ow->t == U64_OBJ && ow->u.o ? "RelativeLocation" : "Location") = x; return u64_bool(1);
+  }
   if (IS("GetInstigator")) {                                                    // AActor::GetInstigator: who caused this actor to exist
     HIT; u64_v *i = u64_ivar(self, "Instigator");
     return i->t == U64_OBJ ? *i : u64_objv(self);

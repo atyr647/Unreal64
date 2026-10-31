@@ -71,3 +71,11 @@ in about 40 rounds of small additions. What is left is dominated by: the ability
 members (GATA traces, `GSAT_*`), `GSAbilitySystemComponent` (animation montage replication, which is animation work), movement saved-move classes,
 `GSInteractable` (UInterface macros), widget / HUD types. These are declarations, not behaviour: none of them is run yet. The two compiled classes that ARE run
 (ammo, damage rules) pass the full suite on the host and on the N64.
+
+## Status of the remaining files (measured)
+
+15 of 45 compile. The rest total about 700 first-pass errors, 217 of them in `GSAbilitySystemComponent.cpp` (animation montage replication: that file belongs to
+the animation work, not to the GAS core) and ~120 in `GSHeroCharacter.cpp`. The shim now has `ShimAny` / `SHIM_FN` stubs (`shim/ue_stubs.h`) for engine members that
+have no runtime backing; they answer a default and are listed once on stderr when `UE_SHIM_REPORT=1`, so anything that compiles but is not backed is visible, not silent.
+Compiling is not running: a class that runs needs each stub it reaches replaced by a runtime-backed implementation (as done for the attribute sets and the jump ability).
+`cpp2mips/errsum.sh <Source/Module>` prints the first errors of every file.

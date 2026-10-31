@@ -56,12 +56,25 @@ struct FName {                                               // interned: identi
 };
 
 struct UClass { const char *Name; };
+// Members the gameplay code reaches that the runtime does not back (yet): they compile, answer a default, and are counted (ShimUnimplemented, reported once).
+void ShimUnimplemented(const char *what);
+struct ShimAny {
+  template <class T> operator T() const { return T(); }
+  ShimAny *operator->() { return this; } ShimAny &operator*() { return *this; }
+  template <class... A> ShimAny operator()(A...) const { return ShimAny(); }
+  template <class T> bool operator==(const T &) const { return false; } template <class T> bool operator!=(const T &) const { return true; }
+  bool operator!() const { return true; }
+};
+#define SHIM_FN(name) template <class... A> ShimAny name(A...) const { ShimUnimplemented(#name); return ShimAny(); }
+#define SHIM_VAR(name) ShimAny name;
 struct FText { const char *s = ""; };
 struct FString { const char *s = ""; template <class... A> static FString Printf(const char *, A...) { return FString(); } };
 static int GPlayInEditorID = 0;
 struct FProperty { FName Name; };
 static const FName NAME_None;
+#include "ue_stubs.h"
 struct UObject {
+  SHIM_OBJECT_STUBS
   virtual ~UObject() {}
   virtual bool InstanceOf(const UClass *) const { return false; }     // generated per class (Cast<> without RTTI)
   template <class T, class... A> T *CreateDefaultSubobject(A...) { return new T(); }
@@ -91,6 +104,8 @@ namespace FMath {
 template <class T> FORCEINLINE T Clamp(T v, T lo, T hi) { return v < lo ? lo : (v > hi ? hi : v); }
 template <class T> FORCEINLINE T Max(T a, T b) { return a > b ? a : b; }
 template <class T> FORCEINLINE T Min(T a, T b) { return a < b ? a : b; }
+template <class T> FORCEINLINE T Lerp(T a, T b, float t) { return a + (b - a) * t; }
+FORCEINLINE float Sqrt(float x) { return sqrtf(x); }
 FORCEINLINE bool IsNearlyEqual(float a, float b, float tol = 1.e-4f) { return fabsf(a - b) <= tol; }
 }
 
@@ -110,7 +125,8 @@ template <class T> struct TArray {                             // the part of TA
 };
 struct FVector { float X = 0, Y = 0, Z = 0; FVector() {} FVector(float x, float y, float z) : X(x), Y(y), Z(z) {} static const FVector ZeroVector;
   FVector operator+(const FVector &o) const { return FVector(X + o.X, Y + o.Y, Z + o.Z); } FVector operator-(const FVector &o) const { return FVector(X - o.X, Y - o.Y, Z - o.Z); }
-  FVector operator*(float f) const { return FVector(X * f, Y * f, Z * f); } float SizeSquared() const { return X * X + Y * Y + Z * Z; } float Size() const { return sqrtf(SizeSquared()); } };
+  FVector operator*(float f) const { return FVector(X * f, Y * f, Z * f); } FVector GetSafeNormal() const { float l = Size(); return l > 1e-8f ? FVector(X / l, Y / l, Z / l) : FVector(); } bool IsZero() const { return X == 0 && Y == 0 && Z == 0; } FVector GetLocation() const { return *this; }
+  static float DistSquared(const FVector &a, const FVector &b) { return (a - b).SizeSquared(); } static float DotProduct(const FVector &a, const FVector &b) { return a.X * b.X + a.Y * b.Y + a.Z * b.Z; } float SizeSquared() const { return X * X + Y * Y + Z * Z; } float Size() const { return sqrtf(SizeSquared()); } };
 typedef FVector FVector_NetQuantize;
 template <class K, class V> struct TMap { K k[32]; V v[32]; int n = 0;                            // the lookups the gameplay code does; fixed capacity
   V *Find(const K &key) { for (int i = 0; i < n; i++) if (k[i] == key) return &v[i]; return nullptr; }

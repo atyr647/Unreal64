@@ -63,3 +63,23 @@ enum class EGameplayEffectReplicationMode { Minimal, Mixed, Full };
 struct UUserWidgetX {}; template <class T, class... A> T *CreateWidget(A...) { return nullptr; }
 struct FNetworkPredictionData_Client_Character { virtual ~FNetworkPredictionData_Client_Character() {} virtual FSavedMovePtr AllocateNewMove() { return FSavedMovePtr(); } };
 enum class ECollisionEnabled { NoCollision, QueryOnly, PhysicsOnly, QueryAndPhysics };
+
+// ---- batch: enums, math, spawn, attachment, roles, sound, prediction
+enum ENetRole { ROLE_None, ROLE_SimulatedProxy, ROLE_AutonomousProxy, ROLE_Authority };
+enum ECollisionChannel { ECC_WorldStatic, ECC_WorldDynamic, ECC_Pawn, ECC_Visibility, ECC_Camera, ECC_PhysicsBody, ECC_Vehicle, ECC_Destructible, ECC_GameTraceChannel1, ECC_GameTraceChannel2, ECC_GameTraceChannel3, ECC_GameTraceChannel4, ECC_GameTraceChannel5 };
+enum ECollisionResponse { ECR_Ignore, ECR_Overlap, ECR_Block };
+enum class EAbilityGenericReplicatedEvent { GenericConfirm, GenericCancel, InputPressed, InputReleased, GenericSignalFromClient, GenericSignalFromServer, GameCustom1 };
+enum class EGameplayCueEvent { OnActive, WhileActive, Executed, Removed };
+enum class EGameplayAbilityNetExecutionPolicy { LocalPredicted, LocalOnly, ServerInitiated, ServerOnly };
+enum class EGameplayTagEventType { NewOrRemoved, AnyCountChange };
+enum class EVisibilityBasedAnimTickOption { AlwaysTickPoseAndRefreshBones, AlwaysTickPose, OnlyTickMontagesWhenNotRendered, OnlyTickPoseWhenRendered };
+enum class ESpawnActorCollisionHandlingMethod { Undefined, AlwaysSpawn, AdjustIfPossibleButAlwaysSpawn, AdjustIfPossibleButDontSpawnIfColliding, DontSpawnIfColliding };
+enum class EAttachLocation { KeepRelativeOffset, KeepWorldPosition, SnapToTarget };
+enum class EAttachmentRule { KeepRelative, KeepWorld, SnapToTarget };
+struct FAttachmentTransformRules { FAttachmentTransformRules(EAttachmentRule, bool) {} FAttachmentTransformRules(EAttachmentRule, EAttachmentRule, EAttachmentRule, bool) {} static const FAttachmentTransformRules SnapToTargetNotIncludingScale, KeepRelativeTransform; };
+struct FDetachmentTransformRules { FDetachmentTransformRules(EAttachmentRule, bool) {} static const FDetachmentTransformRules KeepWorldTransform; };
+struct FActorSpawnParameters { FName Name; AActor *Owner = nullptr; APawn *Instigator = nullptr; ESpawnActorCollisionHandlingMethod SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::Undefined; };
+struct FScopedPredictionWindow { template <class... A> FScopedPredictionWindow(A...) {} };
+#define SCENE_QUERY_STAT(x) FName(#x)
+#define DECLARE_ATTRIBUTE_CAPTUREDEF(...)
+#define DEFINE_ATTRIBUTE_CAPTUREDEF(...)

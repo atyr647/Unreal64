@@ -22,7 +22,6 @@ int u64_run_shooter_scenarios(int verbose)
   u64_gc_stress = 1; u64_log = err_log;                       // collect after every tick: any dangling reference shows up as a failure
   u64_bp_table = u64_bp_registry(); u64_bp_count = u64_bp_registry_count();
   u64_level_load();
-  u64_world_begin_play();
   u64_game_start();
   hero = u64_player_pawn();
   CHECK(hero && !strcmp(u64_obj_class(hero), "BP_HeroCharacter"));
@@ -267,6 +266,8 @@ int u64_run_shooter_scenarios(int verbose)
     CHECK(u64_tag_has(asc_of_hero(), "State.Interacting") && !u64_tag_has(u64_asc_of(ch), "Object.Chest.State.Open"));   // still holding after 2 s
     tick(1 * 30 + 6);
     CHECK(u64_tag_has(u64_asc_of(ch), "Object.Chest.State.Open") && !u64_tag_has(asc_of_hero(), "State.Interacting"));    // done after the 3 s hold
+    u64_input_release_id(hero, "EGSAbilityInputID::Interact");                              // let go of the button
+    tick(2);
     int cnt_rocket1 = 0, cnt_hp1 = 0;
     for (int i = 0; i < u64_obj_count(); i++) { u64_obj *o = u64_obj_at(i); if (!u64_obj_is_actor(o)) continue; if (!strcmp(u64_obj_class(o), "BP_RocketLauncher")) cnt_rocket1++; if (!strcmp(u64_obj_class(o), "BP_Pickup_Health")) cnt_hp1++; }
     CHECK(cnt_rocket1 == cnt_rocket0 + 1 && cnt_hp1 == cnt_hp0 + 1);                      // the chest's loot: a rocket launcher and a health pickup
@@ -274,6 +275,29 @@ int u64_run_shooter_scenarios(int verbose)
     CHECK(u64_tag_has(u64_asc_of(ch), "Object.Chest.State.Open"));                       // GE_ChestOpen lasts 5 s
     tick(2 * 30);
     CHECK(!u64_tag_has(u64_asc_of(ch), "Object.Chest.State.Open"));
+  }
+  // --- door: its button is the interactable component (instant: OpenInteractionDuration is 0 for the door). GA_InteractActive's PostInteract applies
+  // GE_DoorOpen (5 s, Object.Door.State.Open); the tag listener plays DoorOpenTimeline (0.5 s) that lerps the Door component's relative y from its
+  // start to -MaxDoorMovementDistance (-140). The door is yawed 90 and scaled 2.625, so local -140 is world +367.5 in x; the tag ending closes it.
+  {
+    u64_obj *door = u64_find("BP_Door_2"); float b[3], p0[3], p1[3]; u64_comp_world(door, "Button", b); u64_comp_world(door, "Door", p0);
+    CHECK(fabsf(b[0] + 338.25f) < 0.01f && fabsf(b[1] + 930) < 0.01f && fabsf(p0[0] + 144) < 0.01f);       // button at local y 74 * 2.625 = 194.25 from the door
+    *u64_ivar(hero, "Location") = u64_vec(b[0], b[1] + 100, b[2] - 70);
+    u64_obj *cam = u64_comp(hero, "FirstPersonCamera").u.o; u64_v rel = *u64_ivar(cam, "RelativeLocation");
+    float cx = b[0] + rel.u.v[0], cy = b[1] + 100 + rel.u.v[1], cz = b[2] - 70 + rel.u.v[2], dx = b[0] - cx, dy = b[1] - cy, dz = b[2] - cz;
+    *u64_ivar(hero, "ControlRotation") = u64_vec(atan2f(dz, sqrtf(dx * dx + dy * dy)) * 57.29578f, atan2f(dy, dx) * 57.29578f, 0);   // look at the button
+    tick(12);
+    u64_input_press(hero, "EGSAbilityInputID::Interact");
+    tick(3);
+    u64_input_release_id(hero, "EGSAbilityInputID::Interact");
+    CHECK(u64_tag_has(u64_asc_of(door), "Object.Door.State.Open"));
+    tick(15);                                                                              // 0.5 s timeline done
+    u64_comp_world(door, "Door", p1);
+    CHECK(fabsf(p1[0] - (-144 + 367.5f)) < 0.05f && fabsf(p1[1] + 930) < 0.01f);
+    tick(5 * 30);                                                                          // GE_DoorOpen ends: the door closes
+    tick(18);
+    u64_comp_world(door, "Door", p1);
+    CHECK(!u64_tag_has(u64_asc_of(door), "Object.Door.State.Open") && fabsf(p1[0] + 144) < 0.05f);
   }
   // --- garbage collection: 3000 spawn/destroy cycles (plus arrays and temporaries) would exhaust the 1024-object pool without it
   {

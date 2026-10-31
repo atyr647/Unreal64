@@ -27,7 +27,13 @@ static const char *nm(u64_v v)
 static const char *strip_c(const char *s) { static char b[4][64]; static int i; char *o = b[i++ & 3]; snprintf(o, 64, "%s", s); size_t n = strlen(o); if (n > 2 && !strcmp(o + n - 2, "_C")) o[n - 2] = 0; return o; }
 static int tag_matches(const char *have, const char *query) { size_t q = strlen(query); return !strncmp(have, query, q) && (have[q] == 0 || have[q] == '.'); }
 static u64_obj *avatar_of(u64_obj *ab) { u64_v *av = u64_ivar(ab, "Avatar"); return av->t == U64_OBJ ? av->u.o : 0; }
-static u64_obj *asc_for(u64_obj *o) { return o && (u64_is_asc(o) || !strcmp(u64_obj_class(o), "AbilitySystemComponent")) ? o : u64_asc_of(o); }
+static u64_obj *asc_for(u64_obj *o)
+{
+  if (!o || u64_is_asc(o) || !strcmp(u64_obj_class(o), "AbilitySystemComponent")) return o;
+  u64_v *ow = u64_ivar(o, "Owner");                                         // a component of an actor: that actor's ability system
+  if (ow->t == U64_OBJ && ow->u.o && !u64_obj_is_actor(o)) return u64_asc_of(ow->u.o);
+  return u64_asc_of(o);
+}
 
 // ---------------------------------------------------------------------------------------------------- target data
 static u64_v td_hit(u64_obj *hit) { u64_obj *d = u64_new("TargetDataHit", "TargetDataHit"); *u64_ivar(d, "HitResult") = u64_objv(hit); return u64_objv(d); }

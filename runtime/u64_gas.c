@@ -37,8 +37,14 @@ static const char *tostr(u64_v v, char *b, int n)
   }
 }
 static u64_v text(const char *s) { return u64_str(u64_intern(s)); }
-static int is_asc(u64_obj *o) { return o && !strcmp(u64_obj_class(o), "AbilitySystemComponent"); }
-static u64_obj *asc_for(u64_obj *self) { return is_asc(self) ? self : u64_asc_of(self); }
+static int is_asc(u64_obj *o) { return o && (u64_is_asc(o) || !strcmp(u64_obj_class(o), "AbilitySystemComponent")); }
+static u64_obj *asc_for(u64_obj *self)                                    // an ASC, or the ability system of an actor / of the actor that owns a component
+{
+  if (!self || is_asc(self)) return self;
+  u64_v *ow = u64_ivar(self, "Owner");
+  if (ow->t == U64_OBJ && ow->u.o && !u64_obj_is_actor(self)) return u64_asc_of(ow->u.o);
+  return u64_asc_of(self);
+}
 static u64_obj *avatar_of_ability(u64_obj *ab) { u64_v *av = u64_ivar(ab, "Avatar"); return av->t == U64_OBJ ? av->u.o : ab; }
 static u64_obj *obj_arg(u64_v v) { return v.t == U64_OBJ ? v.u.o : 0; }
 static float norm180(float d) { while (d > 180) d -= 360; while (d <= -180) d += 360; return d; }

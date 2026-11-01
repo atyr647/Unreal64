@@ -213,6 +213,11 @@ a real map, 91 Blueprints and ~8k lines of C++. Run its tests with `tools/run_sh
   the material reticles. (Names: the floating bars already show the hero's CharacterName, "Hero". Occlusion: not needed as far as I remember the engine, screen-space widget components are drawn
   on top without a depth test; unverified.) Respawn countdown: when the player's hero dies the game mode calls the HUD's `SetRespawnCountdown(5)`; the widget's own timer shows `Respawning in: 5`
   / 3 at 2 s / 1 at 4 s and hides it at 0 (asserted). The player state is a stand-in (the ability Blueprints cast their owning actor to it; the cast is answered with the hero's).
+* 3D world on the N64 (wireframe only): `u64_world_segments` turns the collision hulls of the placed meshes and of the actors' static-mesh components into edges (planes -> vertices -> edges, under the actor /
+  component transforms) and adds each character's capsule as an 8-sided prism; `u64_gs_world_draw_list` clips them at a near plane 10 units ahead and projects them through the player's camera
+  (kind 3 draw commands), with a ground grid at the characters' feet standing in for the floor mesh, which is not exported yet. Asserted: the four walls' edges against the cube size and placement, one
+  fully visible edge and one clipped at the near plane against a projection written out in the test. The N64 clips lines to the viewport and draws them under the HUD (`docs/img/ares_shooter_world.png`).
+  Not done: depth sorting / hidden lines, filled and textured surfaces, skeletal meshes, lighting.
 * Audio, networking, AI behaviour of the placed heroes.
 * Unverified engine assumption: the first execution of a periodic effect happens on the next tick (see below).
 

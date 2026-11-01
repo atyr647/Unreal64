@@ -34,7 +34,7 @@ def generate(header, out):
             sstruct = f" static UScriptStruct *StaticStruct() {{ static UScriptStruct s; return &s; }}" if kinds.get(cur) == "struct" else ""
             inst = f" bool InstanceOf(const UClass *c) const override {{ return c == StaticClass() || Super::InstanceOf(c); }}" if bases.get(cur) and bases[cur][0] in "UA" else ""
             ctor = f" {cur}(const FObjectInitializer &i = FObjectInitializer());" if "GENERATED_UCLASS_BODY" in ln else ""
-            body = f"public: {sup}{ctor} typedef {cur} ThisClass; static UClass *StaticClass() {{ static UClass c = {{\"{cur}\"}}; return &c; }}{inst}{sstruct}"
+            body = f"public: {sup}{ctor} typedef {cur} ThisClass; static UClass *StaticClass() {{ static UClass c = {{\"{cur}\", &ShimMake<{cur}>}}; return &c; }}{inst}{sstruct}"
             res.append(f"#define {fid}_{i}_GENERATED_BODY {body} @FIND@{cur}@")
     text = "\n".join(res) + "\n"
     for cls, plist in props.items():

@@ -9,6 +9,7 @@ struct FGameplayTag {
   bool operator==(const FGameplayTag &o) const { return Name == o.Name; }
   bool operator!=(const FGameplayTag &o) const { return Name != o.Name; }
   bool IsValid() const { return Name != FName(); }
+  const char *ToString() const { return Name.ToString(); }
 };
 
 struct FGameplayAttribute {                                      // an attribute is named by its property
@@ -36,10 +37,12 @@ struct FGameplayTagContainer {
   void AddTag(const FGameplayTag &x) { if (!HasTag(x)) AddTagFast(x); }
   void RemoveTag(const FGameplayTag &x) { for (int i = 0; i < n; i++) if (t[i] == x) { t[i] = t[--n]; return; } }
   void AppendTags(const FGameplayTagContainer &o) { for (int i = 0; i < o.n; i++) AddTag(o.t[i]); }
+  bool HasTagExact(const FGameplayTag &x) const { return HasTag(x); }
   bool HasTag(const FGameplayTag &x) const { for (int i = 0; i < n; i++) if (t[i] == x) return true; return false; }
 };
+struct FPredictionKey { bool IsValidKey() const { return false; } bool IsValidForMorePrediction() const { return false; } FString ToString() const { return FString("[0/0]"); } };
 class UAbilitySystemComponent;
-struct FGameplayAbilityActorInfo { TWeakObjectPtr<AActor> OwnerActor, AvatarActor; TWeakObjectPtr<AController> PlayerController; UAbilitySystemComponent *AbilitySystemComponent = nullptr; };
+struct FGameplayAbilityActorInfo { TWeakObjectPtr<AActor> OwnerActor, AvatarActor; TWeakObjectPtr<AController> PlayerController; TWeakObjectPtr<UAbilitySystemComponent> AbilitySystemComponent; bool IsNetAuthority() const { return true; } bool IsLocallyControlledPlayer() const { return true; } };
 struct FArchive {}; class UPackageMap; struct UScriptStruct {};
 struct FHitResult;
 struct FGameplayEffectContext {
@@ -63,7 +66,8 @@ struct FGameplayEffectContextHandle {
 };
 struct FTagCapture { FGameplayTagContainer agg; const FGameplayTagContainer *GetAggregatedTags() const { return &agg; } };
 struct FGameplayEffectSpec {
-  FGameplayEffectContextHandle Context; FTagCapture CapturedSourceTags; FGameplayTagContainer DynamicAssetTags, AssetTags;
+  void *Rt = nullptr; FGameplayEffectContextHandle Context; FTagCapture CapturedSourceTags, CapturedTargetTags; TMap<FGameplayTag, float> SetByCallerTagMagnitudes;
+  float GetSetByCallerMagnitude(FGameplayTag t, bool = true, float def = 0) const { const float *f = SetByCallerTagMagnitudes.Find(t); return f ? *f : def; } FGameplayTagContainer DynamicAssetTags, AssetTags;
   FGameplayEffectContextHandle GetContext() const { return Context; }
   void GetAllAssetTags(FGameplayTagContainer &o) const { o = AssetTags; o.AppendTags(DynamicAssetTags); }
 };
@@ -88,19 +92,21 @@ public:
   virtual void AbilityLocalInputPressed(int32) {}
   virtual bool ShouldDoServerAbilityRPCBatch() const { return false; }
   virtual void NotifyAbilityEnded(FGameplayAbilitySpecHandle, UGameplayAbility *, bool) {}
-  int32 GetTagCount(const FGameplayTag &) const { return 0; }
+  virtual int32 GetTagCount(const FGameplayTag &) const { return 0; }
+  virtual bool TryActivateAbility(FGameplayAbilitySpecHandle, bool = true) { return false; }
   void AddLooseGameplayTag(const FGameplayTag &, int32 = 1) {} void AddLooseGameplayTags(const FGameplayTagContainer &, int32 = 1) {}
   void RemoveLooseGameplayTag(const FGameplayTag &, int32 = 1) {} void RemoveLooseGameplayTags(const FGameplayTagContainer &, int32 = 1) {}
   AActor *GetOwnerActor() const { return nullptr; } AActor *GetAvatarActor() const { return nullptr; }
   virtual void SetNumericAttributeBase(const FGameplayAttribute &, float) {}
   virtual void ApplyModToAttributeUnsafe(const FGameplayAttribute &, EGameplayModOp, float) {}
   template <class... A> FGameplayAbilitySpec *FindAbilitySpecFromClass(A...) const { return nullptr; }
-  TSharedPtr<FGameplayAbilityActorInfo> AbilityActorInfo;
+  TSharedPtr<FGameplayAbilityActorInfo> AbilityActorInfo; FPredictionKey ScopedPredictionKey;
   virtual FGameplayEffectContextHandle MakeEffectContext() { return FGameplayEffectContextHandle(); }
   virtual void ApplyGameplayEffectToSelf(const UGameplayEffect *, float, FGameplayEffectContextHandle) {}
 };
 
-struct FGameplayModifierEvaluatedData { FGameplayAttribute Attribute; float Magnitude = 0; };
+struct FGameplayModifierEvaluatedData { FGameplayAttribute Attribute; EGameplayModOp ModifierOp = EGameplayModOp::Additive; float Magnitude = 0; FGameplayModifierEvaluatedData() {}
+  FGameplayModifierEvaluatedData(const FGameplayAttribute &a, EGameplayModOp op, float m) : Attribute(a), ModifierOp(op), Magnitude(m) {} };
 struct FGameplayEffectModCallbackData { FGameplayEffectSpec EffectSpec; FGameplayModifierEvaluatedData EvaluatedData; UAbilitySystemComponent &Target; FGameplayEffectModCallbackData(UAbilitySystemComponent &t) : Target(t) {} };
 
 class UAttributeSet : public UObject {

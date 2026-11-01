@@ -79,3 +79,31 @@ the animation work, not to the GAS core) and ~120 in `GSHeroCharacter.cpp`. The 
 have no runtime backing; they answer a default and are listed once on stderr when `UE_SHIM_REPORT=1`, so anything that compiles but is not backed is visible, not silent.
 Compiling is not running: a class that runs needs each stub it reaches replaced by a runtime-backed implementation (as done for the attribute sets and the jump ability).
 `cpp2mips/errsum.sh <Source/Module>` prints the first errors of every file.
+
+## Update: the ability base class runs in the project's C++ (GSGameplayAbility.cpp)
+
+`GSGameplayAbility.cpp` (the base of the project's Blueprint abilities), `GSTargetType.cpp`, `GSAbilityTypes.cpp` and `GSInteractable.cpp` are compiled unmodified and run inside
+the scenario suite (`bridge_base.cpp`, section "UGSGameplayAbility"; 170 calls in the suite). What runs as the project wrote it: the constructor (default flags, blocked / owned
+tags, interacting tags), `OnAvatarSet` (passive abilities activate when granted, through the ASC's `TryActivateAbility`), `CanActivateAbility` (the interacting-tag rule and
+the "source object must be the current weapon" rule, which casts the avatar to `AGSHeroCharacter` and compares `GetCurrentWeapon()`), `CheckCost` / `ApplyCost` (they dispatch to
+the `GSCheckCost` / `GSApplyCost` Blueprint events, as UHT's generated thunks do), and the effect containers: `MakeEffectContainerSpec` walks the container map, builds the target
+type's class default object (`TSubclassOf::GetDefaultObject`, `UGSTargetType_UseOwner::GetTargets_Implementation`, ...), collects `FGameplayAbilityTargetData` handles and makes
+the outgoing effect specs; the bridge converts the resulting `FGSGameplayEffectContainerSpec` back into the runtime's spec object. The scenario suite found one bridge bug
+(class values from the runtime are `U64_CLASS`, not names: the target type came back empty and the reload effect was never applied).
+
+What the bridge needed: `UClass` now carries a factory (`ShimMake`, emitted by `uht_lite`) so class default objects exist; `FGameplayAbilityActorInfo::AbilitySystemComponent` is a weak
+pointer as in the engine; the ASC proxy answers `GetTagCount` / `TryActivateAbility` from the runtime; `AGSHeroCharacter`, `AGSWeapon` and `UGSAbilitySystemComponent` exist as
+runtime-backed proxies, with their virtual members generated empty by `stubgen.py` (their vtables need definitions; the behaviour is the runtime's). RTTI is now on:
+`GSAbilitySystemGlobals.h` uses `dynamic_cast` (ROM +33 KB with the new classes). Run with `SAN=1 cpp2mips/run_shooter_cxx.sh ...` for ASan + UBSan (clean).
+The engine's own base-class checks (`Super::CanActivateAbility`: required / blocked tags, cooldown; `Super::ApplyCost`: the cost effect) stay in the runtime, which already implements them.
+Not backed: replicated target data, prediction keys (`FPredictionKey` is always invalid), `UGSAbilitySystemComponent`'s montage functions (reported by `UE_SHIM_REPORT=1`).
+
+### The damage formula too (GSDamageExecutionCalc.cpp)
+
+`UGSDamageExecutionCalc` (set-by-caller + captured Damage, the x1.5 headshot multiplier when the effect has `Effect.Damage.CanHeadShot` and the context's hit bone is `b_head`,
+mitigation `100 / (100 + Armor)`, the `Effect.Damage.HeadShot` dynamic tag) runs as written (`bridge_exec.cpp`, `-DU64_CXX_EXEC`, 11 executions in the suite, the headshot value
+12.5 included). The shim has the engine types it uses (`FGameplayEffectAttributeCaptureDefinition`, `DECLARE/DEFINE_ATTRIBUTE_CAPTUREDEF`, `FGameplayEffectCustomExecutionParameters`
+and output, `FAggregatorEvaluateParameters`); the runtime resolves the captures (`u64_exec_in`) and applies the output modifier. One behaviour change: the runtime used to notify
+`WaitReceiveDamage` tasks from this calculation; the project's code does not, so on this path it no longer does (GASDocumentation's calculation, a different class, still does).
+
+15 -> 19 of 45 files compile (`GSGameplayAbility`, `GSAbilityTypes`, `GSAbilitySystemGlobals`, `GSDamageExecutionCalc` now).

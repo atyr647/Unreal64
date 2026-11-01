@@ -6,11 +6,14 @@
 #include <stddef.h>
 #include <string.h>
 #include <math.h>
+#include <stdio.h>
+#include <type_traits>
 
 typedef int8_t int8; typedef int16_t int16; typedef int32_t int32; typedef int64_t int64;
 typedef uint8_t uint8; typedef uint16_t uint16; typedef uint32_t uint32; typedef uint64_t uint64;
 
 #define TEXT(x) x
+#define INDEX_NONE (-1)
 #define FORCEINLINE inline __attribute__((always_inline))
 #define GASSHOOTER_API
 #define UCLASS(...)
@@ -55,7 +58,9 @@ struct FName {                                               // interned: identi
   const char *ToString() const { return s; }
 };
 
-struct UClass { const char *Name; };
+struct UObject;
+struct UClass { const char *Name; UObject *(*Make)() = nullptr; UObject *Cdo = nullptr; void *Rt = nullptr; UObject *GetDefaultObject() { if (!Cdo && Make) Cdo = Make(); return Cdo; } };   // Make: the class's default constructor (the class default object is built lazily)
+template <class T> UObject *ShimMake();
 // Members the gameplay code reaches that the runtime does not back (yet): they compile, answer a default, and are counted (ShimUnimplemented, reported once).
 void ShimUnimplemented(const char *what);
 struct ShimAny {
@@ -68,7 +73,9 @@ struct ShimAny {
 #define SHIM_FN(name) template <class... A> ShimAny name(A...) const { ShimUnimplemented(#name); return ShimAny(); }
 #define SHIM_VAR(name) ShimAny name;
 struct FText { const char *s = ""; };
-struct FString { const char *s = ""; template <class... A> static FString Printf(const char *, A...) { return FString(); } };
+struct FString { const char *s = ""; FString() {} FString(const char *x) : s(x) {} template <class... A> static FString Printf(const char *, A...) { return FString(); }
+  FString operator+(const char *o) const { static char ring[4][256]; static int k; char *b = ring[k++ & 3]; snprintf(b, 256, "%s%s", s, o); return FString(b); }
+  FString operator+(const FString &o) const { return *this + o.s; } };
 static int GPlayInEditorID = 0;
 struct FProperty { FName Name; };
 static const FName NAME_None;
@@ -80,13 +87,16 @@ struct UObject {
   template <class T, class... A> T *CreateDefaultSubobject(A...) { return new T(); }
   void *rt = nullptr; struct UWorld *GetWorld() const { return nullptr; }                                                     // the Unreal64 runtime object this one stands for
 };
+template <class T> UObject *ShimMake() { if constexpr (std::is_base_of_v<UObject, T> && std::is_default_constructible_v<T> && !std::is_abstract_v<T>) return new T(); else return nullptr; }
 template <class T, class U> T *Cast(U *p) { return p && p->InstanceOf(T::StaticClass()) ? static_cast<T *>(p) : nullptr; }
+template <class T> struct TWeakObjectPtr;
 enum class ECastCheckedType { NullChecked, NullAllowed };
 template <class T, class U> T *CastChecked(U *p, ECastCheckedType = ECastCheckedType::NullChecked) { return Cast<T>(p); }
 template <class T> struct TEnumAsByte { uint8 v = 0; TEnumAsByte() {} TEnumAsByte(T x) : v((uint8)x) {} operator T() const { return (T)v; } };
-template <class T> struct TSubclassOf { UClass *c = nullptr; bool operator!() const { return c == nullptr; } explicit operator bool() const { return c != nullptr; } UClass *Get() const { return c; } };
+template <class T> struct TSubclassOf { UClass *c = nullptr; TSubclassOf() {} TSubclassOf(decltype(nullptr)) {} TSubclassOf(UClass *x) : c(x) {} T *GetDefaultObject() const { return c ? static_cast<T *>(c->GetDefaultObject()) : nullptr; } bool operator!() const { return c == nullptr; } explicit operator bool() const { return c != nullptr; } UClass *Get() const { return c; } };
 template <class T> struct TWeakObjectPtr { T *p = nullptr; bool operator!=(long v) const { return (long)p != v; } bool operator==(long v) const { return (long)p == v; } TWeakObjectPtr() {} TWeakObjectPtr(T *x) : p(x) {} bool operator==(const TWeakObjectPtr &o) const { return p == o.p; } bool IsValid() const { return p != nullptr; } T *Get() const { return p; } T *operator->() const { return p; } };
 template <class T> struct TSharedPtr { T *p = nullptr; bool IsValid() const { return p != nullptr; } T *Get() const { return p; } T *operator->() const { return p; } T &operator*() const { return *p; } };
+template <class T, class U> T *Cast(const TWeakObjectPtr<U> &w) { return Cast<T>(w.Get()); }
 struct UPackage {};
 FORCEINLINE UPackage *GetTransientPackage() { static UPackage p; return &p; }
 template <class T> T *NewObject(UPackage *, FName = FName()) { return new T(); }
@@ -114,6 +124,7 @@ template <class T> struct TArray {                             // the part of TA
   int32 Add(const T &v) { if (n < 64) d[n++] = v; return n - 1; }
   int32 AddUnique(const T &v) { for (int i = 0; i < n; i++) if (d[i] == v) return i; return Add(v); }
   void Append(const TArray &o) { for (int i = 0; i < o.n; i++) Add(o.d[i]); }
+  template <class U> void Append(const TArray<U> &o) { for (int i = 0; i < o.n; i++) Add(T(o.d[i])); }
   bool Contains(const T &v) const { for (int i = 0; i < n; i++) if (d[i] == v) return true; return false; }
   void Empty() { n = 0; } void Reset() { n = 0; } int32 Remove(const T &v) { int32 r = 0; for (int i = 0; i < n;) if (d[i] == v) { d[i] = d[--n]; r++; } else i++; return r; }
   bool IsValidIndex(int32 i) const { return i >= 0 && i < n; }

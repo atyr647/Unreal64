@@ -112,6 +112,11 @@ typedef struct {
   void (*world_tick)(float dt);                                                         // per-frame project code (actor overlap notifications, ...)
 } u64_gas_hooks;
 extern const u64_gas_hooks *u64_gas_hooks_active;
+// The inputs of a damage execution calculation (UGSDamageExecutionCalc), already resolved by the runtime: captured Armor (target, current) and Damage (source, snapshot),
+// the spec's set-by-caller magnitudes and asset tags, the context's hit bone. The project's own C++ (U64_CXX_EXEC) computes the output.
+typedef struct { float armor, damage; int nsbc; const char *sbc_tag[4]; float sbc_val[4]; const char *const *asset_tags; int has_hit; const char *bone; } u64_exec_in;
+typedef struct { float mitigated; int headshot; } u64_exec_out;
+int u64_cxx_exec_damage(const u64_exec_in *in, u64_exec_out *out);
 void u64_adjust_for_max_change(u64_obj *asc, const char *affected, const char *maxattr, float new_max);   // AdjustAttributeForMaxChange
 u64_obj *u64_give_ability(u64_obj *asc, const char *cls, int level, const char *input_id, u64_obj *source);
 void u64_clear_ability(u64_obj *asc, u64_obj *ability);

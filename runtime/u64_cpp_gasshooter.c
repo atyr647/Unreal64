@@ -752,8 +752,15 @@ static void ctor_gs_jump(u64_obj *o)                                 // UGSGA_Ch
   for (int i = 0; i < u64_array_len(*ow); i++) if (strcmp(nm(u64_array_get(*ow, i)), "Ability.BlocksInteraction")) u64_array_push(&keep, u64_array_get(*ow, i));
   *ow = keep;
 }
+#ifdef U64_CXX_ABILITY                                               // the project's own GSGameplayAbility.cpp (unmodified): see cpp2mips/bridge_base.cpp
+void u64_cxx_gsa_ctor(u64_obj *o); int u64_cxx_gsa_can_activate(u64_obj *ab); int u64_cxx_gsa_check_cost(u64_obj *ab); void u64_cxx_gsa_apply_cost(u64_obj *ab);
+void u64_cxx_gsa_on_avatar_set(u64_obj *ab); u64_v u64_cxx_gsa_make_container_spec(u64_obj *ab, const char *tag, u64_obj *event, int level);
+#endif
 static void ctor_gs_ability(u64_obj *o)                              // UGSGameplayAbility::UGSGameplayAbility
 {
+#ifdef U64_CXX_ABILITY
+  u64_cxx_gsa_ctor(o); return;
+#endif
   *u64_ivar(o, "bActivateAbilityOnGranted") = u64_bool(0); *u64_ivar(o, "bActivateOnInput") = u64_bool(1);
   *u64_ivar(o, "bSourceObjectMustEqualCurrentWeaponToActivate") = u64_bool(0); *u64_ivar(o, "bCannotActivateWhileInteracting") = u64_bool(1);
   tag_push(o, "ActivationBlockedTags", "State.Dead"); tag_push(o, "ActivationBlockedTags", "State.KnockedDown");
@@ -763,6 +770,9 @@ static void ctor_gs_ability(u64_obj *o)                              // UGSGamep
 static int gs_can_activate(u64_obj *ab)                              // UGSGameplayAbility::CanActivateAbility (before Super)
 {
   if (!is_class(ab, "GSGameplayAbility")) return 1;
+#ifdef U64_CXX_ABILITY
+  return u64_cxx_gsa_can_activate(ab);
+#endif
   u64_obj *asc = O(*u64_ivar(ab, "ASC"));
   if (u64_true(*u64_ivar(ab, "bCannotActivateWhileInteracting")) && u64_tag_count(asc, "State.Interacting") > u64_tag_count(asc, "State.InteractingRemoval")) return 0;
   if (u64_true(*u64_ivar(ab, "bSourceObjectMustEqualCurrentWeaponToActivate"))) {
@@ -774,16 +784,26 @@ static int gs_can_activate(u64_obj *ab)                              // UGSGamep
 }
 static int gs_check_cost(u64_obj *ab)                                // CheckCost: Super && GSCheckCost (Blueprint event, default true)
 {
+#ifdef U64_CXX_ABILITY
+  if (is_class(ab, "GSGameplayAbility")) return u64_cxx_gsa_check_cost(ab);
+#endif
   if (!is_class(ab, "GSGameplayAbility") || !u64_has_bp(ab, "GSCheckCost")) return 1;
   u64_v r = u64_call(ab, "GSCheckCost", 0, 0);
   return r.t == U64_NONE ? 1 : u64_true(r);
 }
 static void gs_apply_cost(u64_obj *ab)                               // ApplyCost: GSApplyCost first, then Super (the cost effect)
 {
+#ifdef U64_CXX_ABILITY
+  if (is_class(ab, "GSGameplayAbility")) { u64_cxx_gsa_apply_cost(ab); return; }
+#endif
   if (is_class(ab, "GSGameplayAbility") && u64_has_bp(ab, "GSApplyCost")) u64_call(ab, "GSApplyCost", 0, 0);
 }
 static u64_v ga_make_container_spec(u64_obj *ab, int c, const u64_v *a)   // MakeEffectContainerSpec(ContainerTag, EventData, OverrideGameplayLevel)
 {
+#ifdef U64_CXX_ABILITY
+  { int lv = A(c, a, 2).t == U64_NONE ? -1 : u64_as_int(A(c, a, 2));
+    return u64_cxx_gsa_make_container_spec(ab, nm(A(c, a, 0)), O(A(c, a, 1)), lv); }
+#endif
   const char *tag = nm(A(c, a, 0));
   u64_obj *spec = u64_new("EffectContainerSpec", "GSGameplayEffectContainerSpec");
   *u64_ivar(spec, "TargetData") = u64_array_of(0, 0); *u64_ivar(spec, "TargetGameplayEffectSpecs") = u64_array_of(0, 0);
@@ -821,6 +841,9 @@ static u64_v ga_noop(u64_obj *ab, int c, const u64_v *a) { (void)ab; (void)c; (v
 static u64_v ga_on_avatar_set(u64_obj *ab, int c, const u64_v *a)      // UGSGameplayAbility::OnAvatarSet: passive abilities activate when granted
 {
   (void)c; (void)a;
+#ifdef U64_CXX_ABILITY
+  u64_cxx_gsa_on_avatar_set(ab); return NONE_;
+#endif
   if (u64_true(*u64_ivar(ab, "bActivateAbilityOnGranted"))) u64_ability_try_activate(ab);
   return NONE_;
 }

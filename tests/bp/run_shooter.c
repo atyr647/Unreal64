@@ -460,6 +460,12 @@ int u64_run_shooter_scenarios(int verbose)
 #endif
 #ifdef U64_CXX_JUMP
   { extern int u64_cxx_jump_calls; printf("jump ability run by the project's C++: %d activations\n", u64_cxx_jump_calls); CHECK(u64_cxx_jump_calls > 0); }
+#ifdef U64_CXX_EXEC
+  { extern int u64_cxx_exec_calls; printf("damage formula (GSDamageExecutionCalc.cpp) run by the project's C++: %d executions\n", u64_cxx_exec_calls); CHECK(u64_cxx_exec_calls > 0); }
+#endif
+#ifdef U64_CXX_ABILITY
+  { extern int u64_cxx_gsa_calls; printf("ability base (GSGameplayAbility.cpp) run by the project's C++: %d calls\n", u64_cxx_gsa_calls); CHECK(u64_cxx_gsa_calls > 20); }
+#endif
 #endif
 #ifdef U64_CXX_BASE
   { extern int u64_cxx_base_calls; printf("damage / health rules run by the project's C++: %d calls\n", u64_cxx_base_calls); CHECK(u64_cxx_base_calls > 0); }

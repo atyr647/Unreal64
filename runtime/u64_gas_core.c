@@ -319,6 +319,23 @@ static float spec_sbc(u64_obj *spec, const char *tag, int *found)
   return -1.0f;
 }
 
+#ifdef U64_CXX_EXEC                                                    // UGSDamageExecutionCalc as the project wrote it (GSDamageExecutionCalc.cpp, see cpp2mips/bridge_exec.cpp)
+static void exec_damage_cxx(asc_t *tgt, asc_t *src, u64_obj *spec)
+{
+  u64_exec_in in; memset(&in, 0, sizeof in); u64_exec_out out; memset(&out, 0, sizeof out);
+  in.armor = attr(tgt, "Armor")->cur; in.damage = src ? attr(src, "Damage")->cur : 0;
+  if (spec && u64_ivar(spec, "snapDamage")->t == U64_FLOAT) in.damage = u64_ivar(spec, "snapDamage")->u.f;     // snapshot taken when the spec was made
+  int found; float sbc = spec_sbc(spec, "Data.Damage", &found);
+  if (found) { in.nsbc = 1; in.sbc_tag[0] = "Data.Damage"; in.sbc_val[0] = sbc; }
+  if (spec && u64_ivar(spec, "GEClass")->t != U64_NONE) { const u64_ge_def *gd = find_ge(nm(*u64_ivar(spec, "GEClass"))); if (gd) in.asset_tags = gd->asset_tags; }
+  u64_obj *ctx = spec && u64_ivar(spec, "Context")->t == U64_OBJ ? u64_ivar(spec, "Context")->u.o : 0;
+  u64_obj *hit = ctx && u64_ivar(ctx, "HitResult")->t == U64_OBJ ? u64_ivar(ctx, "HitResult")->u.o : 0;
+  if (hit) { in.has_hit = 1; in.bone = nm(*u64_ivar(hit, "BoneName")); }
+  if (!u64_cxx_exec_damage(&in, &out)) return;
+  if (out.headshot && spec) *u64_ivar(spec, "HeadShot") = u64_bool(1);                               // DynamicAssetTags: Effect.Damage.HeadShot
+  if (out.mitigated > 0.f) execute_mod(tgt, src, "Damage", U64_OP_ADD, out.mitigated);
+}
+#endif
 // UGDDamageExecCalculation::Execute_Implementation
 static void exec_damage(asc_t *tgt, asc_t *src, u64_obj *spec)
 {
@@ -356,6 +373,9 @@ static void run_modifiers(asc_t *tgt, asc_t *src, const u64_ge_def *d, active_t 
     execute_mod(tgt, src, m->attr, m->op, eval_mag(e, m, tgt, src) * (float)(e->stack ? e->stack : 1));
   }
   for (int i = 0; d->execs && d->execs[i]; i++)
+#ifdef U64_CXX_EXEC
+    if (!strcmp(d->execs[i], "GSDamageExecutionCalc")) exec_damage_cxx(tgt, src, spec); else
+#endif
     if (!strcmp(d->execs[i], "GDDamageExecCalculation") || !strcmp(d->execs[i], "GSDamageExecutionCalc")) exec_damage(tgt, src, spec);
     else if (u64_log) u64_log("  [gas] unported execution calculation %s", d->execs[i]);
 }

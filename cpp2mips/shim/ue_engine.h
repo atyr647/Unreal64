@@ -25,8 +25,8 @@ struct IRepChangedPropertyTracker {}; struct FLinearColor { float R = 0, G = 0, 
 enum class EAbilityTaskNetSyncType { BothWait, OnlyServerWait, OnlyClientWait };
 struct FOnAttributeChangeData { FGameplayAttribute Attribute; float NewValue = 0, OldValue = 0; };
 struct FGameplayAbilityTargetingLocationInfo { FVector LiteralTransform; FVector GetTargetingTransform() const { return LiteralTransform; } };
-struct UPrimitiveComponent : USceneComponent {}; struct FGameplayEffectCustomExecutionParameters; struct FGameplayEffectCustomExecutionOutput;
-struct UGameplayEffectExecutionCalculation : UObject { virtual void Execute_Implementation(const FGameplayEffectCustomExecutionParameters &, OUT FGameplayEffectCustomExecutionOutput &) const {} }; struct UGameplayCueManager : UObject { virtual bool ShouldAsyncLoadRuntimeObjectLibraries() const { return true; } };
+struct UPrimitiveComponent : USceneComponent {};
+struct UGameplayCueManager : UObject { virtual bool ShouldAsyncLoadRuntimeObjectLibraries() const { return true; } };
 struct AGameplayAbilityWorldReticle : AActor {};
 struct AGameplayAbilityTargetActor : AActor { FGameplayAbilityTargetingLocationInfo StartLocation; TSubclassOf<AGameplayAbilityWorldReticle> ReticleClass; FWorldReticleParameters ReticleParams; bool bDestroyOnConfirmationX = true;
   UGameplayAbility *OwningAbility = nullptr; AActor *SourceActor = nullptr; APlayerController *MasterPC = nullptr; FGameplayTargetDataFilterHandle Filter; bool bDestroyOnConfirmation = true; bool ShouldProduceTargetData_ = true;
@@ -53,9 +53,6 @@ struct EDrawDebugTrace { enum Type { None, ForOneFrame, ForDuration, Persistent 
 struct UInputComponent : UObject {}; struct UEngineSubsystem : USubsystem {};
 struct UAnimNotify : UObject { virtual void Notify(USkeletalMeshComponent *, UAnimSequenceBase *) {} };
 struct UCapsuleComponent : UPrimitiveComponent { template <class... A> void SetCollisionObjectType(A...) {} void InitCapsuleSize(float, float) {} template <class... A> void SetCapsuleSize(A...) {} template <class... A> void SetCollisionResponseToChannel(A...) {} template <class... A> void SetupAttachment(A...) {} };
-struct FGameplayEffectCustomExecutionParameters { template <class... A> bool AttemptCalculateCapturedAttributeMagnitude(A...) const { return false; } FGameplayEffectSpec *GetOwningSpecForPreExecuteMod() const { return nullptr; } FGameplayEffectSpec &GetOwningSpec() const { static FGameplayEffectSpec s; return s; } };
-struct FGameplayEffectCustomExecutionOutput { void AddOutputModifier(const FGameplayModifierEvaluatedData &) {} };
-struct UGameplayEffectExecutionCalculationX {};
 struct FWaitTargetDataDelegate : FDelegateBase {};
 struct USpringArmComponent : USceneComponent { float TargetArmLength = 0; bool bUsePawnControlRotation = false, bInheritPitch = true, bInheritYaw = true, bInheritRoll = true; FVector SocketOffset; template <class... A> void SetupAttachment(A...) {} };
 struct USoundBase : UObject {}; struct UAbilitySystemBlueprintLibrary { template <class... A> static UAbilitySystemComponent *GetAbilitySystemComponent(A...) { return nullptr; } template <class... A> static void SendGameplayEventToActor(A...) {} };

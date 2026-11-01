@@ -48,4 +48,4 @@ the interaction trace. Collision comes from the assets (convex hulls, physics-as
 
 `cpp2mips/` is the other way to run project C++: the project's own `.cpp` files compiled with `mips64-elf-g++` against a small Unreal API shim. The ammo
 attribute rules of the scenario suite run in the unmodified `GSAmmoAttributeSet.cpp` that way (`cpp2mips/run_shooter_cxx.sh`, `CXX_AMMO=1 make -C shooterdemo`);
-`docs/img/ares_shooter_suite_cxx.png` shows that ROM passing on the console. `cpp2mips/README.md` has the measured size of the rest.
+The damage rules, the jump ability and the ability base class (`GSGameplayAbility.cpp`: activation rules, cost, effect containers) run in the project's C++ too. `docs/img/ares_shooter_suite_cxx.png` shows that ROM passing on the console. `cpp2mips/README.md` has the measured size of the rest.

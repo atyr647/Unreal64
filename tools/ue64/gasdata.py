@@ -419,7 +419,7 @@ def collect(content_root):
                             lv, seg0, seglen = float(d.get("LinkValue", 0.0)), float(d.get("SegmentBeginTime", 0.0)), float(d.get("SegmentLength", length))
                             t = seg0 + (lv if method == "Absolute" else lv * (seglen if method == "Relative" else length))
                             t += float(d.get("TriggerTimeOffset", 0.0))
-                            tag = ""
+                            tag = ""; dur = 0.0; state = 0
                             ref = d.get("Notify")
                             if isinstance(ref, tuple) and ref[0] == "obj" and ref[2] > 0:
                                 try:
@@ -429,7 +429,18 @@ def collect(content_root):
                                         tag = et[1].get("TagName", ("name", ""))[1]
                                 except Exception:
                                     pass
-                            notifies.append((max(t, 0.0), name.removesuffix("_C"), tag))
+                            sref = d.get("NotifyStateClass")                    # a notify state: NotifyBegin at the time, NotifyEnd after Duration
+                            if isinstance(sref, tuple) and sref[0] == "obj" and sref[2] > 0:
+                                state = 1; dur = float(d.get("Duration", 0.0))
+                                try:
+                                    so = props.read_object(p, data, p.exports[sref[2] - 1])
+                                    gt = so.get("GameplayTags")
+                                    if isinstance(gt, tuple) and gt[0] == "tags":
+                                        tag = "|".join(gt[1])
+                                    name = uasset.class_name(p, p.exports[sref[2] - 1].cls)
+                                except Exception:
+                                    pass
+                            notifies.append((max(t, 0.0), name.removesuffix("_C"), tag, dur, state))
                         montages[e.name] = (length, blend, sorted(notifies))
                 except Exception:
                     pass
@@ -661,8 +672,8 @@ def emit_gas_data_c(ges, montages, shapes, moves=None, projs=None, parents=None,
     rows = []
     for k, v in sorted(montages.items()):
         nv = codegen_ident(k)
-        nl = ", ".join("{%rf, %s, %s}" % (t, _cs(c), _cs(tag)) for t, c, tag in v[2])
-        out.append(f"static const u64_notify_def notifies_{nv}[] = {{{nl}{', ' if nl else ''}{{0, 0, 0}}}};")
+        nl = ", ".join("{%rf, %s, %s, %rf, %d}" % (t, _cs(c), _cs(tag), dur, st) for t, c, tag, dur, st in v[2])
+        out.append(f"static const u64_notify_def notifies_{nv}[] = {{{nl}{', ' if nl else ''}{{0, 0, 0, 0, 0}}}};")
         rows.append("{%s, %rf, %rf, %d, notifies_%s}" % (_cs(k), v[0], v[1], len(v[2]), nv))
     ms = ", ".join(rows)
     out.append(f"const u64_montage_def u64_montages[] = {{{ms}{', ' if ms else ''}{{0}}}};")

@@ -15,7 +15,7 @@ typedef struct {
   int stack_type, stack_limit;
   const char *const *cond_effects, *const *cond_required;      // ConditionalGameplayEffects: class + '|'-joined required source tags
 } u64_ge_def;
-typedef struct { float time; const char *cls, *tag; } u64_notify_def;
+typedef struct { float time; const char *cls, *tag; float duration; int state; } u64_notify_def;     // state: a notify state (begin at time, end after duration; tag = its GameplayTags, "|"-separated)
 typedef struct { const char *name; float length, blend_out; int nnotifies; const u64_notify_def *notifies; } u64_montage_def;
 typedef struct { const char *cls, *comp; int kind; float a, b, c, rx, ry, rz, ryaw; } u64_shape_def;   // kind 1: box half extents; 2: capsule (radius, half height); 3: sphere (radius)
 typedef struct { const char *cls, *fn, *comp; int end; } u64_bound_event_def;   // from K2Node_ComponentBoundEvent: handler function -> component and begin/end

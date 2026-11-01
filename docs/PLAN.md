@@ -204,8 +204,13 @@ a real map, 91 Blueprints and ~8k lines of C++. Run its tests with `tools/run_sh
   draw size 500 x 500, centred on the point's projection through the player's camera (UE axes, horizontal FOV, 16:9; far ones first). The projection is checked against the formula written out in the test (four bars,
   exact rectangles of the background and the health bar), and the enemy's shield bar follows damage through the widget's own attribute listener (91.67 / 100 -> 149.84 of 163.46 wide). Every hero now has a
   player-state stand-in, since the widget reads its ability system through it.
+  Damage numbers (`AGSCharacterBase::AddDamageNumber` / `ShowDamageNumber`, `UI_DamageNumber` + `WC_DamageText`): the project's own `PostGameplayEffectExecute` calls `PC->ShowDamageNumber` for the local
+  player's hits (headshot tag from the effect spec); the runtime queues them (one per 0.1 s), spawns the component (screen space, 200 x 100, pivot 0.5 / 2.0 at the target's origin) and plays the widget's
+  `FadeAnimation` (a MovieScene: opacity and Y translation channels, Hermite keys with per-second tangents, speed 2, assuming 24000 ticks / s), destroyed after 1 s. Tests: text `8` (8.333, half to even)
+  and `12` (12.5 headshot), colours (1, 1, 0.498) / (1, 0, 0), font 42 / 56, position from an independent projection with the camera's actual rotation, animated offset and opacity from the keys.
+  This work also fixed a real bug: an ability's `MakeOutgoingGameplayEffectSpec` used a phantom ASC created for the ability object as the spec's source instead of the hero's ASC.
   HUD, not done: textures (weapon icon / background drawn as frames), the asset's fonts and text measuring (auto-sized slots use a fixed-pitch estimate; the 8 x 8 font overlaps small labels at 576 pixels wide),
-  the character name text (the hero's name is empty), occlusion of the floating bars by geometry, damage numbers (their widget animation is a MovieScene: opacity / 2D transform tracks), the material reticles,
+  the character name text (the hero's name is empty), occlusion of the floating bars by geometry, the material reticles,
   the respawn countdown wiring. The player state is a stand-in (the ability Blueprints cast their owning actor to it; the cast is answered with the hero's).
 * Audio, networking, AI behaviour of the placed heroes.
 * Unverified engine assumption: the first execution of a periodic effect happens on the next tick (see below).

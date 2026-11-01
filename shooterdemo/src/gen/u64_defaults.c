@@ -56,6 +56,7 @@ void u64_apply_defaults(u64_obj *o, const char *cls) {
     *u64_ivar(o, "KnockDownEffect") = u64_cls("GE_KnockedDown");
     *u64_ivar(o, "ReviveEffect") = u64_cls("GE_Revive");
     *u64_ivar(o, "DeathEffect") = u64_cls("GE_Dead");
+    *u64_ivar(o, "CharacterName") = u64_str("Hero");
     *u64_ivar(o, "DeathMontage") = u64_cls("Death_Montage");
     *u64_ivar(o, "DeathSound") = u64_cls("Stinger_PlayerDeath_Stereo_Cue");
     *u64_ivar(o, "CharacterAbilities") = u64_array_const(7, 7, (u64_v[]){u64_int(0), u64_cls("GSGA_CharacterJump"), u64_cls("GA_Sprint"), u64_cls("GA_NextWeapon"), u64_cls("GA_PreviousWeapon"), u64_cls("GA_Revive"), u64_cls("GA_InteractPassive"), u64_cls("GA_InteractActive")} + 1);
@@ -144,6 +145,7 @@ void u64_apply_defaults(u64_obj *o, const char *cls) {
     *u64_ivar(o, "WeaponMesh3P") = u64_comp(o, "WeaponMesh3P");
     *u64_ivar(o, "Abilities") = u64_array_const(15, 5, (u64_v[]){u64_int(0), u64_cls("GA_RiflePrimary"), u64_cls("GA_RiflePrimaryInstant"), u64_cls("GA_RifleAlternate"), u64_cls("GA_RifleSecondary"), u64_cls("GA_RifleReload")} + 1);
     *u64_ivar(o, "DefaultFireMode") = u64_name("Weapon.Rifle.FireMode.FullAuto");
+    *u64_ivar(o, "DefaultStatusText") = u64_str("Full Auto");
     *u64_ivar(o, "Equip1PMontage") = u64_cls("HeroFPP_RifleEquip_Montage");
     *u64_ivar(o, "Equip3PMontage") = u64_cls("HeroTPP_Equip");
     *u64_ivar(o, "PickupSound") = u64_cls("AssaultRifle_AmmoPickup_Cue");
@@ -173,6 +175,7 @@ void u64_apply_defaults(u64_obj *o, const char *cls) {
     *u64_ivar(o, "WeaponMesh3P") = u64_comp(o, "WeaponMesh3P");
     *u64_ivar(o, "Abilities") = u64_array_const(16, 4, (u64_v[]){u64_int(0), u64_cls("GA_RocketLauncherPrimary"), u64_cls("GA_RocketLauncherPrimaryInstant"), u64_cls("GA_RocketLauncherSecondary"), u64_cls("GA_RocketLauncherReload")} + 1);
     *u64_ivar(o, "DefaultFireMode") = u64_name("Weapon.FireMode.None");
+    *u64_ivar(o, "DefaultStatusText") = u64_str("Default");
     *u64_ivar(o, "Equip1PMontage") = u64_cls("HeroFPP_LauncherEquip_Montage");
     *u64_ivar(o, "Equip3PMontage") = u64_cls("HeroTPP_Equip");
     *u64_ivar(o, "PickupSound") = u64_cls("AssaultRifle_AmmoPickup_Cue");
@@ -209,6 +212,7 @@ void u64_apply_defaults(u64_obj *o, const char *cls) {
     *u64_ivar(o, "WeaponMesh3PEquippedRelativeLocation") = u64_vec(0.0f, 0.0f, 12.0f);
     *u64_ivar(o, "Abilities") = u64_array_const(17, 5, (u64_v[]){u64_int(0), u64_cls("GA_ShotgunPrimary"), u64_cls("GA_ShotgunPrimaryInstant"), u64_cls("GA_ShotgunAlternate"), u64_cls("GA_ShotgunSecondary"), u64_cls("GA_ShotgunReload")} + 1);
     *u64_ivar(o, "DefaultFireMode") = u64_name("Weapon.Shotgun.FireMode.SemiAuto");
+    *u64_ivar(o, "DefaultStatusText") = u64_str("Semi Auto");
     *u64_ivar(o, "Equip1PMontage") = u64_cls("HeroFPP_RifleEquip_Montage");
     *u64_ivar(o, "Equip3PMontage") = u64_cls("HeroTPP_Equip");
     *u64_ivar(o, "PickupSound") = u64_cls("AssaultRifle_AmmoPickup_Cue");
@@ -281,6 +285,9 @@ void u64_apply_defaults(u64_obj *o, const char *cls) {
     *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(32, 1, (u64_v[]){u64_int(0), u64_name("State.Dead")} + 1);
   }
   if (!strcmp(cls, "GA_RifleAlternate")) {
+    *u64_ivar(o, "FullAutoStatus") = u64_str("Full Auto");
+    *u64_ivar(o, "SemiAutoStatus") = u64_str("Semi Auto");
+    *u64_ivar(o, "BurstStatus") = u64_str("Burst");
     *u64_ivar(o, "AbilityInputID") = u64_name("EGSAbilityInputID::AlternateFire");
     *u64_ivar(o, "AbilityID") = u64_name("EGSAbilityInputID::AlternateFire");
     *u64_ivar(o, "bSourceObjectMustEqualCurrentWeaponToActivate") = u64_bool(1);
@@ -398,6 +405,8 @@ void u64_apply_defaults(u64_obj *o, const char *cls) {
     *u64_ivar(o, "ActivationBlockedTags") = u64_array_const(82, 3, (u64_v[]){u64_int(0), u64_name("Ability.Weapon.IsChanging"), u64_name("State.Dead"), u64_name("State.KnockedDown")} + 1);
   }
   if (!strcmp(cls, "GA_ShotgunAlternate")) {
+    *u64_ivar(o, "FullAutoStatus") = u64_str("Full Auto");
+    *u64_ivar(o, "SemiAutoStatus") = u64_str("Semi Auto");
     *u64_ivar(o, "AbilityInputID") = u64_name("EGSAbilityInputID::AlternateFire");
     *u64_ivar(o, "AbilityID") = u64_name("EGSAbilityInputID::AlternateFire");
     *u64_ivar(o, "bSourceObjectMustEqualCurrentWeaponToActivate") = u64_bool(1);
@@ -576,6 +585,8 @@ void u64_apply_defaults(u64_obj *o, const char *cls) {
     *u64_ivar(o, "bHasScriptImplementedPaint") = u64_bool(0);
   }
   if (!strcmp(cls, "UI_DamageNumber")) {
+    *u64_ivar(o, "NormalColor") = u64_vec(1.0f, 1.0f, 0.49803900718688965f);
+    *u64_ivar(o, "HeadShotColor") = u64_vec(1.0f, 0.0f, 0.0f);
     *u64_ivar(o, "HeadShotFontSize") = u64_int(56);
     *u64_ivar(o, "NormalFontSize") = u64_int(42);
     *u64_ivar(o, "DesignSizeMode") = u64_name("EDesignPreviewSizeMode::Custom");
@@ -598,5 +609,7 @@ void u64_apply_defaults(u64_obj *o, const char *cls) {
   if (!strcmp(cls, "WC_DamageText")) {
     *u64_ivar(o, "Space") = u64_name("EWidgetSpace::Screen");
     *u64_ivar(o, "WidgetClass") = u64_cls("UI_DamageNumber");
+    *u64_ivar(o, "DrawSize") = u64_vec(200.0f, 100.0f, 0.0f);
+    *u64_ivar(o, "Pivot") = u64_vec(0.5f, 2.0f, 0.0f);
   }
 }

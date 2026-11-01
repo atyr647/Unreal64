@@ -362,8 +362,11 @@ static void exec_damage(asc_t *tgt, asc_t *src, u64_obj *spec)
   u64_notify_damage_tasks(tgt->obj, 3, args);
 }
 
+static u64_obj *cur_spec;                                           // the spec being executed: its dynamic asset tags (Effect.Damage.HeadShot) are read by the project's PostGameplayEffectExecute
+int u64_gas_current_spec_headshot(void) { return cur_spec && u64_true(*u64_ivar(cur_spec, "HeadShot")); }
 static void run_modifiers(asc_t *tgt, asc_t *src, const u64_ge_def *d, active_t *e, u64_obj *spec)
 {
+  cur_spec = spec;
   active_t tmp; memset(&tmp, 0, sizeof tmp); tmp.def = d; tmp.target = tgt; tmp.source = src; tmp.stack = 1;
   if (!e) { e = &tmp;
     for (int i = 0; i < d->nmods; i++) if (d->mods[i].calc == U64_CALC_SETBYCALLER && e->nsbc < 4) {

@@ -1,6 +1,10 @@
 #include "u64_widgets.h"
+static const u64_anim_key anim_keys_UI_DamageNumber_FadeAnimation_0[] = {{0.0f, 1.0f, 2, 0.0f, 0.0f}, {1.25f, 1.0f, 2, 0.0f, 0.0f}, {2.5f, 0.0f, 2, 0.0f, 0.0f}};
+static const u64_anim_key anim_keys_UI_DamageNumber_FadeAnimation_1[] = {{0.0f, 0.0f, 2, -0.001483583590015769f, -0.001483583590015769f}, {2.5f, -75.0f, 2, 0.0f, 0.0f}};
 const u64_widget_def u64_widget_defs[] = {
-  {"UI_DamageNumber", "Retainer", -1, -1, 0, {0.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 100.0f, 30.0f}, {0.0f, 0.0f}, 0, 0, "", 24.0f, 0, {1.0f, 1.0f, 1.0f, 1.0f}, 0.0f, {1.0f, 1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f, 0.5f}, {0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}, 0, 1},
+  {"UI_DamageNumber", "Retainer", -1, 6, 0, {0.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 100.0f, 30.0f}, {0.0f, 0.0f}, 0, 0, "", 24.0f, 0, {1.0f, 1.0f, 1.0f, 1.0f}, 0.0f, {1.0f, 1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f, 0.5f}, {0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}, 0, 1},
+  {"UI_DamageNumber", "Overlay_0", 0, 5, 0, {0.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 100.0f, 30.0f}, {0.0f, 0.0f}, 0, 0, "", 24.0f, 0, {1.0f, 1.0f, 1.0f, 1.0f}, 0.0f, {1.0f, 1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f, 0.5f}, {0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}, 0, 1},
+  {"UI_DamageNumber", "Damage", 1, 1, 0, {0.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 100.0f, 30.0f}, {0.0f, 0.0f}, 0, 0, "", 42.0f, 0, {1.0f, 1.0f, 0.5f, 1.0f}, 0.0f, {1.0f, 1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f, 0.5f}, {0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}, 0, 1},
   {"UI_FloatingStatusBar_Hero", "CanvasPanel", -1, 0, 0, {0.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 100.0f, 30.0f}, {0.0f, 0.0f}, 0, 0, "", 24.0f, 0, {1.0f, 1.0f, 1.0f, 1.0f}, 0.0f, {1.0f, 1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f, 0.5f}, {0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}, 0, 1},
   {"UI_FloatingStatusBar_Hero", "Image_Background", 0, 3, 0, {0.5f, 0.5f, 0.5f, 0.5f}, {0.0f, 0.0f, 165.0f, 24.0f}, {0.5f, 0.5f}, 0, 0, "", 24.0f, 0, {1.0f, 1.0f, 1.0f, 1.0f}, 0.0f, {1.0f, 1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f, 0.5f}, {0.0f, 0.0f}, {0.010417000390589237f, 0.010417000390589237f, 0.010417000390589237f, 1.0f}, 0, 1},
   {"UI_FloatingStatusBar_Hero", "ProgressBar_Shield", 0, 2, 0, {0.5f, 0.5f, 0.5f, 0.5f}, {0.0f, -8.0f, 163.46206665039062f, 8.0f}, {0.5f, 0.5f}, 0, 0, "", 24.0f, 0, {1.0f, 1.0f, 1.0f, 1.0f}, 1.0f, {0.5208330154418945f, 0.9151890277862549f, 1.0f, 1.0f}, {0.274509996175766f, 0.274509996175766f, 0.274509996175766f, 1.0f}, {0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}, 0, 1},
@@ -43,4 +47,9 @@ const u64_widget_def u64_widget_defs[] = {
   {"UI_TargetReticle", "CanvasPanel_0", -1, 0, 0, {0.0f, 0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 100.0f, 30.0f}, {0.0f, 0.0f}, 0, 0, "", 24.0f, 0, {1.0f, 1.0f, 1.0f, 1.0f}, 0.0f, {1.0f, 1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f, 0.5f}, {0.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}, 0, 1},
   {"UI_TargetReticle", "Image_50", 0, 3, 0, {0.5f, 0.5f, 0.5f, 0.5f}, {0.0f, 0.0f, 250.0f, 300.0f}, {0.5f, 0.5f}, 0, 0, "", 24.0f, 0, {1.0f, 1.0f, 1.0f, 1.0f}, 0.0f, {1.0f, 1.0f, 1.0f, 1.0f}, {0.0f, 0.0f, 0.0f, 0.5f}, {512.0f, 512.0f}, {100.0f, 0.0f, 0.0f, 1.0f}, 0, 0}
 };
-const int u64_widget_count = 42;
+const int u64_widget_count = 44;
+const u64_widget_anim_def u64_widget_anims[] = {
+  {"UI_DamageNumber", "FadeAnimation", "Retainer", 0, 3, anim_keys_UI_DamageNumber_FadeAnimation_0, 2.5000416666666667f},
+  {"UI_DamageNumber", "FadeAnimation", "Retainer", 2, 2, anim_keys_UI_DamageNumber_FadeAnimation_1, 2.5000416666666667f},
+  {0}
+};

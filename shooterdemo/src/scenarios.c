@@ -8,6 +8,7 @@
 #include "u64_widgets.h"
 extern u64_obj *u64_gs_hud_of(u64_obj *hero);
 extern int u64_gs_floating_draw_list(u64_obj *viewer, float lw, float lh, u64_draw_cmd *out, int max);
+extern int u64_gs_damage_draw_list(u64_obj *viewer, float lw, float lh, u64_draw_cmd *out, int max);
 #include <stdarg.h>
 const u64_bpfn *u64_bp_registry(void); int u64_bp_registry_count(void);
 static int fails;
@@ -35,6 +36,7 @@ static u64_v call(u64_obj *o, const char *fn) { return u64_call(o, fn, 0, 0); }
 // Two views of the HUD for the N64 build, which renders them after the suite (shooterdemo/src/hud_render.c): [0] at the chest hold (status bars, ammo, "Hold 'E'" and its bar), [1] aiming at the enemy
 // (the HUD with the enemy's floating status bar). Text is copied: the widgets' strings are collectable.
 u64_draw_cmd u64_hud_snap[2][96]; int u64_hud_snap_n[2]; static char hud_snap_txt[2][96][64];
+static void hud_snap_damage(const u64_draw_cmd *dn, int n);
 static void hud_snapshot(int view, const u64_draw_cmd *dl, int n)
 {
   u64_hud_snap_n[view] = n < 96 ? n : 96;
@@ -43,6 +45,11 @@ static void hud_snapshot(int view, const u64_draw_cmd *dl, int n)
       for (int i = 0; i < u64_hud_snap_n[view]; i++) fprintf(f, "  {%d, %.4ff, %.4ff, %.4ff, %.4ff, {%.4ff, %.4ff, %.4ff, %.4ff}, %s%s%s, %d, %.1ff, 0},\n", dl[i].kind, dl[i].x, dl[i].y, dl[i].w, dl[i].h, dl[i].rgba[0], dl[i].rgba[1], dl[i].rgba[2], dl[i].rgba[3], dl[i].text ? "\"" : "", dl[i].text ? dl[i].text : "0", dl[i].text ? "\"" : "", dl[i].justify, dl[i].font);
       fprintf(f, "};\nconst int hud_dump%d_n = %d;\n", view, u64_hud_snap_n[view]); fclose(f); } }
   for (int i = 0; i < u64_hud_snap_n[view]; i++) { u64_hud_snap[view][i] = dl[i]; if (dl[i].text) { snprintf(hud_snap_txt[view][i], sizeof hud_snap_txt[view][i], "%s", dl[i].text); u64_hud_snap[view][i].text = hud_snap_txt[view][i]; } u64_hud_snap[view][i].name = 0; }
+}
+static void hud_snap_damage(const u64_draw_cmd *dn, int n)       // the floating damage number joins the second N64 view (aiming at the enemy)
+{
+  for (int i = 0; i < n && u64_hud_snap_n[1] < 96; i++) { int k = u64_hud_snap_n[1]++; u64_hud_snap[1][k] = dn[i]; u64_hud_snap[1][k].name = 0;
+    if (dn[i].text) { snprintf(hud_snap_txt[1][k], sizeof hud_snap_txt[1][k], "%s", dn[i].text); u64_hud_snap[1][k].text = hud_snap_txt[1][k]; } }
 }
 // ---- HUD draw-list helpers
 static const char *hud_text(const u64_draw_cmd *dl, int n, const char *name) { for (int i = 0; i < n; i++) if (dl[i].kind == 1 && !strcmp(dl[i].name, name)) return dl[i].text; return "(none)"; }
@@ -107,6 +114,7 @@ int u64_run_shooter_scenarios(int verbose)
     CHECK(!strcmp(hud_text(dl, n, "TextBlock_Health"), "100 / 100") && !strcmp(hud_text(dl, n, "TextBlock_Shield"), "100 / 100") && !strcmp(hud_text(dl, n, "TextBlock_Mana"), "100 / 100") && !strcmp(hud_text(dl, n, "TextBlock_Stamina"), "100 / 100"));
     CHECK(!strcmp(hud_text(dl, n, "TextBlock_HealthRegen"), "+ 1.0") && !strcmp(hud_text(dl, n, "TextBlock_ManaRegen"), "+ 1.0") && !strcmp(hud_text(dl, n, "TextBlock_StaminaRegen"), "+ 2.0") && !strcmp(hud_text(dl, n, "TextBlock_ShieldRegen"), "+ 0.0"));
     CHECK(!strcmp(hud_text(dl, n, "TextBlock_ClipAmmo"), "30") && !strcmp(hud_text(dl, n, "TextBlock_ReserveAmmo"), "60") && !strcmp(hud_text(dl, n, "TextBlock_XP"), "0") && !strcmp(hud_text(dl, n, "TextBlock_Gold"), "0"));
+    CHECK(!strcmp(hud_text(dl, n, "TextBlock_WeaponStatus"), "Full Auto"));                 // BP_Rifle's DefaultStatusText (an FText in the class defaults)
     const u64_draw_cmd *hb = hud_bar(dl, n, "ProgressBar_Health", 1);                    // the fill (second rectangle of the bar): 580 wide at full health
     CHECK(hb && fabsf(hb->w - 580.0f) < 1e-3f && fabsf(hb->x - 11.126678f) < 0.001f && fabsf(hb->y - 990.52922f) < 0.001f);
     CHECK(hud_text_at(dl, n, "TextBlock_ClipAmmo", 1674.078f, 1006.9189f) && hud_text_at(dl, n, "TextBlock_Health", 25.1267f, 990.5292f));
@@ -117,7 +125,7 @@ int u64_run_shooter_scenarios(int verbose)
     u64_obj *enemy = u64_find("BP_HeroCharacter2"); u64_draw_cmd dl[64]; u64_v el = *u64_ivar(enemy, "Location");
     *u64_ivar(hero, "ControlRotation") = u64_vec(0, 0, 0);
     int n = u64_gs_floating_draw_list(hero, 1920, 1080, dl, 64);
-    CHECK(u64_ivar(enemy, "UIFloatingStatusBar")->t == U64_OBJ && n >= 5);
+    CHECK(u64_ivar(enemy, "UIFloatingStatusBar")->t == U64_OBJ && n >= 5 && !strcmp(hud_text(dl, n, "TextBlock_Name"), "Hero"));      // the hero's CharacterName (an FText in the class defaults)
     float cam[3]; { u64_v hl = *u64_ivar(hero, "Location"); u64_obj *fc = u64_comp(hero, "FirstPersonCamera").u.o; u64_v rel = fc ? *u64_ivar(fc, "RelativeLocation") : u64_vec(0, 0, 0); float fov = fc && u64_ivar(fc, "FieldOfView")->t == U64_FLOAT ? u64_ivar(fc, "FieldOfView")->u.f : 90.0f;
       cam[0] = hl.u.v[0] + rel.u.v[0]; cam[1] = hl.u.v[1] + rel.u.v[1]; cam[2] = hl.u.v[2] + rel.u.v[2];
       float dx = el.u.v[0] - cam[0], dy = el.u.v[1] - cam[1], dz = el.u.v[2] + 120.0f - cam[2];                      // control rotation 0: the camera looks along +X, +Y is right, +Z up
@@ -231,7 +239,7 @@ int u64_run_shooter_scenarios(int verbose)
     float cx = loc.u.v[0] + rel.u.v[0], cy = loc.u.v[1] + rel.u.v[1], cz = loc.u.v[2] + rel.u.v[2];
     float dx = el.u.v[0] - cx, dy = el.u.v[1] - cy, dz = body_z(enemy, "b_Hips") - cz;
     *u64_ivar(hero, "ControlRotation") = u64_vec(atan2f(dz, sqrtf(dx * dx + dy * dy)) * 57.29578f, atan2f(dy, dx) * 57.29578f, 0);
-    int clip0 = u64_as_int(call(hero, "GetPrimaryClipAmmo"));
+    int clip0 = u64_as_int(call(hero, "GetPrimaryClipAmmo")); float fire_t = u64_world_time();
     CHECK(u64_input_press(hero, "EGSAbilityInputID::PrimaryFire"));
     for (int i = 0; i < 30 && u64_as_int(call(hero, "GetPrimaryClipAmmo")) == clip0; i++) tick(1);       // until the first round is fired
     u64_input_release_id(hero, "EGSAbilityInputID::PrimaryFire");
@@ -259,6 +267,26 @@ int u64_run_shooter_scenarios(int verbose)
       { u64_draw_cmd both[96]; int nb = u64_widget_draw_list(u64_gs_hud_of(ehero), "UI_HUD", 1920, 1080, both, 48); nb += u64_gs_floating_draw_list(ehero, 1920, 1080, both + nb, 96 - nb); hud_snapshot(1, both, nb); }
     }
     hero = ehero;
+    {                                                                                  // the floating damage number for the 8.3333 hit (the project's PostGameplayEffectExecute -> PC->ShowDamageNumber -> WC_DamageText -> UI_DamageNumber):
+      // text "8" (Conv_FloatToText, no fraction digits, half to even), NormalColor (1, 1, 0.498), font 42, at the enemy's origin projected through the player's camera, the widget's top-left at
+      // point - pivot (0.5, 2.0) * draw size (200 x 100); FadeAnimation (speed 2) rises by Hermite(0 -> -75 over 2.5 s, start tangent -0.0014836 / s) and fades from 1.25 s: opacity 1 -> 0 (cubic, flat tangents)
+      u64_draw_cmd dn[16]; int nn = u64_gs_damage_draw_list(ehero, 1920, 1080, dn, 16);
+      CHECK(nn == 1 && dn[0].kind == 1 && !strcmp(dn[0].text, "8") && !strcmp(dn[0].name, "Damage") && dn[0].font == 42.0f);
+      CHECK(fabsf(dn[0].rgba[0] - 1.0f) < 1e-4f && fabsf(dn[0].rgba[1] - 1.0f) < 1e-4f && fabsf(dn[0].rgba[2] - 0.498f) < 1e-4f);
+      u64_obj *dtc = 0; for (int i = 0; i < u64_obj_count() && !dtc; i++) { u64_obj *o = u64_obj_at(i); if (!strcmp(u64_obj_class(o), "WC_DamageText") && u64_obj_alive(o)) dtc = o; }
+      u64_obj *dw = dtc ? u64_ivar(dtc, "Widget")->u.o : 0; float born = dw ? u64_ivar(dw, "AnimStart")->u.f : -1;
+      CHECK(dw && born >= fire_t - 0.001f && born <= u64_world_time() && fabsf(u64_ivar(dw, "AnimSpeed")->u.f - 2.0f) < 1e-6f);        // spawned by the hit, played at speed 2
+      u64_v hl = *u64_ivar(hero, "Location"), el2 = *u64_ivar(enemy, "Location"); u64_obj *fc = u64_comp(hero, "FirstPersonCamera").u.o; u64_v rl = fc ? *u64_ivar(fc, "RelativeLocation") : u64_vec(0, 0, 0);
+      float fov = fc && u64_ivar(fc, "FieldOfView")->t == U64_FLOAT ? u64_ivar(fc, "FieldOfView")->u.f : 90.0f, t = tanf(fov * 0.5f * 3.14159265f / 180.0f);
+      float ddx = el2.u.v[0] - (hl.u.v[0] + rl.u.v[0]), ddy = el2.u.v[1] - (hl.u.v[1] + rl.u.v[1]), ddz = el2.u.v[2] - (hl.u.v[2] + rl.u.v[2]);
+      u64_v cr = *u64_ivar(hero, "ControlRotation"); float pp = cr.u.v[0] * 0.017453292f, yy = cr.u.v[1] * 0.017453292f;      // the camera is aimed at the enemy's hips (set above)
+      float fwd = ddx * cosf(pp) * cosf(yy) + ddy * cosf(pp) * sinf(yy) + ddz * sinf(pp), rgt = -ddx * sinf(yy) + ddy * cosf(yy), upv = -ddx * sinf(pp) * cosf(yy) - ddy * sinf(pp) * sinf(yy) + ddz * cosf(pp);
+      float sx = (0.5f + 0.5f * rgt / fwd / t) * 1920.0f, sy = (0.5f - 0.5f * upv / fwd / (t * 1080.0f / 1920.0f)) * 1080.0f;
+      float a = (u64_world_time() - born) * 2.0f, u = a / 2.5f, h = (u * u * u - 2 * u * u + u) * 2.5f * -0.001483583590015769f + (-2 * u * u * u + 3 * u * u) * -75.0f;
+      float op = 1.0f; if (a > 1.25f) { float w = (a - 1.25f) / 1.25f; op = 1.0f - (3 * w * w - 2 * w * w * w); }
+      CHECK(fwd > 0 && fabsf(dn[0].x - (sx - 100.0f)) < 0.05f && fabsf(dn[0].y - (sy - 200.0f + h)) < 0.05f && fabsf(dn[0].rgba[3] - op) < 1e-3f);
+      hud_snap_damage(dn, nn);
+    }
     // --- reload (GA_RifleReload): the clip is topped up from the reserve; clip + reserve is conserved
     int clip1 = u64_as_int(call(hero, "GetPrimaryClipAmmo")), res1 = u64_as_int(call(hero, "GetPrimaryReserveAmmo"));
     CHECK(clip1 == 29 && res1 == 90);
@@ -301,6 +329,11 @@ int u64_run_shooter_scenarios(int verbose)
     hero = enemy;
     CHECK(fabsf((sh0 - attr("Shield")) - 10.0f * 1.5f * 100.0f / 120.0f) < 0.01f);
     hero = me;
+    {                                                                                  // the headshot's number: 12.5 -> "12" (half to even), HeadShotColor (1, 0, 0), HeadShotFontSize 56
+      u64_draw_cmd dn[16]; int nn = u64_gs_damage_draw_list(me, 1920, 1080, dn, 16), k = -1;
+      for (int i = 0; i < nn; i++) if (dn[i].kind == 1 && !strcmp(dn[i].text, "12")) k = i;
+      CHECK(k >= 0 && dn[k].font == 56.0f && fabsf(dn[k].rgba[0] - 1.0f) < 1e-4f && dn[k].rgba[1] == 0.0f && dn[k].rgba[2] == 0.0f);
+    }
   }
   // --- shotgun (GA_ShotgunPrimaryInstant): 8 pellets at 6 damage each, 12 degrees of spread
   {

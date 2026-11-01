@@ -191,7 +191,16 @@ a real map, 91 Blueprints and ~8k lines of C++. Run its tests with `tools/run_sh
   Animation, not done: aim offset (`RotationOffsetBlendSpace`: mesh-space rotation-additive samples against the Idle frame) and Fabrik IK are passed through unchanged. I held back on the aim
   offset because its exact composition order and the additive blend-space accumulation can't be checked against an engine build here, and for characters that never pitch (every placed hero) it
   is close to the identity; montages on the 3P skeleton beyond the equip one.
-* HUD / player controller widgets (ignored), audio, networking, AI behaviour of the placed heroes.
+* HUD (the player's `UI_HUD`, a UMG widget blueprint): exported from the asset (`tools/ue64/widgets.py`: canvas panels, switcher, text blocks, progress bars, images; slots with anchors / offsets / alignment;
+  the engine's default slot offsets 0, 0, 100, 30), laid out by `runtime/u64_widgets.c` with UMG's canvas rules (checked against an independent Python layout on the real asset at two viewports, and by hand-made
+  cases), and driven by the project's own flow: `CreateHUD` when the player's hero is possessed, the compiled widget functions format and set the widgets (`100 / 100`, `+ 1.0` with the engine's number
+  formatting options, named `Format` arguments), ammo / weapon updates, the attribute listener (health 75 -> text `75 / 100`, bar 435 of 580 wide), the interaction prompt (`Press 'E'` / `Hold 'E'` with its
+  duration bar, gone after the interaction). Rectangles, texts and bar widths are asserted against numbers computed by hand from the asset's values (status panel 9.13, 599.55 in a 1280 x 720 viewport, ...).
+  On the N64 (`shooterdemo/src/hud_render.c`, 640 x 480): the draw list scaled by 0.45, 8 x 8 built-in font, rectangles with alpha; the ares screenshot is `docs/img/ares_shooter_hud.png`.
+  HUD, not done: textures (weapon icon / background drawn as frames), the asset's fonts and text measuring (auto-sized slots use a fixed-pitch estimate), the DPI scale rules (a 1280 x 720 design viewport
+  is assumed), the floating status bars over heroes (`UI_FloatingStatusBar_Hero`), damage numbers, the material reticles, the respawn countdown wiring. The player state is a stand-in (the ability Blueprints cast
+  their owning actor to it; the cast is answered with the hero's).
+* Audio, networking, AI behaviour of the placed heroes.
 * Unverified engine assumption: the first execution of a periodic effect happens on the next tick (see below).
 
 ## Toward an Unreal Engine export target

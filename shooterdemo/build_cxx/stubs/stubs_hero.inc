@@ -1,6 +1,5 @@
 FSimpleMulticastDelegate* AGSHeroCharacter::GetTargetCancelInteractionDelegate(UPrimitiveComponent* InteractionComponent)  { return nullptr; }
 bool AGSHeroCharacter::IsAvailableForInteraction_Implementation(UPrimitiveComponent* InteractionComponent) const { return bool(); }
-bool AGSHeroCharacter::IsInFirstPersonPerspective() const { return bool(); }
 float AGSHeroCharacter::GetInteractionDuration_Implementation(UPrimitiveComponent* InteractionComponent) const { return float(); }
 void AGSHeroCharacter::BeginPlay()  { }
 void AGSHeroCharacter::CancelInteraction_Implementation(UPrimitiveComponent* InteractionComponent)  { }

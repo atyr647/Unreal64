@@ -4,7 +4,8 @@
 #include "AttributeSet.h"
 #include "GameFramework/Actors.h"
 
-struct FHitResult { FHitResult() {} void *Rt = nullptr; FVector Location, ImpactPoint, Normal, TraceStart, TraceEnd; float Time = 1, Distance = 0; bool bBlockingHit = false; TWeakObjectPtr<AActor> Actor; FName BoneName;
+struct UPrimitiveComponent;
+struct FHitResult { FHitResult() {} void *Rt = nullptr; TWeakObjectPtr<UPrimitiveComponent> Component; FVector Location, ImpactPoint, Normal, TraceStart, TraceEnd; float Time = 1, Distance = 0; bool bBlockingHit = false; TWeakObjectPtr<AActor> Actor; FName BoneName;
   AActor *GetActor() const { return Actor.Get(); } };
 inline void FGameplayEffectContext::AddHitResult(const FHitResult &h, bool) { HitResultPtr = new FHitResult(h); }
 struct FActiveGameplayEffectHandle { int32 Handle = -1; bool IsValid() const { return Handle >= 0; } bool operator==(const FActiveGameplayEffectHandle &o) const { return Handle == o.Handle; } };

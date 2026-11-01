@@ -120,4 +120,15 @@ Behaviour changes found by running the project's code: a trace that hits nothing
 use the engine's sampling (not uniform in solid angle) instead of the hand-written one. Approximations that remain: the start location's rotation is the hero's control rotation (the real one is
 the weapon socket's rotation), reticle actors are not spawned (HUD), debug drawing is off.
 
-15 -> 22 of 45 files compile (`GSGameplayAbility`, `GSAbilityTypes`, `GSAbilitySystemGlobals`, `GSDamageExecutionCalc`, `GSGATA_Trace`, `GSGATA_LineTrace`, `GSGATA_SphereTrace` now).
+### The interaction trace task (GSAT_WaitInteractableTarget.cpp)
+
+`UGSAT_WaitInteractableTarget` (the ability task that looks for something to interact with) runs as written (`-DU64_CXX_TASKS`): the project's own factory `WaitForInteractableTarget` builds the task,
+`Activate` registers its `SetTimer` (the shim's timer list, fired from the runtime's frame with the runtime's world time), and every period `PerformTrace` aims from the view point, clips the ray to
+range, traces by the `InteractTrace` profile, applies the interactable-component rule (the hit component must *overlap* the Interactable channel and the actor must `Implements<UGSInteractable>()`
+and be available through `IGSInteractable::Execute_IsAvailableForInteraction`), and broadcasts `FoundNewInteractableTarget` / `LostInteractableTarget`, which reach the Blueprint's handlers.
+The chest, door and revive scenarios now go through it. New shim pieces: `TimerManager::SetTimer` over member-function pointers, socket-type targeting location info, `FHitResult::Component`,
+`UPrimitiveComponent::GetCollisionResponseToChannel` (runtime hook), `AActor::Implements<>` (runtime hook), one-receiver delegate hooks for `DECLARE_..._OneParam`, and `Execute_<Event>` declarations
+emitted by `uht_lite.py` for interface events. Bug found on the way: target data kept between ticks must not hold pointers to runtime objects (they are collected); a rebuilt hit lost its component until the
+C++ hit carried it. Approximation kept from the hand port: the start location (weapon point / head socket) is the camera's eye position, since those sockets need the animated meshes.
+
+15 -> 23 of 45 files compile.

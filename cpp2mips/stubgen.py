@@ -2,8 +2,10 @@
 """stubgen.py <Class> <header>... : empty definitions for every virtual / override member a header declares (the class's vtable needs them to link).
 Used for engine-facing project classes the build does not compile (AGSHeroCharacter, AGSWeapon): the runtime owns their behaviour; the proxy only has to exist."""
 import re, sys
-cls = sys.argv[1]
-text = "\n".join(open(h, encoding="utf-8", errors="ignore").read() for h in sys.argv[2:])
+args = sys.argv[1:]; skip = set()
+while "--skip" in args: i = args.index("--skip"); skip.add(args[i + 1]); del args[i:i + 2]
+cls = args[0]
+text = "\n".join(open(h, encoding="utf-8", errors="ignore").read() for h in args[1:])
 text = re.sub(r"/\*.*?\*/", "", text, flags=re.S); text = re.sub(r"//[^\n]*", "", text)
 m = re.search(r"class\s+\w*_?API\s+%s\b[^{]*\{(.*?)\n\};" % cls, text, re.S) or re.search(r"class\s+%s\b[^{]*\{(.*?)\n\};" % cls, text, re.S)
 body = m.group(1)
@@ -12,6 +14,7 @@ for decl, term in re.findall(r"((?:virtual|[\w:<>\*& ]+?)\s+\w+\s*\([^;{]*\)\s*(
     if term == "{": continue                       # defined inline in the header
     if "virtual" not in decl and "override" not in decl: continue
     if "~" in decl or "UFUNCTION" in decl: continue
+    if re.search(r"\b(%s)\s*\(" % "|".join(skip or ["^$"]), decl): continue          # defined by the bridge
     d = decl.replace("virtual", "").replace("override", "").replace("static", "").strip()
     mm = re.match(r"(.*?)(\w+)\s*\((.*)\)\s*(const)?$", d, re.S)
     if not mm: continue

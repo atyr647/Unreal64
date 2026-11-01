@@ -653,6 +653,11 @@ int u64_gs_muzzle_world(u64_obj *hero, float out[3])             // the current 
 }
 // FGameplayAbilityTargetingLocationInfo::GetTargetingTransform().GetLocation(): literal transform, the source actor, or a socket on a component
 static v3 targeting_location(u64_v info, u64_obj *source_actor);
+int u64_cpp_eye_view(u64_obj *hero, float loc[3], float rot[3])         // the hero's camera view point (first / third person camera, control rotation), whoever controls it
+{
+  v3 l, r; if (!hero) return 0;
+  player_view(hero, &l, &r); loc[0] = l.x; loc[1] = l.y; loc[2] = l.z; rot[0] = r.x; rot[1] = r.y; rot[2] = r.z; return 1;
+}
 int u64_cpp_player_view(u64_obj *hero, float loc[3], float rot[3])      // the player controller's view point (0 when the hero is not the player pawn)
 {
   v3 l, r; if (!hero || u64_player_pawn() != hero) return 0;
@@ -1180,15 +1185,26 @@ static void it_perform(u64_obj *t)                                              
     if (broadcast_new) { u64_v nd = interact_target_data(ret); *u64_ivar(t, "TargetData") = nd; u64_mc_broadcast(u64_ivar(t, "FoundNewInteractableTarget"), 1, &nd); }
   }
 }
+#ifdef U64_CXX_TASKS
+void u64_cxx_wait_interactable(u64_obj *task, u64_obj *ability, u64_v profile, float range, float period); void u64_cxx_tasks_tick(float now);
+#endif
 static u64_v ga_wait_interactable(u64_obj *ab, int c, const u64_v *a)    // (Ability, Name, TraceProfile, MaxRange, TimerPeriod, bShowDebug)
 {
   u64_obj *t = u64_task_new("GSAT_WaitInteractableTarget", O(A(c, a, 0)) ? O(A(c, a, 0)) : ab);
+#ifdef U64_CXX_TASKS
+  *u64_ivar(t, "TraceProfile") = A(c, a, 2); *u64_ivar(t, "MaxRange") = A(c, a, 3); *u64_ivar(t, "TimerPeriod") = A(c, a, 4); *u64_ivar(t, "TargetData") = u64_array_of(0, 0);
+  u64_cxx_wait_interactable(t, O(A(c, a, 0)) ? O(A(c, a, 0)) : ab, A(c, a, 2), fv(A(c, a, 3)), fv(A(c, a, 4)));
+  return u64_objv(t);
+#endif
   *u64_ivar(t, "TraceProfile") = A(c, a, 2); *u64_ivar(t, "MaxRange") = A(c, a, 3); *u64_ivar(t, "TimerPeriod") = A(c, a, 4);
   *u64_ivar(t, "TargetData") = u64_array_of(0, 0); *u64_ivar(t, "NextTime") = u64_float(u64_world_time() + fv(A(c, a, 4)));
   return u64_objv(t);
 }
 static void interact_tick(void)
 {
+#ifdef U64_CXX_TASKS
+  u64_cxx_tasks_tick(u64_world_time()); return;
+#endif
   u64_obj *snap[96]; int n = u64_tasks_snapshot(snap, 96); float now = u64_world_time();
   for (int i = 0; i < n; i++) {
     if (strcmp(u64_obj_class(snap[i]), "GSAT_WaitInteractableTarget") || now + 1e-5f < fv(*u64_ivar(snap[i], "NextTime"))) continue;

@@ -10,6 +10,18 @@ CLASS = re.compile(r"^\s*(?:class|struct)\s+(?:\w+_API\s+)?(\w+)\s*(?::\s*(?:pub
 PROP = re.compile(r"^\s*FGameplayAttributeData\s+(\w+)\s*;")
 
 
+NATIVE_EVENT = re.compile(r"UFUNCTION\([^)]*BlueprintNativeEvent[^)]*\)\s*\n\s*([\w:<>\*& ]+?)\s+(\w+)\s*\(([^)]*)\)\s*(const)?\s*;", re.S)
+
+
+def execute_thunks(text):
+    """UHT declares static Execute_<Name>(UObject*, args...) for every BlueprintNativeEvent of an interface; the bridge defines them (they call the Blueprint event)."""
+    out = []
+    for ret, name, args, const in NATIVE_EVENT.findall(text):
+        args = re.sub(r"\s*=\s*[^,)]+", "", args).strip()
+        out.append(f"static {ret.strip()} Execute_{name}(UObject *O{', ' + args if args else ''});")
+    return " ".join(out)
+
+
 def generate(header, out):
     lines = open(header, encoding="utf-8", errors="ignore").read().splitlines()
     base = os.path.splitext(os.path.basename(header))[0]
@@ -34,7 +46,8 @@ def generate(header, out):
             sstruct = f" static UScriptStruct *StaticStruct() {{ static UScriptStruct s; return &s; }}" if kinds.get(cur) == "struct" else ""
             inst = f" bool InstanceOf(const UClass *c) const override {{ return c == StaticClass() || Super::InstanceOf(c); }}" if bases.get(cur) and bases[cur][0] in "UA" else ""
             ctor = f" {cur}(const FObjectInitializer &i = FObjectInitializer());" if "GENERATED_UCLASS_BODY" in ln else ""
-            body = f"public: {sup}{ctor} typedef {cur} ThisClass; static UClass *StaticClass() {{ static UClass c = {{\"{cur}\", &ShimMake<{cur}>}}; return &c; }}{inst}{sstruct}"
+            thunks = execute_thunks("\n".join(lines)) if cur.startswith("I") else ""
+            body = f"public: {thunks} {sup}{ctor} typedef {cur} ThisClass; static UClass *StaticClass() {{ static UClass c = {{\"{cur}\", &ShimMake<{cur}>}}; return &c; }}{inst}{sstruct}"
             res.append(f"#define {fid}_{i}_GENERATED_BODY {body} @FIND@{cur}@")
     text = "\n".join(res) + "\n"
     for cls, plist in props.items():

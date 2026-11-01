@@ -3,7 +3,7 @@
 // (FRotator::Vector, FVector::Rotation, FVector::RotateAngleAxis, FRandomStream::GetFraction / VRandCone). Not verified against an engine build: the engine is not available here.
 #include "ue_shim.h"
 #define PI 3.1415926535897932f
-struct FRotator { float Pitch = 0, Yaw = 0, Roll = 0; FRotator() {} FRotator(float p, float y, float r) : Pitch(p), Yaw(y), Roll(r) {}
+struct FRotator { float Pitch = 0, Yaw = 0, Roll = 0; FRotator() {} FRotator(float p, float y, float r) : Pitch(p), Yaw(y), Roll(r) {} explicit FRotator(float v) : Pitch(v), Yaw(v), Roll(v) {}
   FVector Vector() const { float rp = Pitch * (PI / 180.f), ry = Yaw * (PI / 180.f); float CP = cosf(rp), SP = sinf(rp), CY = cosf(ry), SY = sinf(ry); return FVector(CP * CY, CP * SY, SP); }
   FVector UnitAxisY() const { float rp = Pitch * (PI / 180.f), ry = Yaw * (PI / 180.f), rr = Roll * (PI / 180.f); float SP = sinf(rp), CY = cosf(ry), SY = sinf(ry), SR = sinf(rr), CR = cosf(rr);
     return FVector(SR * SP * CY - CR * SY, SR * SP * SY + CR * CY, -SR * cosf(rp)); } };

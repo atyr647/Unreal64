@@ -12,11 +12,13 @@
 #include "Weapons/GSWeapon.h"
 #include "Characters/Abilities/GSGATA_LineTrace.h"
 #include "Characters/Abilities/GSGATA_SphereTrace.h"
+#include "Characters/Abilities/AbilityTasks/GSAT_WaitInteractableTarget.h"
 extern "C" {
 #include "u64_gas_core.h"
 int u64_cpp_player_view(u64_obj *hero, float loc[3], float rot[3]);
 void u64_cpp_targeting(u64_v info, u64_obj *source, float loc[3], float rot[3]);
 void u64_target_data_ready(u64_obj *target_actor, u64_v handle);
+int u64_cpp_eye_view(u64_obj *hero, float loc[3], float rot[3]);
 u64_v u64_td_handle_from_hits(u64_v hits);
 }
 
@@ -77,7 +79,7 @@ Actor *actor_for(u64_obj *o)
 {
   for (int i = 0; i < nactors; i++) if (actors[i].obj == o) return &actors[i];
   if (nactors >= 16) return nullptr;
-  Actor *a = &actors[nactors++]; a->obj = o; a->ch.rt = o; a->player = o == u64_player_pawn();
+  Actor *a = &actors[nactors++]; a->obj = o; a->ch.rt = o; a->pc.rt = o; a->ctl.rt = o; a->player = o == u64_player_pawn();
   if (u64_class_is(u64_obj_class(o), "GSHeroCharacter")) { a->hero = new AGSHeroCharacter(FObjectInitializer()); a->hero->rt = o; }
   a->ctl.Pawn = &a->ch; a->pc.Pawn = &a->ch; a->ch.Controller = a->player ? (AController *)&a->pc : &a->ctl;
   return a;
@@ -91,7 +93,7 @@ Slot *slot_for(u64_obj *asc)            // slots and proxies are cached by runti
   if (a) {
     a->player = a->obj == u64_player_pawn(); a->ch.Controller = a->player ? (AController *)&a->pc : &a->ctl;
     if (a->hero) a->hero->Controller = a->ch.Controller;
-    s->info.AvatarActor.p = a->avatar(); s->info.OwnerActor.p = a->avatar(); s->info.AbilitySystemComponent.p = &s->rt; s->info.PlayerController.p = a->player ? (AController *)&a->pc : nullptr;
+    s->info.AvatarActor.p = a->avatar(); s->info.OwnerActor.p = a->avatar(); s->info.AbilitySystemComponent.p = &s->rt; s->info.PlayerController.p = a->player ? &a->pc : nullptr;
   }
   s->rt.AbilityActorInfo.p = &s->info;
   return s;
@@ -222,10 +224,10 @@ bool commit2(void *ab) { return u64_ability_commit((u64_obj *)ab, 1, 1); }
 void end2(void *ab, bool c) { u64_ability_end((u64_obj *)ab, c); }
 void AbilityRtInit() { AbilityRt.level = level_hook; AbilityRt.make_spec = make_spec_hook; AbilityRt.source = source_hook; AbilityCommitHook = commit2; AbilityEndHook = end2; }
 // the instance for runtime ability `ab`: class-default flags from the runtime object, actor info of its ASC
-UGSGameplayAbility *gsa_bind(u64_obj *ab, FGameplayAbilitySpec *spec)
+UGSGameplayAbility *gsa_bind(u64_obj *ab, FGameplayAbilitySpec *spec, UGSGameplayAbility *inst = nullptr)
 {
   AbilityRtInit();
-  UGSGameplayAbility *g = gsa_inst(); g->rt = ab;
+  UGSGameplayAbility *g = inst ? inst : gsa_inst(); g->rt = ab;
   g->bActivateAbilityOnGranted = u64_true(*u64_ivar(ab, "bActivateAbilityOnGranted")); g->bActivateOnInput = u64_true(*u64_ivar(ab, "bActivateOnInput"));
   g->bSourceObjectMustEqualCurrentWeaponToActivate = u64_true(*u64_ivar(ab, "bSourceObjectMustEqualCurrentWeaponToActivate"));
   g->bCannotActivateWhileInteracting = u64_true(*u64_ivar(ab, "bCannotActivateWhileInteracting"));
@@ -249,6 +251,7 @@ UClass *target_class(const char *name)                       // the project's ta
 }
 AActor *actor_ref(u64_obj *o)                                // a stand-in for any runtime actor, one per runtime object (pointer identity = actor identity, as the target code compares)
 {
+  if (o && u64_class_is(u64_obj_class(o), "GSCharacterBase")) if (Actor *a = actor_for(o)) return a->avatar();        // characters have one proxy: the same pointer as the ability's avatar
   static AActor pool[64]; static int n;
   for (int i = 0; i < n && i < 64; i++) if (pool[i].rt == o) return &pool[i];
   int k = n++ & 63; pool[k].rt = o; return &pool[k];
@@ -359,11 +362,18 @@ TraceSlot tslots[16]; int ntslots;
 float f_(u64_v v) { return v.t == U64_FLOAT ? v.u.f : (v.t == U64_INT || v.t == U64_BOOL) ? (float)v.u.i : 0.0f; }
 FVector vec_(u64_v v) { return v.t == U64_VEC ? FVector(v.u.v[0], v.u.v[1], v.u.v[2]) : FVector(); }
 u64_v vec_v(const FVector &a) { return u64_vec(a.X, a.Y, a.Z); }
+UPrimitiveComponent *comp_ref(u64_obj *o)                    // one stand-in per runtime component
+{
+  static UPrimitiveComponent pool[64]; static int n;
+  for (int i = 0; i < n && i < 64; i++) if (pool[i].rt == o) return &pool[i];
+  int k = n++ & 63; pool[k].rt = o; return &pool[k];
+}
 FHitResult hit_from_rt(u64_obj *h)
 {
   FHitResult f; f.Rt = h; f.Location = vec_(*u64_ivar(h, "Location")); f.ImpactPoint = f.Location; f.Normal = vec_(*u64_ivar(h, "Normal"));
   f.Time = f_(*u64_ivar(h, "Time")); f.Distance = f_(*u64_ivar(h, "Distance")); f.bBlockingHit = u64_true(*u64_ivar(h, "bBlockingHit"));
   if (u64_obj *a = O_(*u64_ivar(h, "HitActor"))) f.Actor = actor_ref(a);
+  if (u64_obj *c = O_(*u64_ivar(h, "HitComponent"))) f.Component = comp_ref(c);
   f.BoneName = FName(nm_(*u64_ivar(h, "BoneName"))); f.TraceStart = vec_(*u64_ivar(h, "TraceStart")); f.TraceEnd = vec_(*u64_ivar(h, "TraceEnd"));
   return f;
 }
@@ -374,7 +384,7 @@ u64_obj *hit_to_rt(const FHitResult &f)                         // the runtime's
     h = u64_new("HitResult", "HitResult");                      // the default hit the project adds at the end of a trace that hit nothing
     *u64_ivar(h, "Time") = u64_float(f.Time); *u64_ivar(h, "Distance") = u64_float(f.Distance); *u64_ivar(h, "bBlockingHit") = u64_bool(f.bBlockingHit);
     *u64_ivar(h, "Location") = vec_v(f.Location); *u64_ivar(h, "Normal") = vec_v(f.Normal); *u64_ivar(h, "BoneName") = u64_name(f.BoneName.ToString());
-    *u64_ivar(h, "HitActor") = u64_objv(f.Actor.Get() ? (u64_obj *)f.Actor.Get()->rt : nullptr); *u64_ivar(h, "HitComponent") = u64_objv(nullptr);
+    *u64_ivar(h, "HitActor") = u64_objv(f.Actor.Get() ? (u64_obj *)f.Actor.Get()->rt : nullptr); *u64_ivar(h, "HitComponent") = u64_objv(f.Component.Get() ? (u64_obj *)f.Component.Get()->rt : nullptr);
   }
   *u64_ivar(h, "TraceStart") = vec_v(f.TraceStart); *u64_ivar(h, "TraceEnd") = vec_v(f.TraceEnd);
   return h;
@@ -484,3 +494,74 @@ extern "C" void u64_cxx_trace_confirm(u64_obj *s)                // ConfirmTarge
   sl->t->ConfirmTargetingAndContinue(); trace_sync_out(sl, s);
 }
 extern "C" void u64_cxx_trace_stop(u64_obj *s) { TraceSlot *sl = tslot(s); u64_cxx_trace_calls++; sl->t->StopTargeting(); }
+
+// ---- UGSAT_WaitInteractableTarget: the project's interaction trace task (view-point aim, range clip, the interactable-component rules, found / lost target broadcasts) runs as written.
+// One C++ task per runtime task object, made by the project's own factory (WaitForInteractableTarget); its SetTimer is the shim's timer list, fired from the runtime's frame with the
+// runtime's world time. The start location (weapon point / head socket) needs the animated pose of those meshes: the camera's eye stands in, as in the hand port this replaces.
+namespace {
+struct ITProbe : UGSAT_WaitInteractableTarget { void shut(bool a) { OnDestroy(a); } };
+struct ITSlot { u64_obj *key = nullptr; UGSAT_WaitInteractableTarget *t = nullptr; UGSGameplayAbility *ab = nullptr; u64_obj *rab = nullptr; };
+ITSlot islots[8];
+void it_bcast(void *ctx, const FGameplayAbilityTargetDataHandle &h, const char *delegate)
+{
+  u64_v hits = u64_array_of(0, 0);
+  for (int i = 0; i < h.Num(); i++) if (const FHitResult *hr = h.Get(i)->GetHitResult()) u64_array_push(&hits, u64_objv(hit_to_rt(*hr)));
+  u64_v td = u64_td_handle_from_hits(hits); u64_mc_broadcast(u64_ivar((u64_obj *)ctx, delegate), 1, &td);
+}
+void it_found(void *ctx, const FGameplayAbilityTargetDataHandle &h) { it_bcast(ctx, h, "FoundNewInteractableTarget"); }
+void it_lost(void *ctx, const FGameplayAbilityTargetDataHandle &h) { it_bcast(ctx, h, "LostInteractableTarget"); }
+bool implements_hook(const void *actor, const char *iface)       // the project's interface: Blueprint actors with the event, the hero (native)
+{
+  u64_obj *o = (u64_obj *)((const AActor *)actor)->rt;
+  return o && !strcmp(iface, "UGSInteractable") && (u64_has_bp(o, "IsAvailableForInteraction") || u64_class_is(u64_obj_class(o), "GSHeroCharacter"));
+}
+int comp_response_hook(const void *comp, int channel)            // COLLISION_INTERACTABLE is the project's Interactable channel
+{
+  u64_obj *c = (u64_obj *)((const UPrimitiveComponent *)comp)->rt;
+  return c && channel == ECC_GameTraceChannel5 ? u64_comp_response(c, "Interactable") : 0;
+}
+FTransform targeting_hook(const FGameplayAbilityTargetingLocationInfo &info)
+{
+  FTransform t; u64_obj *rab = info.SourceAbility ? (u64_obj *)info.SourceAbility->rt : nullptr, *hero = rab ? O_(*u64_ivar(rab, "Avatar")) : nullptr; float l[3], r[3];
+  if (hero && u64_cpp_eye_view(hero, l, r)) { t.Location = FVector(l[0], l[1], l[2]); t.Rotation.R = FRotator(r[0], r[1], r[2]); }
+  return t;
+}
+float now_hook() { return u64_world_time(); }
+void it_install()
+{
+  AbilityRtInit(); WorldLineTraceHook = trace_line_hook; WorldSweepHook = trace_sweep_hook; PlayerViewHook = view_hook; ImplementsHook = implements_hook; CompResponseHook = comp_response_hook;
+  TargetingTransformHook = targeting_hook; ShimNowHook = now_hook;
+}
+}
+bool IGSInteractable::Execute_IsAvailableForInteraction(UObject *O, UPrimitiveComponent *c)     // the Blueprint event (or the native implementation) of the runtime actor
+{
+  u64_obj *a = (u64_obj *)O->rt; if (!a) return false;
+  u64_v arg = u64_objv(c ? (u64_obj *)c->rt : nullptr); return u64_true(u64_call(a, "IsAvailableForInteraction", 1, &arg));
+}
+USkeletalMeshComponent *AGSHeroCharacter::GetFirstPersonMesh() const { static USkeletalMeshComponent m[16]; static int n; USkeletalMeshComponent *r = &m[n++ & 15]; r->rt = rt ? O_(u64_comp((u64_obj *)rt, "FirstPersonMesh")) : nullptr; return r; }
+USkeletalMeshComponent *AGSHeroCharacter::GetThirdPersonMesh() const { static USkeletalMeshComponent m[16]; static int n; USkeletalMeshComponent *r = &m[n++ & 15]; r->rt = rt ? O_(u64_comp((u64_obj *)rt, "Mesh")) : nullptr; return r; }
+bool AGSHeroCharacter::IsInFirstPersonPerspective() const { return rt && u64_true(*u64_ivar((u64_obj *)rt, "bIsFirstPersonPerspective")); }
+extern "C" int u64_cxx_task_calls;
+int u64_cxx_task_calls;
+extern "C" void u64_cxx_wait_interactable(u64_obj *task, u64_obj *ability, u64_v profile, float range, float period)
+{
+  it_install(); ITSlot *sl = nullptr;
+  for (ITSlot &x : islots) if (!x.key) { sl = &x; break; }
+  if (!sl) { sl = &islots[0]; if (sl->t) static_cast<ITProbe *>(sl->t)->shut(false); }                       // a full table recycles the first slot
+  sl->key = task; sl->rab = ability; sl->ab = new UGSGameplayAbility(); gsa_bind(ability, nullptr, sl->ab);
+  FCollisionProfileName prof; prof.Name = FName(nm_(profile));
+  sl->t = UGSAT_WaitInteractableTarget::WaitForInteractableTarget(sl->ab, FName("WaitInteractableTarget"), prof, range, period, false);   // the project's factory
+  sl->t->FoundNewInteractableTarget.hook = it_found; sl->t->FoundNewInteractableTarget.ctx = task; sl->t->LostInteractableTarget.hook = it_lost; sl->t->LostInteractableTarget.ctx = task;
+  sl->t->Activate(); u64_cxx_task_calls++;
+}
+extern "C" void u64_cxx_tasks_tick(float now)
+{
+  u64_obj *snap[96]; int n = u64_tasks_snapshot(snap, 96);
+  for (ITSlot &x : islots) {
+    if (!x.key) continue;
+    bool live = false; for (int i = 0; i < n; i++) if (snap[i] == x.key) live = true;
+    if (!live) { static_cast<ITProbe *>(x.t)->shut(true); x.key = nullptr; x.t = nullptr; delete x.ab; x.ab = nullptr; continue; }       // the ability ended: OnDestroy clears the timer
+    gsa_bind(x.rab, nullptr, x.ab);                                       // the actor info of the ability's ASC, re-read (the runtime reuses object slots)
+  }
+  ShimTimersTick(now);
+}

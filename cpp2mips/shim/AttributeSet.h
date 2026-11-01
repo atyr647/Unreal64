@@ -42,7 +42,7 @@ struct FGameplayTagContainer {
 };
 struct FPredictionKey { bool IsValidKey() const { return false; } bool IsValidForMorePrediction() const { return false; } FString ToString() const { return FString("[0/0]"); } };
 class UAbilitySystemComponent;
-struct FGameplayAbilityActorInfo { TWeakObjectPtr<AActor> OwnerActor, AvatarActor; TWeakObjectPtr<AController> PlayerController; TWeakObjectPtr<UAbilitySystemComponent> AbilitySystemComponent; bool IsNetAuthority() const { return true; } bool IsLocallyControlledPlayer() const { return true; } };
+struct FGameplayAbilityActorInfo { TWeakObjectPtr<AActor> OwnerActor, AvatarActor; TWeakObjectPtr<struct APlayerController> PlayerController; TWeakObjectPtr<UAbilitySystemComponent> AbilitySystemComponent; bool IsNetAuthority() const { return true; } bool IsLocallyControlledPlayer() const { return true; } };
 struct FArchive {}; class UPackageMap; struct UScriptStruct {};
 struct FHitResult;
 struct FGameplayEffectContext {

@@ -7,6 +7,9 @@ struct FGameplayTargetDataFilterHandle { bool FilterPassesForActor(const TWeakOb
 struct FWorldReticleParameters { FVector AOEScale; };
 enum ETickingGroupShim { TG_PrePhysics, TG_PostPhysics, TG_PostUpdateWork };
 struct FCollisionProfileName { FName Name; };
+enum ECollisionChannel { ECC_WorldStatic, ECC_WorldDynamic, ECC_Pawn, ECC_Visibility, ECC_Camera, ECC_PhysicsBody, ECC_Vehicle, ECC_Destructible, ECC_GameTraceChannel1, ECC_GameTraceChannel2, ECC_GameTraceChannel3, ECC_GameTraceChannel4, ECC_GameTraceChannel5 };
+enum ECollisionResponse { ECR_Ignore, ECR_Overlap, ECR_Block };
+
 struct FCollisionQueryParams { bool bTraceComplex = false, bReturnPhysicalMaterial = false, bIgnoreBlocks = false; FCollisionQueryParams() {} FCollisionQueryParams(FName, bool c) : bTraceComplex(c) {}
   const AActor *Ignored[8]; int nIgnored = 0;
   void AddIgnoredActor(const AActor *a) { if (nIgnored < 8) Ignored[nIgnored++] = a; } void AddIgnoredActors(const TArray<TWeakObjectPtr<AActor>> &l) { for (int i = 0; i < l.Num(); i++) AddIgnoredActor(l[i].Get()); }
@@ -26,7 +29,16 @@ struct FQuatIdentityShim {}; struct FCollisionShape { float Radius = 0; static F
 // world queries are the runtime's (u64_collision.c); the bridge sets the hooks. LineTraceMultiByProfile: profile responses decide blocking / overlap, sorted, stops at the first block.
 inline bool (*WorldLineTraceHook)(const FVector &, const FVector &, FName, const struct FCollisionQueryParams &, TArray<FHitResult> &) = nullptr;
 inline bool (*WorldSweepHook)(const FVector &, const FVector &, float, FName, const struct FCollisionQueryParams &, TArray<FHitResult> &) = nullptr;
-struct UWorld : UObject { EWorldType WorldType = EWorldType::Game; float GetTimeSeconds() const { return 0; } ENetMode GetNetMode() const { return NM_Standalone; }
+// Timers: SetTimer(handle, object, &Class::Method, period, loop) is recorded here; the bridge fires them (ShimTimersTick) with the runtime's world time.
+struct ShimTimer { int id = 0; void *obj = nullptr; void (*call)(void *, const void *) = nullptr; char pmf[16]; float next = 0, period = 0; bool loop = false; };
+inline ShimTimer ShimTimers[32]; inline int ShimTimerSeq = 0; inline float (*ShimNowHook)() = nullptr;
+inline void ShimTimersTick(float now) { for (ShimTimer &t : ShimTimers) while (t.id && now + 1e-5f >= t.next) { void *o = t.obj; if (t.loop) t.next += t.period; else t.id = 0; t.call(o, t.pmf); if (!t.loop) break; } }
+struct FTimerManager {
+  template <class T> void SetTimer(FTimerHandle &h, T *obj, void (T::*fn)(), float rate, bool loop = false, float = -1.f) {
+    ClearTimer(h); for (ShimTimer &t : ShimTimers) if (!t.id) { t.id = h.id = ++ShimTimerSeq; t.obj = obj; memcpy(t.pmf, &fn, sizeof fn); t.call = [](void *o, const void *p) { (static_cast<T *>(o)->*(*(void (T::* const *)())p))(); };
+      t.period = rate; t.loop = loop; t.next = (ShimNowHook ? ShimNowHook() : 0.0f) + rate; return; } }
+  void ClearTimer(FTimerHandle &h) { if (h.id) for (ShimTimer &t : ShimTimers) if (t.id == h.id) t.id = 0; h.id = 0; } };
+struct UWorld : UObject { FTimerManager &GetTimerManager() const { static FTimerManager m; return m; } EWorldType WorldType = EWorldType::Game; float GetTimeSeconds() const { return 0; } ENetMode GetNetMode() const { return NM_Standalone; }
   bool LineTraceMultiByProfile(TArray<FHitResult> &out, const FVector &a, const FVector &b, FName profile, const FCollisionQueryParams &p) const { return WorldLineTraceHook ? WorldLineTraceHook(a, b, profile, p, out) : false; }
   bool SweepMultiByProfile(TArray<FHitResult> &out, const FVector &a, const FVector &b, const FQuat &, FName profile, const FCollisionShape &sh, const FCollisionQueryParams &p) const { return WorldSweepHook ? WorldSweepHook(a, b, sh.Radius, profile, p, out) : false; }
   template <class T> T *SpawnActor(TSubclassOf<T>, const FVector &, const FRotator &) const { ShimUnimplemented("SpawnActor"); return nullptr; } };
@@ -37,8 +49,15 @@ struct UGameplayStatics { template <class... A> static UObject *GetPlayerControl
 struct IRepChangedPropertyTracker {}; struct FLinearColor { float R = 0, G = 0, B = 0, A = 1; };  struct FSubsystemCollectionBase {}; struct USubsystem : UObject { virtual void Initialize(FSubsystemCollectionBase &) {} virtual void Deinitialize() {} };
 enum class EAbilityTaskNetSyncType { BothWait, OnlyServerWait, OnlyClientWait };
 struct FOnAttributeChangeData { FGameplayAttribute Attribute; float NewValue = 0, OldValue = 0; };
-struct FGameplayAbilityTargetingLocationInfo { FTransform LiteralTransform; FTransform GetTargetingTransform() const { return LiteralTransform; } };
-struct UPrimitiveComponent : USceneComponent {};
+enum class EGameplayAbilityTargetingLocationType { LiteralTransform, ActorTransform, SocketTransform };
+struct FGameplayAbilityTargetingLocationInfo;
+inline FTransform (*TargetingTransformHook)(const FGameplayAbilityTargetingLocationInfo &) = nullptr;      // set by the bridge: a socket's transform (the runtime has no animated sockets for all meshes)
+struct FGameplayAbilityTargetingLocationInfo { EGameplayAbilityTargetingLocationType LocationType = EGameplayAbilityTargetingLocationType::LiteralTransform; FTransform LiteralTransform;
+  UObject *SourceComponent = nullptr; FName SourceSocketName; UGameplayAbility *SourceAbility = nullptr; AActor *SourceActor = nullptr;
+  FTransform GetTargetingTransform() const { return LocationType == EGameplayAbilityTargetingLocationType::SocketTransform && TargetingTransformHook ? TargetingTransformHook(*this) : LiteralTransform; }
+  FGameplayAbilityTargetDataHandle MakeTargetDataHandleFromHitResult(UGameplayAbility *, const FHitResult &h) const { FGameplayAbilityTargetDataHandle r; auto *d = new FGameplayAbilityTargetData_SingleTargetHit(h); d->HitResult.Rt = nullptr; r.Add(d); return r; } };
+inline int (*CompResponseHook)(const void *comp, int channel) = nullptr;           // set by the bridge: the runtime's per-channel response of a component
+struct UPrimitiveComponent : USceneComponent { enum ECollisionResponseShim { Ignore, Overlap, Block }; ECollisionResponse GetCollisionResponseToChannel(ECollisionChannel c) const { return CompResponseHook ? (ECollisionResponse)CompResponseHook(this, (int)c) : ECR_Ignore; } };
 struct UGameplayCueManager : UObject { virtual bool ShouldAsyncLoadRuntimeObjectLibraries() const { return true; } };
 struct AGameplayAbilityWorldReticle : AActor { bool bSnapToTargetedActor = false; template <class... A> void Destroy(A...) {} void SetActorHiddenInGame(bool) {} void SetActorLocation(const FVector &) {} void SetIsTargetAnActor(bool) {} void SetReplicates(bool) {}
   template <class... A> void InitializeReticle(A...) {} };
@@ -82,8 +101,6 @@ enum class ECollisionEnabled { NoCollision, QueryOnly, PhysicsOnly, QueryAndPhys
 
 // ---- batch: enums, math, spawn, attachment, roles, sound, prediction
 enum ENetRole { ROLE_None, ROLE_SimulatedProxy, ROLE_AutonomousProxy, ROLE_Authority };
-enum ECollisionChannel { ECC_WorldStatic, ECC_WorldDynamic, ECC_Pawn, ECC_Visibility, ECC_Camera, ECC_PhysicsBody, ECC_Vehicle, ECC_Destructible, ECC_GameTraceChannel1, ECC_GameTraceChannel2, ECC_GameTraceChannel3, ECC_GameTraceChannel4, ECC_GameTraceChannel5 };
-enum ECollisionResponse { ECR_Ignore, ECR_Overlap, ECR_Block };
 enum class EAbilityGenericReplicatedEvent { GenericConfirm, GenericCancel, InputPressed, InputReleased, GenericSignalFromClient, GenericSignalFromServer, GameCustom1 };
 enum class EGameplayCueEvent { OnActive, WhileActive, Executed, Removed };
 enum class EGameplayAbilityNetExecutionPolicy { LocalPredicted, LocalOnly, ServerInitiated, ServerOnly };

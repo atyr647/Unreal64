@@ -37,7 +37,7 @@ typedef uint8_t uint8; typedef uint16_t uint16; typedef uint32_t uint32; typedef
 #define GENERATED_USTRUCT_BODY() GENERATED_BODY()
 struct FDelegateBase { template <class... A> void Broadcast(A...) const {} template <class... A> void AddDynamic(A...) {} template <class... A> void RemoveDynamic(A...) {} template <class... A> void AddUniqueDynamic(A...) {} template <class... A> void BindDynamic(A...) {} bool IsBound() const { return false; } template <class... A> void Execute(A...) const {} template <class... A> bool ExecuteIfBound(A...) const { return false; } };
 #define DECLARE_DYNAMIC_MULTICAST_DELEGATE(Name) struct Name : FDelegateBase {}
-#define DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(Name, ...) struct Name : FDelegateBase {}
+#define DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(Name, T, N) struct Name : FDelegateBase { void (*hook)(void *, T) = nullptr; void *ctx = nullptr; void Broadcast(T v) const { if (hook) hook(ctx, v); } }   /* one receiver, bound by the bridge */
 #define DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(Name, ...) struct Name : FDelegateBase {}
 #define DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(Name, ...) struct Name : FDelegateBase {}
 #define DECLARE_DYNAMIC_MULTICAST_DELEGATE_FourParams(Name, ...) struct Name : FDelegateBase {}
@@ -102,7 +102,7 @@ struct UPackage {};
 FORCEINLINE UPackage *GetTransientPackage() { static UPackage p; return &p; }
 template <class T> T *NewObject(UPackage *, FName = FName()) { return new T(); }
 struct FObjectInitializer {};
-struct FTimerHandle {}; struct FDelegateHandle {}; struct FDelegateRemoveShim { void Remove(FDelegateHandle) {} };
+struct FTimerHandle { int id = 0; }; struct FDelegateHandle {}; struct FDelegateRemoveShim { void Remove(FDelegateHandle) {} };
 struct UAnimMontage; struct USoundCue; struct UWidgetComponent;
 template <class T> T *FindFieldChecked(UClass *cls, FName name)      // one FProperty per name, stable for the program's lifetime
 {

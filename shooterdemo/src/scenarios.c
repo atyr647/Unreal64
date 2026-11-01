@@ -151,6 +151,19 @@ int u64_run_shooter_scenarios(int verbose)
   for (int i = 0; i < 3 && strcmp(u64_obj_class(call(hero, "GetCurrentWeapon").u.o), "BP_Rifle"); i++) call(hero, "NextWeapon");
   CHECK(!strcmp(u64_obj_class(call(hero, "GetCurrentWeapon").u.o), "BP_Rifle"));
   rifle = call(hero, "GetCurrentWeapon").u.o;
+  // --- equipping plays the weapon's equip montage (HeroFPP_RifleEquip_Montage); its notify state AddLooseGameplayTags adds Ability.Weapon.IsChanging from the montage start for
+  // 0.35385939 s (the state's Duration in the asset), which blocks the weapon abilities. The begin happens on the montage's first update (not inside Montage_Play).
+  // 1/30 s ticks: absent at once, present from the first tick to 0.3 s, gone by 0.367 s.
+  CHECK(!u64_tag_has(asc_of_hero(), "Ability.Weapon.IsChanging"));
+  tick(1);
+  CHECK(u64_tag_has(asc_of_hero(), "Ability.Weapon.IsChanging"));
+  tick(8);
+  CHECK(u64_tag_has(asc_of_hero(), "Ability.Weapon.IsChanging") && !u64_input_press(hero, "EGSAbilityInputID::PrimaryFire"));      // firing is blocked while changing
+  u64_input_release_id(hero, "EGSAbilityInputID::PrimaryFire");
+  tick(1);                                                                          // 0.333 s < 0.3539 s: still present
+  CHECK(u64_tag_has(asc_of_hero(), "Ability.Weapon.IsChanging"));
+  tick(1);                                                                          // 0.367 s: NotifyEnd has run
+  CHECK(!u64_tag_has(asc_of_hero(), "Ability.Weapon.IsChanging") && u64_tag_count(asc_of_hero(), "Ability.Weapon.IsChanging") == 0);
   // --- firing the rifle (GA_RiflePrimary -> GA_RiflePrimaryInstant -> GSGATA_LineTrace -> GE_RifleDamage)
   {
     u64_obj *enemy = u64_find("BP_HeroCharacter2");

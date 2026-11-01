@@ -363,6 +363,9 @@ static u64_v h_set_current_weapon(u64_obj *s, int c, const u64_v *a)
     if (asc) u64_tag_add_loose(asc, wt, 1);
     u64_mc_add(u64_ivar(nw, "OnPrimaryClipAmmoChanged"), u64_delegate(u64_objv(s), "CurrentWeaponPrimaryClipAmmoChanged"));
     u64_mc_add(u64_ivar(nw, "OnSecondaryClipAmmoChanged"), u64_delegate(u64_objv(s), "CurrentWeaponSecondaryClipAmmoChanged"));
+    const char *m1 = nm(*u64_ivar(nw, "Equip1PMontage")), *m3 = nm(*u64_ivar(nw, "Equip3PMontage"));      // GetFirstPersonMesh()->GetAnimInstance()->Montage_Play(Equip1PMontage), then the 3P one
+    if (*m1) u64_montage_play(s, m1, 1.0f);
+    if (*m3) u64_montage_play(s, m3, 1.0f);
   } else h_unequip_current_weapon(s, 0, 0);
   return NONE_;
 }

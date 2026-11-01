@@ -893,6 +893,17 @@ void u64_montage_play(u64_obj *actor, const char *name, float rate)      // sche
     if (strcmp(m->name, name)) continue;
     *u64_ivar(actor, "CurrentMontage") = u64_name(m->name);
     for (int i = 0; i < m->nnotifies; i++) {
+      if (m->notifies[i].state) {                       // a notify state (AnimNotifyState_*): ReceivedNotifyBegin at the time, ReceivedNotifyEnd after its duration
+        char nmb[64]; snprintf(nmb, sizeof nmb, "%s.%s.%d", m->name, m->notifies[i].cls, i);
+        u64_obj *sobj = u64_new(u64_intern(nmb), u64_intern(m->notifies[i].cls));
+        u64_v tags = u64_array_of(0, 0); char buf[160]; strncpy(buf, m->notifies[i].tag, sizeof buf - 1); buf[sizeof buf - 1] = 0;
+        for (char *t = strtok(buf, "|"); t; t = strtok(0, "|")) u64_array_push(&tags, u64_name(u64_intern(t)));
+        *u64_ivar(sobj, "GameplayTags") = tags;
+        u64_v mesh = u64_comp(actor, "Mesh");
+        u64_timer_call(m->notifies[i].time / rate, sobj, "Received_NotifyBegin", mesh);
+        u64_timer_call((m->notifies[i].time + m->notifies[i].duration) / rate, sobj, "Received_NotifyEnd", mesh);
+        continue;
+      }
       char cls[64], nmb[64]; snprintf(cls, sizeof cls, "AnimNotify_%s", m->notifies[i].cls);
       snprintf(nmb, sizeof nmb, "%s.%s.%d", m->name, m->notifies[i].cls, i);
       u64_obj *nobj = u64_new(u64_intern(nmb), u64_intern(cls));

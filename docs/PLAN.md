@@ -182,8 +182,10 @@ a real map, 91 Blueprints and ~8k lines of C++. Run its tests with `tools/run_sh
   layered blend without filters), the weapon muzzle through camera -> mesh -> animated `b_RightWeapon` -> equipped offset -> mesh socket. The idle pose and the muzzle
   position are checked against an independent Python evaluation.
   Montages play through the AnimBP slots (blend in / out, plain segments; the rifle fire recoil is checked against Python).
-  Animation, not done: the third-person AnimBP (`ABP_Hero3P`: blend spaces, aim offset, Fabrik IK, cached poses,
-  layered blends with bone filters), so the physics bodies (headshots) of heroes stay in the reference pose; AnimNotifies from sequences.
+  Third person: `ABP_Hero3P` is evaluated too (BlendSpacePlayer 2D grid, cached poses, layered blends with branch filters, pass-through for Fabrik / aim offset /
+  space conversions); the heroes' physics bodies follow the animated pose (headshot test aims at the posed head; idle bodies checked against Python).
+  Animation, not done: aim offset (RotationOffsetBlendSpace) and Fabrik IK are passed through unchanged, so the 3P pose lacks pitch aim and foot/hand IK;
+  AnimNotifies from sequences; montages on the 3P skeleton.
 * HUD / player controller widgets (ignored), audio, networking, AI behaviour of the placed heroes.
 * Unverified engine assumption: the first execution of a periodic effect happens on the next tick (see below).
 

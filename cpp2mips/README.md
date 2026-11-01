@@ -131,4 +131,13 @@ The chest, door and revive scenarios now go through it. New shim pieces: `TimerM
 emitted by `uht_lite.py` for interface events. Bug found on the way: target data kept between ticks must not hold pointers to runtime objects (they are collected); a rebuilt hit lost its component until the
 C++ hit carried it. Approximation kept from the hand port: the start location (weapon point / head socket) is the camera's eye position, since those sockets need the animated meshes.
 
-15 -> 23 of 45 files compile.
+### The smaller ability tasks (FOV, move, delay, input press)
+
+`UGSAT_WaitChangeFOV`, `UGSAT_MoveSceneCompRelLocation`, `UGSAT_WaitDelayOneFrame` and `UGSAT_WaitInputPressWithTags` run as written (`-DU64_CXX_TASKS`): the project's factories make them, `Activate` /
+`TickTask(DeltaTime)` / `EndTask` are driven by the runtime's frame (EndTask removes the runtime task), their delegates reach the Blueprint's bindings. The ADS field-of-view change (90 -> 60 in 0.1 s
+and back in 0.05 s, mid-value checked) and the interaction input (`WaitInputPressWithTags`: required / ignored tags, the `State.Interacting` rule) go through them in the scenarios (12 tasks in the
+suite). Shim: `SetTimerForNextTick`, `AddUObject` bindings the bridge can invoke (the ASC's input-pressed delegate), virtual `SetFieldOfView` / `SetRelativeLocation` written through to the runtime object,
+`HasAnyMatchingGameplayTags` / `HasAll...` over the runtime's tag counts, `GetTimeSeconds` from the world clock. Interpolation curves are not backed (`UCurveFloat` / `UCurveVector`: reported by
+`UE_SHIM_REPORT=1`); the project's assets pass none, which is why the hand port's identity curve was exact. `ServerWaitForClientTargetData` compiles but is not run (single authority: it never completes).
+
+15 -> 27 of 45 files compile.

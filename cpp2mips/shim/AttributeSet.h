@@ -93,6 +93,9 @@ public:
   virtual bool ShouldDoServerAbilityRPCBatch() const { return false; }
   virtual void NotifyAbilityEnded(FGameplayAbilitySpecHandle, UGameplayAbility *, bool) {}
   virtual int32 GetTagCount(const FGameplayTag &) const { return 0; }
+  bool HasMatchingGameplayTag(const FGameplayTag &t) const { return GetTagCount(t) > 0; }
+  bool HasAnyMatchingGameplayTags(const FGameplayTagContainer &c) const { for (int i = 0; i < c.n; i++) if (GetTagCount(c.t[i]) > 0) return true; return false; }
+  bool HasAllMatchingGameplayTags(const FGameplayTagContainer &c) const { for (int i = 0; i < c.n; i++) if (GetTagCount(c.t[i]) <= 0) return false; return true; }
   virtual bool TryActivateAbility(FGameplayAbilitySpecHandle, bool = true) { return false; }
   template <class E, class H, class K> FDelegateRemoveShim AbilityReplicatedEventDelegate(E, H, K) { return FDelegateRemoveShim(); } FDelegateBase GenericLocalConfirmCallbacks, GenericLocalCancelCallbacks;
   void AddLooseGameplayTag(const FGameplayTag &, int32 = 1) {} void AddLooseGameplayTags(const FGameplayTagContainer &, int32 = 1) {}

@@ -13,6 +13,10 @@
 #include "Characters/Abilities/GSGATA_LineTrace.h"
 #include "Characters/Abilities/GSGATA_SphereTrace.h"
 #include "Characters/Abilities/AbilityTasks/GSAT_WaitInteractableTarget.h"
+#include "Characters/Abilities/AbilityTasks/GSAT_WaitChangeFOV.h"
+#include "Characters/Abilities/AbilityTasks/GSAT_MoveSceneCompRelLocation.h"
+#include "Characters/Abilities/AbilityTasks/GSAT_WaitDelayOneFrame.h"
+#include "Characters/Abilities/AbilityTasks/GSAT_WaitInputPressWithTags.h"
 extern "C" {
 #include "u64_gas_core.h"
 int u64_cpp_player_view(u64_obj *hero, float loc[3], float rot[3]);
@@ -232,7 +236,7 @@ UGSGameplayAbility *gsa_bind(u64_obj *ab, FGameplayAbilitySpec *spec, UGSGamepla
   g->bSourceObjectMustEqualCurrentWeaponToActivate = u64_true(*u64_ivar(ab, "bSourceObjectMustEqualCurrentWeaponToActivate"));
   g->bCannotActivateWhileInteracting = u64_true(*u64_ivar(ab, "bCannotActivateWhileInteracting"));
   Slot *sl = slot_for(O_(*u64_ivar(ab, "ASC"))); g->CurrentActorInfo = sl ? &sl->info : nullptr;
-  g->CurrentSpecHandle.Handle = ab_index(ab);
+  g->CurrentSpecHandle.Handle = ab_index(ab); g->CurrentSpecShim.InputPressed = u64_true(*u64_ivar(ab, "InputPressed"));
   if (spec) { spec->Handle = g->CurrentSpecHandle; spec->Ability = g; }
   return g;
 }
@@ -554,6 +558,7 @@ extern "C" void u64_cxx_wait_interactable(u64_obj *task, u64_obj *ability, u64_v
   sl->t->FoundNewInteractableTarget.hook = it_found; sl->t->FoundNewInteractableTarget.ctx = task; sl->t->LostInteractableTarget.hook = it_lost; sl->t->LostInteractableTarget.ctx = task;
   sl->t->Activate(); u64_cxx_task_calls++;
 }
+extern "C" void u64_cxx_tasks_tick2(float now);
 extern "C" void u64_cxx_tasks_tick(float now)
 {
   u64_obj *snap[96]; int n = u64_tasks_snapshot(snap, 96);
@@ -563,5 +568,85 @@ extern "C" void u64_cxx_tasks_tick(float now)
     if (!live) { static_cast<ITProbe *>(x.t)->shut(true); x.key = nullptr; x.t = nullptr; delete x.ab; x.ab = nullptr; continue; }       // the ability ended: OnDestroy clears the timer
     gsa_bind(x.rab, nullptr, x.ab);                                       // the actor info of the ability's ASC, re-read (the runtime reuses object slots)
   }
+  u64_cxx_tasks_tick2(now);
   ShimTimersTick(now);
+}
+
+// ---- the other ability tasks the project wrote in C++: UGSAT_WaitChangeFOV, UGSAT_MoveSceneCompRelLocation, UGSAT_WaitDelayOneFrame, UGSAT_WaitInputPressWithTags. Same scheme as the interaction task:
+// made by the project's own factory, activated, ticked (TickTask with the frame's delta) and ended (EndTask removes the runtime task); their delegates reach the Blueprint's bindings.
+namespace {
+struct RtCamera : UCameraComponent { void SetFieldOfView(float f) override { FieldOfView = f; if (rt) *u64_ivar((u64_obj *)rt, "FieldOfView") = u64_float(f); } };
+struct RtScene : USceneComponent { void SetRelativeLocation(const FVector &v) override { RelativeLocation = v; if (rt) *u64_ivar((u64_obj *)rt, "RelativeLocation") = vec_v(v); } };
+struct TSlot2 { bool ended = false; u64_obj *key = nullptr; UAbilityTask *t = nullptr; UGSGameplayAbility *ab = nullptr; u64_obj *rab = nullptr; int kind = 0; };      // kind: 1 FOV, 2 move, 3 delay one frame, 4 input press
+TSlot2 tslots2[16]; float last_now = -1;
+template <class T> T *proxy_of(u64_obj *o)                       // one stand-in per runtime component, its state read from the runtime when the task is made
+{
+  static T pool[16]; static int n;
+  for (int i = 0; i < n && i < 16; i++) if (pool[i].rt == o) return &pool[i];
+  int k = n++ & 15; pool[k] = T(); pool[k].rt = o; return &pool[k];
+}
+void task_ended(UAbilityTask *t) { for (TSlot2 &x : tslots2) if (x.t == t && x.key) { x.ended = true; u64_task_untrack(x.key); } }
+void bc0(void *ctx, const char *dg) { u64_mc_broadcast(u64_ivar((u64_obj *)ctx, dg), 0, 0); }
+void fov_reached(void *c) { bc0(c, "OnTargetFOVReached"); }
+void move_finished(void *c) { bc0(c, "OnFinishMove"); }
+void delay_finished(void *c) { bc0(c, "OnFinish"); }
+void input_pressed(void *c, float t) { u64_v a = u64_float(t); u64_mc_broadcast(u64_ivar((u64_obj *)c, "OnPress"), 1, &a); }
+FGameplayTagContainer tags_of(u64_v arr) { FGameplayTagContainer c; for (int i = 0; i < u64_array_len(arr); i++) c.AddTag(FGameplayTag::RequestGameplayTag(FName(nm_(u64_array_get(arr, i))))); return c; }
+}
+extern "C" int u64_cxx_task2_calls;
+int u64_cxx_task2_calls;
+extern "C" void u64_cxx_task_make(const char *cls, u64_obj *task, u64_obj *ability, const u64_v *a, int argc)
+{
+  it_install(); TaskEndedHook = task_ended; ImplementsHook = implements_hook;
+  TSlot2 *sl = nullptr; for (TSlot2 &x : tslots2) if (!x.key) { sl = &x; break; }
+  if (!sl) { sl = &tslots2[0]; if (sl->t) sl->t->OnDestroy(true); delete sl->ab; }                      // a full table recycles the first slot
+  sl->key = task; sl->ended = false; sl->rab = ability; sl->ab = new UGSGameplayAbility(); gsa_bind(ability, nullptr, sl->ab); u64_cxx_task2_calls++;
+  auto A = [&](int i) { return i < argc ? a[i] : u64_v{U64_NONE}; };
+  if (!strcmp(cls, "GSAT_WaitChangeFOV")) {                       // (Ability, Name, Camera, TargetFOV, Duration, Curve)
+    sl->kind = 1; RtCamera *cam = proxy_of<RtCamera>(O_(A(2))); u64_v f = *u64_ivar(O_(A(2)), "FieldOfView"); cam->FieldOfView = f.t == U64_FLOAT ? f.u.f : 90.0f;
+    if (A(5).t != U64_NONE) ShimUnimplemented("UCurveFloat (optional interpolation curve)");
+    UGSAT_WaitChangeFOV *t = UGSAT_WaitChangeFOV::WaitChangeFOV(sl->ab, FName("None"), cam, f_(A(3)), f_(A(4)), nullptr);
+    t->OnTargetFOVReached.hook = fov_reached; t->OnTargetFOVReached.ctx = task; sl->t = t;
+  } else if (!strcmp(cls, "GSAT_MoveSceneCompRelLocation")) {    // (Ability, Name, Component, Location, Duration, Curve, VectorCurve)
+    sl->kind = 2; RtScene *comp = proxy_of<RtScene>(O_(A(2))); comp->RelativeLocation = vec_(*u64_ivar(O_(A(2)), "RelativeLocation"));
+    if (A(5).t != U64_NONE || A(6).t != U64_NONE) ShimUnimplemented("UCurveFloat / UCurveVector (interpolation curves)");
+    UGSAT_MoveSceneCompRelLocation *t = UGSAT_MoveSceneCompRelLocation::MoveSceneComponentRelativeLocation(sl->ab, FName("None"), comp, vec_(A(3)), f_(A(4)), nullptr, nullptr);
+    t->OnFinishMove.hook = move_finished; t->OnFinishMove.ctx = task; sl->t = t;
+  } else if (!strcmp(cls, "GSAT_WaitDelayOneFrame")) {
+    sl->kind = 3; UGSAT_WaitDelayOneFrame *t = UGSAT_WaitDelayOneFrame::WaitDelayOneFrame(sl->ab); t->OnFinish.hook = delay_finished; t->OnFinish.ctx = task; sl->t = t;
+  } else if (!strcmp(cls, "GSAT_WaitInputPressWithTags")) {      // (Ability, RequiredTags, IgnoredTags, bTestAlreadyPressed)
+    sl->kind = 4; UGSAT_WaitInputPressWithTags *t = UGSAT_WaitInputPressWithTags::WaitInputPressWithTags(sl->ab, tags_of(A(1)), tags_of(A(2)), u64_true(A(3)));
+    t->OnPress.hook = input_pressed; t->OnPress.ctx = task; sl->t = t;
+  }
+}
+extern "C" int u64_cxx_task_activate(u64_obj *task)              // 1 when the project's task handles it
+{
+  for (TSlot2 &x : tslots2) if (x.key == task && x.t) {
+    gsa_bind(x.rab, nullptr, x.ab); x.t->Activate();
+    if (x.kind == 1 || x.kind == 2) { UAbilityTask *t = x.t; (void)t; }
+    return 1;
+  }
+  return 0;
+}
+extern "C" int u64_cxx_input_pressed(u64_obj *ab)                // the ability's input press: the callbacks the input-wait tasks bound to the ASC's delegate
+{
+  int handled = 0;
+  for (TSlot2 &x : tslots2) {
+    if (!x.key || x.kind != 4 || x.rab != ab) continue;
+    gsa_bind(x.rab, nullptr, x.ab);
+    for (ShimBind &b : ShimBinds) if (b.id && b.obj == x.t) { b.call(b.obj, b.pmf); handled = 1; break; }
+  }
+  return handled;
+}
+extern "C" void u64_cxx_tasks_tick2(float now)
+{
+  float dt = last_now < 0 ? 0 : now - last_now; last_now = now;
+  u64_obj *snap[96]; int n = u64_tasks_snapshot(snap, 96);
+  for (TSlot2 &x : tslots2) {
+    if (!x.key) continue;
+    bool live = false; for (int i = 0; i < n; i++) if (snap[i] == x.key) live = true;
+    if (!live) { if (!x.ended) x.t->OnDestroy(true); x.ended = false; x.key = nullptr; x.t = nullptr; delete x.ab; x.ab = nullptr; continue; }
+    gsa_bind(x.rab, nullptr, x.ab);
+    if (x.t->bTickingTask) x.t->TickTask(dt);
+  }
 }

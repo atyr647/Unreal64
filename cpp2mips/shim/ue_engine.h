@@ -18,9 +18,9 @@ struct FCollisionQueryParams { bool bTraceComplex = false, bReturnPhysicalMateri
 #define ABILITY_LOG(...) ((void)0)
 #define ENABLE_DRAW_DEBUG 0
 struct UActorComponent : UObject { template <class... A> void SetIsReplicated(A...) {} template <class... A> void RegisterComponent(A...) {} template <class... A> void SetActive(A...) {} };
-struct USceneComponent : UActorComponent { template <class... A> void SetRelativeLocation(A...) {} template <class... A> void SetRelativeRotation(A...) {} template <class... A> void SetupAttachment(A...) {} template <class... A> void AttachToComponent(A...) {}
+struct USceneComponent : UActorComponent { FVector RelativeLocation; virtual void SetRelativeLocation(const FVector &v) { RelativeLocation = v; } FVector GetRelativeLocation() const { return RelativeLocation; } template <class... A> void SetRelativeLocation(A...) {} template <class... A> void SetRelativeRotation(A...) {} template <class... A> void SetupAttachment(A...) {} template <class... A> void AttachToComponent(A...) {}
   template <class... A> void SetVisibility(A...) {} template <class... A> void SetHiddenInGame(A...) {} template <class... A> void SetCollisionEnabled(A...) {} template <class... A> void SetCollisionResponseToChannel(A...) {} template <class... A> void SetCollisionProfileName(A...) {}
-  template <class... A> void SetCollisionObjectType(A...) {} template <class... A> void SetGenerateOverlapEvents(A...) {} FVector GetComponentLocation() const { return FVector(); } }; struct UCameraComponent : USceneComponent { bool bUsePawnControlRotation = false; float FieldOfView = 90; }; struct UWidgetComponent : USceneComponent {};
+  template <class... A> void SetCollisionObjectType(A...) {} template <class... A> void SetGenerateOverlapEvents(A...) {} FVector GetComponentLocation() const { return FVector(); } }; struct UCameraComponent : USceneComponent { bool bUsePawnControlRotation = false; float FieldOfView = 90; virtual void SetFieldOfView(float f) { FieldOfView = f; } }; struct UWidgetComponent : USceneComponent {};
 struct UAnimInstance : UObject {}; struct UUserWidget : UObject { template <class... A> void AddToViewport(A...) {} template <class... A> void SetVisibility(A...) {} }; struct UBlueprintFunctionLibrary : UObject {}; struct UBlueprintAsyncActionBase : UObject {};
 struct APlayerState : AActor {}; struct AGameModeBase : AActor {}; struct UCharacterMovementComponent : UActorComponent { virtual float GetMaxSpeed() const { return 0; } virtual struct FNetworkPredictionData_Client_Character *GetPredictionData_Client() const { return nullptr; } virtual void UpdateFromCompressedFlags(uint8) {} }; struct UProjectileMovementComponent : UActorComponent { float InitialSpeed = 0, MaxSpeed = 0, ProjectileGravityScale = 1; bool bRotationFollowsVelocity = false; };
 enum class EWorldType { None, Game, Editor, PIE };
@@ -30,15 +30,19 @@ struct FQuatIdentityShim {}; struct FCollisionShape { float Radius = 0; static F
 inline bool (*WorldLineTraceHook)(const FVector &, const FVector &, FName, const struct FCollisionQueryParams &, TArray<FHitResult> &) = nullptr;
 inline bool (*WorldSweepHook)(const FVector &, const FVector &, float, FName, const struct FCollisionQueryParams &, TArray<FHitResult> &) = nullptr;
 // Timers: SetTimer(handle, object, &Class::Method, period, loop) is recorded here; the bridge fires them (ShimTimersTick) with the runtime's world time.
-struct ShimTimer { int id = 0; void *obj = nullptr; void (*call)(void *, const void *) = nullptr; char pmf[16]; float next = 0, period = 0; bool loop = false; };
+struct ShimTimer { int frame = -1; int id = 0; void *obj = nullptr; void (*call)(void *, const void *) = nullptr; char pmf[16]; float next = 0, period = 0; bool loop = false; };
 inline ShimTimer ShimTimers[32]; inline int ShimTimerSeq = 0; inline float (*ShimNowHook)() = nullptr;
-inline void ShimTimersTick(float now) { for (ShimTimer &t : ShimTimers) while (t.id && now + 1e-5f >= t.next) { void *o = t.obj; if (t.loop) t.next += t.period; else t.id = 0; t.call(o, t.pmf); if (!t.loop) break; } }
+inline int ShimFrame = 0;
+inline void ShimTimersTick(float now) { ShimFrame++; for (ShimTimer &t : ShimTimers) while (t.id && t.frame < ShimFrame && now + 1e-5f >= t.next) { void *o = t.obj; if (t.loop) t.next += t.period; else t.id = 0; t.call(o, t.pmf); if (!t.loop) break; } }
 struct FTimerManager {
   template <class T> void SetTimer(FTimerHandle &h, T *obj, void (T::*fn)(), float rate, bool loop = false, float = -1.f) {
     ClearTimer(h); for (ShimTimer &t : ShimTimers) if (!t.id) { t.id = h.id = ++ShimTimerSeq; t.obj = obj; memcpy(t.pmf, &fn, sizeof fn); t.call = [](void *o, const void *p) { (static_cast<T *>(o)->*(*(void (T::* const *)())p))(); };
       t.period = rate; t.loop = loop; t.next = (ShimNowHook ? ShimNowHook() : 0.0f) + rate; return; } }
+  template <class T> void SetTimerForNextTick(T *obj, void (T::*fn)()) {            // fires on the next frame's timer pass
+    for (ShimTimer &t : ShimTimers) if (!t.id) { t.id = ++ShimTimerSeq; t.obj = obj; memcpy(t.pmf, &fn, sizeof fn); t.call = [](void *o, const void *p) { (static_cast<T *>(o)->*(*(void (T::* const *)())p))(); };
+      t.period = 0; t.loop = false; t.next = 0; t.frame = ShimFrame; return; } }
   void ClearTimer(FTimerHandle &h) { if (h.id) for (ShimTimer &t : ShimTimers) if (t.id == h.id) t.id = 0; h.id = 0; } };
-struct UWorld : UObject { FTimerManager &GetTimerManager() const { static FTimerManager m; return m; } EWorldType WorldType = EWorldType::Game; float GetTimeSeconds() const { return 0; } ENetMode GetNetMode() const { return NM_Standalone; }
+struct UWorld : UObject { FTimerManager &GetTimerManager() const { static FTimerManager m; return m; } EWorldType WorldType = EWorldType::Game; float GetTimeSeconds() const { return ShimNowHook ? ShimNowHook() : 0.0f; } ENetMode GetNetMode() const { return NM_Standalone; }
   bool LineTraceMultiByProfile(TArray<FHitResult> &out, const FVector &a, const FVector &b, FName profile, const FCollisionQueryParams &p) const { return WorldLineTraceHook ? WorldLineTraceHook(a, b, profile, p, out) : false; }
   bool SweepMultiByProfile(TArray<FHitResult> &out, const FVector &a, const FVector &b, const FQuat &, FName profile, const FCollisionShape &sh, const FCollisionQueryParams &p) const { return WorldSweepHook ? WorldSweepHook(a, b, sh.Radius, profile, p, out) : false; }
   template <class T> T *SpawnActor(TSubclassOf<T>, const FVector &, const FRotator &) const { ShimUnimplemented("SpawnActor"); return nullptr; } };
@@ -71,18 +75,23 @@ struct AGameplayAbilityTargetActor : AActor { FGameplayAbilityTargetingLocationI
   virtual bool IsConfirmTargetingAllowed() { return true; } virtual void BindToConfirmCancelInputs() {} virtual bool ShouldProduceTargetData() const { return true; }
   void SetActorTickEnabled(bool) {} void SetActorLocationAndRotation(const FVector &, const FRotator &) {} FVector GetActorLocation() const { return FVector(); } FRotator GetActorRotation() const { return FRotator(); }
   template <class... A> void Destroy(A...) {} }; struct EGameplayTargetingConfirmation { enum Type { Instant, UserConfirmed, Custom, CustomMulti }; };
-struct UCurveFloat : UObject { float GetFloatValue(float) const { return 0; } };
+struct UCurveFloat : UObject { float GetFloatValue(float) const { return 0; } }; struct UCurveVector : UObject { FVector GetVectorValue(float) const { return FVector(); } };
 struct FOnMontageBlendingOutStarted {}; struct FOnMontageEnded {};
+struct UAbilityTask;
+inline void (*TaskEndedHook)(UAbilityTask *) = nullptr;                           // set by the bridge: EndTask() removes the runtime task
 struct UAbilityTask : UObject {
   virtual void ExternalConfirm(bool) {}
   UAbilityTask() {} UAbilityTask(const FObjectInitializer &) {}
   static UClass *StaticClass() { static UClass c = {"UAbilityTask"}; return &c; } bool InstanceOf(const UClass *c) const override { return c == StaticClass(); }
-  UGameplayAbility *Ability = nullptr; UAbilitySystemComponent *AbilitySystemComponent = nullptr; bool bTickingTask = false; bool bIsPausable = true;
+  UGameplayAbility *Ability = nullptr; UAbilitySystemComponent *AbilitySystemComponent = nullptr; bool bTickingTask = false; bool bIsPausable = true; bool bIsSimulating = false;
+  bool IsLocallyControlled() const { return true; } bool IsForRemoteClient() const { return false; } bool IsPredictingClient() const { return false; }
+  FGameplayAbilitySpecHandle GetAbilitySpecHandle() const { return Ability ? Ability->GetCurrentAbilitySpecHandle() : FGameplayAbilitySpecHandle(); }
+  FPredictionKey GetActivationPredictionKey() const { return FPredictionKey(); } void ClearWaitingOnRemotePlayerData() {}
   virtual void Activate() {} virtual void OnDestroy(bool) {} virtual void TickTask(float) {} virtual void ExternalCancel() {} virtual void InitSimulatedTask(void *) {}
-  virtual void ReadyForActivation() { Activate(); } void EndTask() { OnDestroy(false); } bool ShouldBroadcastAbilityTaskDelegates() const { return true; }
+  virtual void ReadyForActivation() { Activate(); } void EndTask() { OnDestroy(false); if (TaskEndedHook) TaskEndedHook(this); } bool ShouldBroadcastAbilityTaskDelegates() const { return true; }
   virtual FString GetDebugString() const { return FString(); }
-  template <class T> static T *NewAbilityTask(UGameplayAbility *a, FName = FName()) { T *t = new T(); t->Ability = a; return t; }
-  AActor *GetAvatarActor() const { return nullptr; } void SetWaitingOnAvatar() {} void SetWaitingOnRemotePlayerData() {}
+  template <class T> static T *NewAbilityTask(UGameplayAbility *a, FName = FName()) { T *t = new T(); t->Ability = a; t->AbilitySystemComponent = a ? a->GetAbilitySystemComponentFromActorInfo() : nullptr; return t; }
+  AActor *GetAvatarActor() const { return Ability ? Ability->GetAvatarActorFromActorInfo() : nullptr; } void SetWaitingOnAvatar() {} void SetWaitingOnRemotePlayerData() {}
 }; struct UAnimNotify_PlaySound : UObject { virtual void Notify(USkeletalMeshComponent *, UAnimSequenceBase *) {} }; struct FNetworkPredictionData_Client_Character; struct FSavedMove_Character { virtual ~FSavedMove_Character() {} virtual void Clear() {} virtual uint8 GetCompressedFlags() const { return 0; } virtual void SetMoveFor(ACharacter *, float, FVector const &, FNetworkPredictionData_Client_Character &) {} virtual bool CanCombineWith(const struct FSavedMovePtr &, ACharacter *, float) const { return false; } virtual void PrepMoveFor(ACharacter *) {} };
 struct FSimpleMulticastDelegate { template <class... A> void Broadcast(A...) const {} template <class... A> void AddUObject(A...) {} template <class... A> FDelegateHandle AddLambda(A...) { return FDelegateHandle(); } void Remove(FDelegateHandle) {} };
  struct UAnimSequenceBase : UObject {}; struct FSavedMovePtr {};

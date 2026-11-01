@@ -36,7 +36,7 @@ typedef uint8_t uint8; typedef uint16_t uint16; typedef uint32_t uint32; typedef
 // UHT emits <File>.generated.h with one macro per GENERATED_BODY() line; uht_lite.py does the same.
 #define GENERATED_USTRUCT_BODY() GENERATED_BODY()
 struct FDelegateBase { template <class... A> void Broadcast(A...) const {} template <class... A> void AddDynamic(A...) {} template <class... A> void RemoveDynamic(A...) {} template <class... A> void AddUniqueDynamic(A...) {} template <class... A> void BindDynamic(A...) {} bool IsBound() const { return false; } template <class... A> void Execute(A...) const {} template <class... A> bool ExecuteIfBound(A...) const { return false; } };
-#define DECLARE_DYNAMIC_MULTICAST_DELEGATE(Name) struct Name : FDelegateBase {}
+#define DECLARE_DYNAMIC_MULTICAST_DELEGATE(Name) struct Name : FDelegateBase { void (*hook)(void *) = nullptr; void *ctx = nullptr; void Broadcast() const { if (hook) hook(ctx); } }   /* one receiver, bound by the bridge */
 #define DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(Name, T, N) struct Name : FDelegateBase { void (*hook)(void *, T) = nullptr; void *ctx = nullptr; void Broadcast(T v) const { if (hook) hook(ctx, v); } }   /* one receiver, bound by the bridge */
 #define DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(Name, ...) struct Name : FDelegateBase {}
 #define DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(Name, ...) struct Name : FDelegateBase {}
@@ -98,11 +98,16 @@ template <class T> struct TSubclassOf { UClass *c = nullptr; TSubclassOf() {} TS
 template <class T> struct TWeakObjectPtr { T *p = nullptr; bool operator!=(long v) const { return (long)p != v; } bool operator==(long v) const { return (long)p == v; } TWeakObjectPtr() {} TWeakObjectPtr(T *x) : p(x) {} bool operator==(const TWeakObjectPtr &o) const { return p == o.p; } bool IsValid() const { return p != nullptr; } T *Get() const { return p; } T *operator->() const { return p; } };
 template <class T> struct TSharedPtr { T *p = nullptr; bool IsValid() const { return p != nullptr; } T *Get() const { return p; } T *operator->() const { return p; } T &operator*() const { return *p; } };
 template <class T, class U> T *Cast(const TWeakObjectPtr<U> &w) { return Cast<T>(w.Get()); }
+template <class T> FORCEINLINE bool IsValid(const T *p) { return p != nullptr; }
 struct UPackage {};
 FORCEINLINE UPackage *GetTransientPackage() { static UPackage p; return &p; }
 template <class T> T *NewObject(UPackage *, FName = FName()) { return new T(); }
 struct FObjectInitializer {};
-struct FTimerHandle { int id = 0; }; struct FDelegateHandle {}; struct FDelegateRemoveShim { void Remove(FDelegateHandle) {} };
+struct FTimerHandle { int id = 0; }; struct FDelegateHandle { int id = 0; }; struct ShimBind { int id = 0; void *obj = nullptr; void (*call)(void *, const void *) = nullptr; char pmf[16]; };
+inline ShimBind ShimBinds[32]; inline int ShimBindSeq = 0;                       // delegate bindings made with AddUObject (the ability system's replicated-event delegates): the bridge invokes them
+struct FDelegateRemoveShim {
+  template <class T> FDelegateHandle AddUObject(T *obj, void (T::*fn)()) { FDelegateHandle h; for (ShimBind &b : ShimBinds) if (!b.id) { b.id = h.id = ++ShimBindSeq; b.obj = obj; memcpy(b.pmf, &fn, sizeof fn); b.call = [](void *o, const void *p) { (static_cast<T *>(o)->*(*(void (T::* const *)())p))(); }; break; } return h; }
+  void Remove(FDelegateHandle h) { if (h.id) for (ShimBind &b : ShimBinds) if (b.id == h.id) b.id = 0; } };
 struct UAnimMontage; struct USoundCue; struct UWidgetComponent;
 template <class T> T *FindFieldChecked(UClass *cls, FName name)      // one FProperty per name, stable for the program's lifetime
 {
@@ -115,7 +120,7 @@ namespace FMath {
 template <class T> FORCEINLINE T Clamp(T v, T lo, T hi) { return v < lo ? lo : (v > hi ? hi : v); }
 template <class T> FORCEINLINE T Max(T a, T b) { return a > b ? a : b; }
 template <class T> FORCEINLINE T Min(T a, T b) { return a < b ? a : b; }
-template <class T> FORCEINLINE T Lerp(T a, T b, float t) { return a + (b - a) * t; }
+template <class T, class U = float> FORCEINLINE T Lerp(const T &a, const T &b, const U &t) { return a + (b - a) * t; }
 FORCEINLINE float Sqrt(float x) { return sqrtf(x); } FORCEINLINE float DegreesToRadians(float d) { return d * (3.1415926535897932f / 180.f); } FORCEINLINE int32 Rand() { static uint32 s = 1; s = s * 1103515245u + 12345u; return (int32)((s >> 16) & 0x7fff); }   // not libc rand(): the same sequence on the host and on the N64 template <class T> FORCEINLINE T Square(T x) { return x * x; }
 FORCEINLINE bool IsNearlyEqual(float a, float b, float tol = 1.e-4f) { return fabsf(a - b) <= tol; }
 }

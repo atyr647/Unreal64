@@ -19,10 +19,10 @@ g++ "${cxx[@]}" -std=c++20 -c -o "$out/bridge_base.o" "$here/cpp2mips/bridge_bas
 g++ "${cxx[@]}" -c -o "$out/baseset.o" "$gs/Private/Characters/Abilities/AttributeSets/GSAttributeSetBase.cpp"
 g++ "${cxx[@]}" -c -o "$out/jumpcpp.o" "$gs/Private/Characters/Abilities/GSGA_CharacterJump.cpp"
 for f in GSGameplayAbility GSTargetType GSAbilityTypes GSInteractable GSGATA_Trace GSGATA_LineTrace GSGATA_SphereTrace; do g++ "${cxx[@]}" -std=c++20 -c -o "$out/$f.o" "$gs/Private/Characters/Abilities/$f.cpp"; done
-g++ "${cxx[@]}" -std=c++20 -c -o "$out/GSAT_WaitInteractableTarget.o" "$gs/Private/Characters/Abilities/AbilityTasks/GSAT_WaitInteractableTarget.cpp"
+for f in GSAT_WaitInteractableTarget GSAT_WaitChangeFOV GSAT_MoveSceneCompRelLocation GSAT_WaitDelayOneFrame GSAT_WaitInputPressWithTags; do g++ "${cxx[@]}" -std=c++20 -c -o "$out/$f.o" "$gs/Private/Characters/Abilities/AbilityTasks/$f.cpp"; done
 g++ "${cxx[@]}" -std=c++20 -c -o "$out/bridge_exec.o" "$here/cpp2mips/bridge_exec.cpp"
 g++ "${cxx[@]}" -std=c++20 -c -o "$out/GSDamageExecutionCalc.o" "$gs/Private/Characters/Abilities/GSDamageExecutionCalc.cpp"
 g++ "${cxx[@]}" -c -o "$out/fname.o" "$here/cpp2mips/fname.cpp"
 g++ "${cxx[@]}" -c -o "$out/ammoset.o" "$gs/Private/Characters/Abilities/AttributeSets/GSAmmoAttributeSet.cpp"
-g++ ${SAN:+-fsanitize=address,undefined} -o "$out/shooter" "${objs[@]}" "$out/bridge.o" "$out/fname.o" "$out/ammoset.o" "$out/bridge_base.o" "$out/baseset.o" "$out/jumpcpp.o" "$out/GSGameplayAbility.o" "$out/GSTargetType.o" "$out/GSAbilityTypes.o" "$out/GSInteractable.o" "$out/GSGATA_Trace.o" "$out/GSGATA_LineTrace.o" "$out/GSGATA_SphereTrace.o" "$out/bridge_exec.o" "$out/GSAT_WaitInteractableTarget.o" "$out/GSDamageExecutionCalc.o" -lm
+g++ ${SAN:+-fsanitize=address,undefined} -o "$out/shooter" "${objs[@]}" "$out/bridge.o" "$out/fname.o" "$out/ammoset.o" "$out/bridge_base.o" "$out/baseset.o" "$out/jumpcpp.o" "$out/GSGameplayAbility.o" "$out/GSTargetType.o" "$out/GSAbilityTypes.o" "$out/GSInteractable.o" "$out/GSGATA_Trace.o" "$out/GSGATA_LineTrace.o" "$out/GSGATA_SphereTrace.o" "$out/bridge_exec.o" "$out/GSAT_WaitInteractableTarget.o" "$out/GSAT_WaitChangeFOV.o" "$out/GSAT_MoveSceneCompRelLocation.o" "$out/GSAT_WaitDelayOneFrame.o" "$out/GSAT_WaitInputPressWithTags.o" "$out/GSDamageExecutionCalc.o" -lm
 { if [ -n "${SAN:-}" ]; then "$out/shooter" 2>&1; else stdbuf -o0 "$out/shooter"; fi; } | grep -E "FAIL|shooter:|project.s C\+\+|runtime error|ERROR: Addr" || true

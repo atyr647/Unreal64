@@ -474,6 +474,7 @@ int u64_run_shooter_scenarios(int verbose)
 #ifdef U64_CXX_JUMP
   { extern int u64_cxx_jump_calls; printf("jump ability run by the project's C++: %d activations\n", u64_cxx_jump_calls); CHECK(u64_cxx_jump_calls > 0); }
 #ifdef U64_CXX_TASKS
+  { extern int u64_cxx_task2_calls; printf("ability tasks (FOV, move, input, delay) run by the project's C++: %d tasks\n", u64_cxx_task2_calls); CHECK(u64_cxx_task2_calls > 0); }
   { extern int u64_cxx_task_calls; printf("interaction trace task (GSAT_WaitInteractableTarget.cpp) run by the project's C++: %d tasks\n", u64_cxx_task_calls); CHECK(u64_cxx_task_calls > 0); }
 #endif
 #ifdef U64_CXX_TRACE

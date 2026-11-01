@@ -171,6 +171,9 @@ static void tl_tick(float dt)
 // ---------------------------------------------------------------------------------------------------- tasks
 // Tasks keep their own timing in the world clock: StartTime / Duration / Period are seconds of u64_world_time().
 static void finish(u64_obj *t) { u64_task_untrack(t); }
+#ifdef U64_CXX_TASKS                                                 // the project's own tasks (unmodified C++, cpp2mips/bridge_base.cpp): WaitChangeFOV, MoveSceneCompRelLocation, WaitDelayOneFrame, WaitInputPressWithTags
+void u64_cxx_task_make(const char *cls, u64_obj *task, u64_obj *ability, const u64_v *args, int argc); int u64_cxx_task_activate(u64_obj *task); int u64_cxx_input_pressed(u64_obj *ability);
+#endif
 static u64_v curve_value(u64_v curve, float x)                       // UCurveFloat::GetFloatValue: unsupported curves fall back to identity
 {
   if (curve.t != U64_OBJ && curve.t != U64_CLASS) return u64_float(x);
@@ -184,6 +187,9 @@ void u64_tasks_tick_extra(float dt)
   float now = u64_world_time();
   for (int i = 0; i < n; i++) {
     u64_obj *t = snap[i]; const char *c = u64_obj_class(t);
+#ifdef U64_CXX_TASKS
+    if (!strcmp(c, "GSAT_WaitChangeFOV") || !strcmp(c, "GSAT_MoveSceneCompRelLocation") || !strcmp(c, "GSAT_WaitDelayOneFrame")) continue;     // ticked by the project's C++
+#endif
     if (!strcmp(c, "GSAT_WaitChangeFOV")) {                                   // UGSAT_WaitChangeFOV::TickTask
       u64_obj *cam = O(*u64_ivar(t, "CameraComponent"));
       if (!cam) { finish(t); continue; }
@@ -234,6 +240,9 @@ static void start_listen(u64_obj *t, u64_obj *asc, u64_v tags)           // reme
 int u64_task_activate_extra(u64_obj *t)
 {
   const char *c = u64_obj_class(t);
+#ifdef U64_CXX_TASKS
+  if (u64_cxx_task_activate(t)) return 1;                                     // the project's Activate()
+#endif
   if (!strcmp(c, "AbilityTask_WaitGameplayTagAdded") || !strcmp(c, "AbilityTask_WaitGameplayTagRemoved")) {
     u64_obj *asc = O(*u64_ivar(t, "ListenASC"));
     int add = !strcmp(c, "AbilityTask_WaitGameplayTagAdded"), has = asc && u64_tag_count(asc, nm(*u64_ivar(t, "Tag"))) > 0;
@@ -275,6 +284,9 @@ void u64_target_data_ready(u64_obj *target_actor, u64_v handle)
 
 void u64_ability_input_pressed(u64_obj *ab)                                  // GSAT_WaitInputPressWithTags::OnPressCallback
 {
+#ifdef U64_CXX_TASKS
+  if (u64_cxx_input_pressed(ab)) return;
+#endif
   u64_obj *asc = O(*u64_ivar(ab, "ASC"));
   u64_obj *snap[96]; int n = u64_tasks_snapshot(snap, 96);
   for (int i = 0; i < n; i++) {
@@ -446,13 +458,22 @@ int u64_native_gas_extra(u64_obj *self, const char *fn, int argc, const u64_v *a
     *u64_ivar(t, "TimeBetweenActions") = y; *u64_ivar(t, "ActionsToPerform") = z; *u64_ivar(t, "ActionCounter") = u64_int(0);
     *out = u64_objv(t); return 1;
   }
-  if (IS("WaitDelayOneFrame")) { *out = u64_objv(u64_task_new("GSAT_WaitDelayOneFrame", O(x))); return 1; }
+  if (IS("WaitDelayOneFrame")) {
+    u64_obj *t = u64_task_new("GSAT_WaitDelayOneFrame", O(x));
+#ifdef U64_CXX_TASKS
+    u64_cxx_task_make("GSAT_WaitDelayOneFrame", t, O(x), a, argc);
+#endif
+    *out = u64_objv(t); return 1;
+  }
   if (IS("WaitChangeFOV")) {                                               // (Ability, TaskInstanceName, Camera, TargetFOV, Duration, Curve)
     u64_obj *t = u64_task_new("GSAT_WaitChangeFOV", O(x)), *cam = O(A(argc, a, 2));
     float dur = F(A(argc, a, 4)); if (dur < 0.001f) dur = 0.001f;
     *u64_ivar(t, "CameraComponent") = A(argc, a, 2); *u64_ivar(t, "TargetFOV") = A(argc, a, 3); *u64_ivar(t, "Duration") = u64_float(dur);
     *u64_ivar(t, "StartFOV") = cam && u64_ivar(cam, "FieldOfView")->t == U64_FLOAT ? *u64_ivar(cam, "FieldOfView") : u64_float(90.0f);   // UCameraComponent::FieldOfView defaults to 90
     *u64_ivar(t, "StartTime") = u64_float(u64_world_time()); *u64_ivar(t, "LerpCurve") = A(argc, a, 5);
+#ifdef U64_CXX_TASKS
+    u64_cxx_task_make("GSAT_WaitChangeFOV", t, O(x), a, argc);
+#endif
     *out = u64_objv(t); return 1;
   }
   if (IS("MoveSceneComponentRelativeLocation")) {                          // (Ability, Name, Component, Location, Duration, Curve, VectorCurve)
@@ -461,11 +482,17 @@ int u64_native_gas_extra(u64_obj *self, const char *fn, int argc, const u64_v *a
     *u64_ivar(t, "Component") = A(argc, a, 2); *u64_ivar(t, "TargetLocation") = A(argc, a, 3); *u64_ivar(t, "Duration") = u64_float(dur);
     *u64_ivar(t, "StartLocation") = comp ? *u64_ivar(comp, "RelativeLocation") : u64_vec(0, 0, 0);
     *u64_ivar(t, "StartTime") = u64_float(u64_world_time()); *u64_ivar(t, "LerpCurve") = A(argc, a, 5);
+#ifdef U64_CXX_TASKS
+    u64_cxx_task_make("GSAT_MoveSceneCompRelLocation", t, O(x), a, argc);
+#endif
     *out = u64_objv(t); return 1;
   }
   if (IS("WaitInputPressWithTags")) {                                      // (Ability, RequiredTags, IgnoredTags, bTestAlreadyPressed)
     u64_obj *t = u64_task_new("GSAT_WaitInputPressWithTags", O(x));
     *u64_ivar(t, "RequiredTags") = y; *u64_ivar(t, "IgnoredTags") = z; *u64_ivar(t, "bTestInitialState") = A(argc, a, 3);
+#ifdef U64_CXX_TASKS
+    u64_cxx_task_make("GSAT_WaitInputPressWithTags", t, O(x), a, argc);
+#endif
     *out = u64_objv(t); return 1;
   }
   if (IS("WaitGameplayEvent")) {                                           // (Ability, Tag, OptionalExternalTarget, OnlyTriggerOnce, OnlyMatchExact)

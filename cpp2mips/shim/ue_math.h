@@ -10,6 +10,7 @@ struct FRotator { float Pitch = 0, Yaw = 0, Roll = 0; FRotator() {} FRotator(flo
 struct FQuat { FRotator R; FRotator Rotator() const { return R; } static const FQuat Identity; };                  // the rotation is kept as the rotator it was made from
 struct FTransform { FVector Location; FQuat Rotation; FVector GetLocation() const { return Location; } FQuat GetRotation() const { return Rotation; } };
 inline FVector operator*(float f, const FVector &v) { return v * f; }
+inline FVector operator*(const FVector &a, const FVector &b) { return FVector(a.X * b.X, a.Y * b.Y, a.Z * b.Z); }                 // component-wise, as the engine
 inline FVector FVectorRotateAngleAxis(const FVector &v, float deg, const FVector &a)
 {
   float r = deg * (PI / 180.f), S = sinf(r), C = cosf(r), XX = a.X * a.X, YY = a.Y * a.Y, ZZ = a.Z * a.Z, XY = a.X * a.Y, YZ = a.Y * a.Z, ZX = a.Z * a.X, XS = a.X * S, YS = a.Y * S, ZS = a.Z * S, OMC = 1.f - C;

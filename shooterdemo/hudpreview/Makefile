@@ -4,7 +4,7 @@ SOURCE_DIR = src
 .DEFAULT_GOAL := all
 include $(N64_INST)/include/n64.mk
 N64_CFLAGS += -std=gnu2x -I../../runtime
-src = src/main.c src/hud_render.c src/hud_dump.c
+src = src/main.c src/hud_render.c src/hud_v0.c src/hud_v1.c
 objs = $(patsubst $(SOURCE_DIR)/%.c,$(BUILD_DIR)/%.o,$(src))
 all: hudpreview.z64
 $(BUILD_DIR)/hudpreview.elf: $(objs)

@@ -196,10 +196,17 @@ a real map, 91 Blueprints and ~8k lines of C++. Run its tests with `tools/run_sh
   cases), and driven by the project's own flow: `CreateHUD` when the player's hero is possessed, the compiled widget functions format and set the widgets (`100 / 100`, `+ 1.0` with the engine's number
   formatting options, named `Format` arguments), ammo / weapon updates, the attribute listener (health 75 -> text `75 / 100`, bar 435 of 580 wide), the interaction prompt (`Press 'E'` / `Hold 'E'` with its
   duration bar, gone after the interaction). Rectangles, texts and bar widths are asserted against numbers computed by hand from the asset's values (status panel 9.13, 599.55 in a 1280 x 720 viewport, ...).
-  On the N64 (`shooterdemo/src/hud_render.c`, 640 x 480): the draw list scaled by 0.45, 8 x 8 built-in font, rectangles with alpha; the ares screenshot is `docs/img/ares_shooter_hud.png`.
-  HUD, not done: textures (weapon icon / background drawn as frames), the asset's fonts and text measuring (auto-sized slots use a fixed-pitch estimate), the DPI scale rules (a 1280 x 720 design viewport
-  is assumed), the floating status bars over heroes (`UI_FloatingStatusBar_Hero`), damage numbers, the material reticles, the respawn countdown wiring. The player state is a stand-in (the ability Blueprints cast
-  their owning actor to it; the cast is answered with the hero's).
+  On the N64 (`shooterdemo/src/hud_render.c`, 640 x 480): the layout space scaled by 0.3, 8 x 8 built-in font, rectangles with alpha; the ares screenshot is `docs/img/ares_shooter_hud.png`.
+  Layout space: the project has no UI-scale override, so the engine's default rule applies (shortest side, curve 480 -> 4/9, 720 -> 2/3, 1080 -> 1, 8640 -> 8: a 16:9 viewport of 720 or 1080 lines lays out as
+  1920 x 1080, the space the HUD was designed in; `u64_ui_scale`, checked against Python; the curve's key values are from my memory of the engine's defaults, unverified). An earlier version of this step
+  laid the HUD out in 1280 x 720 and so drew it too large; fixed.
+  Floating status bars (`UI_FloatingStatusBar_Hero`, `AGSHeroCharacter::InitializeFloatingStatusBar`): one per hero except the locally controlled player; the widget component is 120 above the hero, screen space,
+  draw size 500 x 500, centred on the point's projection through the player's camera (UE axes, horizontal FOV, 16:9; far ones first). The projection is checked against the formula written out in the test (four bars,
+  exact rectangles of the background and the health bar), and the enemy's shield bar follows damage through the widget's own attribute listener (91.67 / 100 -> 149.84 of 163.46 wide). Every hero now has a
+  player-state stand-in, since the widget reads its ability system through it.
+  HUD, not done: textures (weapon icon / background drawn as frames), the asset's fonts and text measuring (auto-sized slots use a fixed-pitch estimate; the 8 x 8 font overlaps small labels at 576 pixels wide),
+  the character name text (the hero's name is empty), occlusion of the floating bars by geometry, damage numbers (their widget animation is a MovieScene: opacity / 2D transform tracks), the material reticles,
+  the respawn countdown wiring. The player state is a stand-in (the ability Blueprints cast their owning actor to it; the cast is answered with the hero's).
 * Audio, networking, AI behaviour of the placed heroes.
 * Unverified engine assumption: the first execution of a periodic effect happens on the next tick (see below).
 

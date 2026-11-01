@@ -471,13 +471,18 @@ static void hud_poll_reserve(u64_obj *hero)
   int v = (int)hattr(asc, ra), shown = u64_ivar(hero, "HudReserve1")->t == U64_INT ? u64_ivar(hero, "HudReserve1")->u.i : v;
   if (v != shown) { hud_call(hero, "SetPrimaryReserveAmmo", u64_int(v)); *u64_ivar(hero, "HudReserve1") = u64_int(v); }
 }
+static u64_obj *hero_ps(u64_obj *hero, u64_obj *asc)                                               // the hero's player state (a stand-in: it owns the ability system in the engine; here it points at it)
+{
+  u64_obj *ps = O(*u64_ivar(hero, "PlayerState"));
+  if (!ps) { ps = u64_new("PlayerState", "GSPlayerState"); *u64_ivar(ps, "ASC") = u64_objv(asc); *u64_ivar(ps, "Hero") = u64_objv(hero); *u64_ivar(hero, "PlayerState") = u64_objv(ps); }
+  return ps;
+}
 static void create_hud(u64_obj *hero, u64_obj *pc)                                                // AGSPlayerController::CreateHUD
 {
   if (O(*u64_ivar(pc, "UIHUDWidget"))) return;                                                  // only once
   u64_v cls = *u64_ivar(pc, "UIHUDWidgetClass"); if (!*nm(cls)) return;
   u64_obj *asc = u64_asc_of(hero); if (!asc) return;
-  u64_obj *ps = O(*u64_ivar(pc, "PlayerState"));                                                 // the player state the widget reads its ability system from
-  if (!ps) { ps = u64_new("PlayerState", "GSPlayerState"); *u64_ivar(ps, "ASC") = u64_objv(asc); *u64_ivar(ps, "Hero") = u64_objv(hero); *u64_ivar(pc, "PlayerState") = u64_objv(ps); *u64_ivar(hero, "PlayerState") = u64_objv(ps); }
+  *u64_ivar(pc, "PlayerState") = u64_objv(hero_ps(hero, asc));                                    // the player state the widget reads its ability system from
   u64_obj *hud = u64_new(nm(cls), nm(cls));                                                       // CreateWidget<UGSHUDWidget>(this, UIHUDWidgetClass)
   u64_widget_instantiate(hud, nm(cls)); *u64_ivar(hud, "OwningPlayer") = u64_objv(pc);
   { u64_obj *snap[96]; int nt = u64_tasks_snapshot(snap, 96);                                  // listeners of an earlier HUD that point at a dead ability system component (the previous hero)
@@ -502,6 +507,25 @@ u64_obj *u64_cpp_cast_hook(u64_obj *o, const char *cls)                  // Cast
 {
   if (strcmp(cls, "GSPlayerState") || !is_class(o, "GSCharacterBase")) return 0;
   return O(*u64_ivar(o, "PlayerState"));
+}
+// ---------------------------------------------------------------------------------------------------- floating status bars (AGSHeroCharacter::InitializeFloatingStatusBar)
+// A screen-space widget component 120 above the hero (draw size 500 x 500) shows UI_FloatingStatusBar_Hero for every hero but the locally controlled player. The widget listens to its owner's
+// attributes itself (its Construct); the component's placement is the projection of the point through the player's camera.
+static void init_floating_status_bar(u64_obj *hero)
+{
+  if (O(*u64_ivar(hero, "UIFloatingStatusBar"))) return;                                         // only once
+  u64_obj *asc = u64_asc_of(hero); if (!asc || u64_true(*u64_ivar(hero, "IsPlayer"))) return;       // an ability system is needed; not for the locally controlled player
+  hero_ps(hero, asc);
+  u64_obj *w = u64_new("UIFloatingStatusBar", "UI_FloatingStatusBar_Hero");                       // CreateWidget<UGSFloatingStatusBarWidget>(PC, UIFloatingStatusBarClass)
+  u64_widget_instantiate(w, "UI_FloatingStatusBar_Hero"); *u64_ivar(w, "OwningCharacter") = u64_objv(hero);
+  *u64_ivar(hero, "UIFloatingStatusBar") = u64_objv(w);                                          // SetWidget
+  float h = u64_attr_get(asc, "Health"), mh = u64_attr_get(asc, "MaxHealth"), m = u64_attr_get(asc, "Mana"), mm = u64_attr_get(asc, "MaxMana"), sh = u64_attr_get(asc, "Shield"), msh = u64_attr_get(asc, "MaxShield");
+  u64_v pv;
+  pv = u64_float(h / mh); if (u64_has_bp(w, "SetHealthPercentage")) u64_call(w, "SetHealthPercentage", 1, &pv);
+  pv = u64_float(m / mm); if (u64_has_bp(w, "SetManaPercentage")) u64_call(w, "SetManaPercentage", 1, &pv);
+  pv = u64_float(sh / msh); if (u64_has_bp(w, "SetShieldPercentage")) u64_call(w, "SetShieldPercentage", 1, &pv);
+  pv = *u64_ivar(hero, "CharacterName"); if (u64_has_bp(w, "SetCharacterName")) u64_call(w, "SetCharacterName", 1, &pv);
+  if (u64_has_bp(w, "Construct")) u64_call(w, "Construct", 0, 0);
 }
 static u64_v h_clip_changed(u64_obj *s, int c, const u64_v *a) { hud_call(s, "SetPrimaryClipAmmo", A(c, a, 1)); return NONE_; }          // CurrentWeaponPrimaryClipAmmoChanged(Old, New)
 static u64_v h_clip2_changed(u64_obj *s, int c, const u64_v *a) { hud_call(s, "SetSecondaryClipAmmo", A(c, a, 1)); return NONE_; }
@@ -687,6 +711,43 @@ static void player_view(u64_obj *hero, v3 *loc, v3 *rot)
     float arm = boom && u64_ivar(boom, "TargetArmLength")->t == U64_FLOAT ? u64_ivar(boom, "TargetArmLength")->u.f : 300.0f;
     *loc = v3_sub(pivot, v3_mul(dir_of(ctrl), arm));
   }
+}
+// World point -> viewport position of a camera (UE: x forward, y right, z up; FOV horizontal): the projection every screen-space widget uses. Returns the depth along the view axis (<= 0: behind).
+float u64_gs_project(const float eye[3], const float rot[3], float fov_deg, float aspect, const float p[3], float vw, float vh, float *sx, float *sy)
+{
+  float pr = rot[0] * 0.017453292f, yw = rot[1] * 0.017453292f, cp = cosf(pr), sp = sinf(pr), cy = cosf(yw), sy_ = sinf(yw);
+  float d[3] = {p[0] - eye[0], p[1] - eye[1], p[2] - eye[2]};
+  float depth = d[0] * cp * cy + d[1] * cp * sy_ + d[2] * sp;                                  // along X
+  float right = -d[0] * sy_ + d[1] * cy;                                                          // along Y
+  float up = d[0] * (-sp * cy) + d[1] * (-sp * sy_) + d[2] * cp;                                  // along Z
+  if (depth <= 1e-3f) return depth;
+  float t = tanf(fov_deg * 0.5f * 0.017453292f);
+  *sx = (right / depth / t * 0.5f + 0.5f) * vw; *sy = (0.5f - up / depth / (t / aspect) * 0.5f) * vh;
+  return depth;
+}
+// The floating status bars as the player sees them, in a viewport of lw x lh layout units: far ones first.
+int u64_gs_floating_draw_list(u64_obj *viewer, float lw, float lh, u64_draw_cmd *out, int max)
+{
+  if (!viewer) return 0;
+  v3 eye, rot; player_view(viewer, &eye, &rot);
+  u64_obj *cam = O(u64_comp(viewer, u64_true(*u64_ivar(viewer, "bIsFirstPersonPerspective")) ? "FirstPersonCamera" : "FollowCamera"));
+  float fov = cam && u64_ivar(cam, "FieldOfView")->t == U64_FLOAT ? u64_ivar(cam, "FieldOfView")->u.f : 90.0f;
+  struct { u64_obj *w; float depth, sx, sy; } vis[16]; int nv = 0;
+  for (int i = 0; i < u64_obj_count() && nv < 16; i++) {
+    u64_obj *h = u64_obj_at(i); if (h == viewer || !u64_obj_is_actor(h) || !is_class(h, "GSHeroCharacter") || !is_alive(h)) continue;
+    u64_obj *w = O(*u64_ivar(h, "UIFloatingStatusBar")); if (!w) continue;
+    v3 l = v3_of(*u64_ivar(h, "Location")); float e[3] = {eye.x, eye.y, eye.z}, r[3] = {rot.x, rot.y, rot.z}, p[3] = {l.x, l.y, l.z + 120.0f}, sx, sy;     // the component sits at (0, 0, 120)
+    float depth = u64_gs_project(e, r, fov, lw / lh, p, lw, lh, &sx, &sy);
+    if (depth <= 1e-3f) continue;
+    vis[nv].w = w; vis[nv].depth = depth; vis[nv].sx = sx; vis[nv].sy = sy; nv++;
+  }
+  for (int a = 1; a < nv; a++) for (int b = a; b > 0 && vis[b].depth > vis[b - 1].depth; b--) { __typeof__(vis[0]) t = vis[b]; vis[b] = vis[b - 1]; vis[b - 1] = t; }
+  int k = 0;
+  for (int i = 0; i < nv && k < max; i++) {
+    u64_draw_cmd tmp[40]; int n = u64_widget_draw_list(vis[i].w, "UI_FloatingStatusBar_Hero", 500, 500, tmp, 40);      // draw size 500 x 500, centred on the projected point
+    for (int j = 0; j < n && k < max; j++) { out[k] = tmp[j]; out[k].x += vis[i].sx - 250.0f; out[k].y += vis[i].sy - 250.0f; k++; }
+  }
+  return k;
 }
 // FRotator -> rotation matrix (columns: X, Y, Z axes), as FRotationMatrix
 static void rot_mat(v3 rot, float m[9])
@@ -987,6 +1048,7 @@ static u64_v h_possessed_by(u64_obj *s, int c, const u64_v *a)         // AGSHer
   u64_obj *asc = u64_asc_of(s);
   if (asc) u64_remove_ge_with_tags(asc, "State.Dead");                // RemoveActiveEffectsWithGrantedTags(DeadTag)
   if (player) create_hud(s, pc);                                                        // PC->CreateHUD()
+  else init_floating_status_bar(s);                                                     // InitializeFloatingStatusBar (not for the locally controlled player)
   if (player) *u64_ivar(s, "bIsFirstPersonPerspective") = *u64_ivar(s, "bStartInFirstPersonPerspective");     // SetupStartupPerspective
   return NONE_;
 }

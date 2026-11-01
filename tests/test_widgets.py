@@ -40,6 +40,14 @@ class CanvasRules(unittest.TestCase):
         r = widgets.layout(ws, 800, 600); self.assertEqual(r[2], r[1])
 
 
+def ui_scale(w, h):
+    side = min(w, h); keys = [(480, 4 / 9), (720, 2 / 3), (1080, 1.0), (8640, 8.0)]
+    if side <= keys[0][0]: return keys[0][1]
+    for (a, b), (c, d) in zip(keys, keys[1:]):
+        if side <= c: return b + (d - b) * (side - a) / (c - a)
+    return keys[-1][1]
+
+
 class RealHud(unittest.TestCase):
     @unittest.skipUnless(os.environ.get("GASSHOOTER_CONTENT"), "set GASSHOOTER_CONTENT to the project's Content directory")
     def test_python_and_c_layout_agree(self):
@@ -51,6 +59,10 @@ class RealHud(unittest.TestCase):
             stub = t + "/stub.c"
             with open(stub, "w") as fh: fh.write('#include "u64_rt.h"\nu64_obj *u64_new(const char *a, const char *b) { return 0; } u64_v *u64_ivar(u64_obj *o, const char *n) { static u64_v v; return &v; } const char *u64_intern(const char *s) { return s; }\n')
             subprocess.check_call(["gcc", "-w", "-I" + ROOT + "/runtime", "-o", exe, ROOT + "/tests/widgets_test.c", ROOT + "/runtime/u64_widgets.c", t + "/u64_widget_data.c", stub, "-lm"])
+            for vw, vh in ((1280, 720), (1920, 1080), (640, 480), (3840, 2160), (800, 450)):          # the UI scale rule: layout space = viewport / scale (16:9 at 720 and 1080 lines -> 1920 x 1080)
+                sc, lw, lh = [float(x) for x in subprocess.check_output([exe, "scale", str(vw), str(vh)], text=True).split()]
+                self.assertAlmostEqual(sc, ui_scale(vw, vh), places=3); self.assertAlmostEqual(lw, vw / ui_scale(vw, vh), places=1)
+            self.assertAlmostEqual(ui_scale(1280, 720) * 1920, 1280, places=6); self.assertAlmostEqual(ui_scale(1920, 1080), 1.0)
             tree = widgets.read_widget_tree(content + "/GASShooter/UI/UI_HUD.uasset")
             ws = tree["widgets"]
             def meas(w):

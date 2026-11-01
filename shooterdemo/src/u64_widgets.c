@@ -3,6 +3,15 @@
 #include <string.h>
 #include <math.h>
 
+float u64_ui_scale(float vw, float vh)
+{
+  static const float k[4][2] = {{480, 4.0f / 9.0f}, {720, 2.0f / 3.0f}, {1080, 1.0f}, {8640, 8.0f}};
+  float side = vw < vh ? vw : vh;
+  if (side <= k[0][0]) return k[0][1];
+  for (int i = 1; i < 4; i++) if (side <= k[i][0]) return k[i - 1][1] + (k[i][1] - k[i - 1][1]) * (side - k[i - 1][0]) / (k[i][0] - k[i - 1][0]);
+  return k[3][1];
+}
+void u64_ui_layout_size(float vw, float vh, float *lw, float *lh) { float s = u64_ui_scale(vw, vh); *lw = vw / s; *lh = vh / s; }
 static int block(const char *bp, int *first)                          // the widgets of a blueprint are contiguous in the table
 {
   int n = 0; *first = -1;

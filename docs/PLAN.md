@@ -210,8 +210,9 @@ a real map, 91 Blueprints and ~8k lines of C++. Run its tests with `tools/run_sh
   and `12` (12.5 headshot), colours (1, 1, 0.498) / (1, 0, 0), font 42 / 56, position from an independent projection with the camera's actual rotation, animated offset and opacity from the keys.
   On the N64 the number is drawn in the enemy view (`docs/img/ares_shooter_damage_number.png`: yellow `8` above the floating bars; the full suite passes there). This work also fixed a real bug: an ability's `MakeOutgoingGameplayEffectSpec` used a phantom ASC created for the ability object as the spec's source instead of the hero's ASC.
   HUD, not done: textures (weapon icon / background drawn as frames), the asset's fonts and text measuring (auto-sized slots use a fixed-pitch estimate; the 8 x 8 font overlaps small labels at 576 pixels wide),
-  the character name text (the hero's name is empty), occlusion of the floating bars by geometry, the material reticles,
-  the respawn countdown wiring. The player state is a stand-in (the ability Blueprints cast their owning actor to it; the cast is answered with the hero's).
+  the material reticles. (Names: the floating bars already show the hero's CharacterName, "Hero". Occlusion: not needed as far as I remember the engine, screen-space widget components are drawn
+  on top without a depth test; unverified.) Respawn countdown: when the player's hero dies the game mode calls the HUD's `SetRespawnCountdown(5)`; the widget's own timer shows `Respawning in: 5`
+  / 3 at 2 s / 1 at 4 s and hides it at 0 (asserted). The player state is a stand-in (the ability Blueprints cast their owning actor to it; the cast is answered with the hero's).
 * Audio, networking, AI behaviour of the placed heroes.
 * Unverified engine assumption: the first execution of a periodic effect happens on the next tick (see below).
 

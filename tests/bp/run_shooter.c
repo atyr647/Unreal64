@@ -191,18 +191,23 @@ int u64_run_shooter_scenarios(int verbose)
   dm[0].value = 500.0f; u64_apply_ge(asc, asc, "TestDamage", 1, 0);
   CHECK(u64_tag_has(asc, "State.KnockedDown") && attr("Health") == 100 && attr("Shield") == 0 && u64_obj_alive(hero));
   // knocked down and hit again: FinishDying -> weapons dropped, hero destroyed, respawn scheduled (RespawnDelay 5 s)
-  u64_v hl = *u64_ivar(hero, "Location");
+  u64_v hl = *u64_ivar(hero, "Location"); u64_obj *hud0 = u64_gs_hud_of(hero);
   dm[0].value = 500.0f; u64_apply_ge(asc, asc, "TestDamage", 1, 0);
   CHECK(!u64_obj_alive(hero));
+  { u64_draw_cmd dl[64]; int n = u64_widget_draw_list(hud0, "UI_HUD", 1920, 1080, dl, 64); CHECK(!strcmp(hud_text(dl, n, "TextBlock_RespawnCountdown"), "Respawning in: 5")); }     // PC->SetRespawnCountdown(5): the HUD shows it and counts down once a second
   // RemoveAllWeaponsFromInventory drops weapon i at hero + 50 * (cos(i/N * 2pi), sin(i/N * 2pi)) with N = 3: rifle 0, shotgun 1, rocket 2
   CHECK(!u64_true(*u64_ivar(rifle, "OwningCharacter")) && u64_obj_alive(rifle));
   CHECK(fabsf(u64_ivar(rifle, "Location")->u.v[0] - (hl.u.v[0] + 50)) < 1e-3f && fabsf(u64_ivar(rifle, "Location")->u.v[1] - hl.u.v[1]) < 1e-3f);
   CHECK(fabsf(u64_ivar(shotgun, "Location")->u.v[0] - (hl.u.v[0] - 25)) < 1e-3f && fabsf(u64_ivar(shotgun, "Location")->u.v[1] - (hl.u.v[1] + 43.30127f)) < 1e-3f);
   CHECK(fabsf(u64_ivar(rocket, "Location")->u.v[0] - (hl.u.v[0] - 25)) < 1e-3f && fabsf(u64_ivar(rocket, "Location")->u.v[1] - (hl.u.v[1] - 43.30127f)) < 1e-3f);
-  tick(4 * 30);
+  tick(2 * 30);
+  { u64_draw_cmd dl[64]; int n = u64_widget_draw_list(hud0, "UI_HUD", 1920, 1080, dl, 64); CHECK(!strcmp(hud_text(dl, n, "TextBlock_RespawnCountdown"), "Respawning in: 3")); }
+  tick(2 * 30);
+  { u64_draw_cmd dl[64]; int n = u64_widget_draw_list(hud0, "UI_HUD", 1920, 1080, dl, 64); CHECK(!strcmp(hud_text(dl, n, "TextBlock_RespawnCountdown"), "Respawning in: 1")); }
   CHECK(u64_player_pawn() == 0);                                                    // still waiting at 4 s
   tick(2 * 30);
   CHECK(u64_player_pawn() && u64_player_pawn() != hero && u64_obj_alive(u64_player_pawn()));     // respawned after 5 s
+  { u64_draw_cmd dl[64]; int n = u64_widget_draw_list(hud0, "UI_HUD", 1920, 1080, dl, 64); CHECK(!hud_has(dl, n, "TextBlock_RespawnCountdown")); }     // hidden again when it reaches 0
   hero = u64_player_pawn(); tick(3);
   // The new hero starts among the weapons its previous life dropped (ring of radius 50 around the death spot, pickup capsule 40 + hero 34):
   // it picks them up on touch: the dropped rifle is a duplicate (its 30 rounds go to the reserve), the shotgun and rocket launcher join.

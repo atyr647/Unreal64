@@ -601,7 +601,9 @@ static void game_mode_hero_died(u64_obj *hero)                     // AGASShoote
 {
   u64_obj *gm = gm_obj();
   if (!gm) return;
+  float delay = fv(*u64_ivar(gm, "RespawnDelay"));
   if (u64_player_pawn() == hero) u64_set_player_pawn(0);                    // UnPossess (the spectator pawn is not modelled)
+  if (u64_true(*u64_ivar(hero, "IsPlayer"))) hud_call(hero, "SetRespawnCountdown", u64_float(delay));      // PC->SetRespawnCountdown(RespawnDelay): the HUD's countdown text and timer
   u64_timer_call(fv(*u64_ivar(gm, "RespawnDelay")), gm, "RespawnHero", u64_bool(u64_true(*u64_ivar(hero, "IsPlayer"))));
 }
 

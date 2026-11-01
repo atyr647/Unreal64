@@ -864,9 +864,11 @@ int u64_ray_pawn_capsule(u64_obj *o, const float s[3], const float e[3], float *
 int u64_line_trace(const float start[3], const float end[3], u64_obj *ignore, u64_obj **hits, int max) { return u64_trace_multi(start, end, 0.0f, ignore, hits, max); }
 
 // ---------------------------------------------------------------------------------------------------- montage notifies and gameplay events
+__attribute__((weak)) void u64_cpp_montage_hook(u64_obj *actor, const char *name, float rate) { (void)actor; (void)name; (void)rate; }   // the project port starts it on the actor's animation instance
 void u64_montage_play(u64_obj *actor, const char *name, float rate)      // schedules the montage's AnimNotifies
 {
   if (rate <= 0) rate = 1;
+  u64_cpp_montage_hook(actor, name, rate);
   for (const u64_montage_def *m = u64_montages; m->name; m++) {
     if (strcmp(m->name, name)) continue;
     *u64_ivar(actor, "CurrentMontage") = u64_name(m->name);

@@ -3,12 +3,16 @@
 // the Blueprint's SetText / SetPercent / SetVisibility natives write), layout in a viewport, and the list of things to draw.
 #include "u64_rt.h"
 typedef struct {
-  const char *bp, *name; int parent, type, visible;                 // type: 0 canvas panel, 1 text, 2 progress bar, 3 image, 4 widget switcher; visible: ESlateVisibility
+  const char *bp, *name; int parent, type, visible;                 // type: 0 canvas panel, 1 text, 2 progress bar, 3 image, 4 widget switcher, 5 overlay, 6 retainer box; visible: ESlateVisibility
   float anchors[4], offsets[4], align[2]; int autosize, z;           // the canvas slot
   const char *text; float font; int justify; float color[4];         // text block (justify: 0 left, 1 center, 2 right)
   float percent, fill[4], back[4]; float image[2], tint[4];          // progress bar / image
   int active, variable;
 } u64_widget_def;
+typedef struct { float t, v; int interp; float arrive, leave; } u64_anim_key;                    // a float channel key: time (s), value, interpolation (0 linear, 1 constant, 2 cubic), tangents (value / s)
+typedef struct { const char *bp, *anim, *widget; int channel; int nkeys; const u64_anim_key *keys; float length; } u64_widget_anim_def;     // channel: 0 render opacity, 1 / 2 render translation x / y
+extern const u64_widget_anim_def u64_widget_anims[];                                          // terminated by a zero entry
+float u64_anim_channel_eval(const u64_anim_key *k, int n, float t);                             // the channel's value at time t: constant outside the keys, Hermite between cubic keys
 extern const u64_widget_def u64_widget_defs[];
 extern const int u64_widget_count;
 

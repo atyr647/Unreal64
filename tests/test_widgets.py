@@ -57,7 +57,7 @@ class RealHud(unittest.TestCase):
             exe = t + "/w"
             # the C layout only needs the table: build without the whole runtime
             stub = t + "/stub.c"
-            with open(stub, "w") as fh: fh.write('#include "u64_rt.h"\nu64_obj *u64_new(const char *a, const char *b) { return 0; } u64_v *u64_ivar(u64_obj *o, const char *n) { static u64_v v; return &v; } const char *u64_intern(const char *s) { return s; }\n')
+            with open(stub, "w") as fh: fh.write('#include "u64_rt.h"\nfloat u64_world_time(void) { return 0.0f; } u64_obj *u64_new(const char *a, const char *b) { return 0; } u64_v *u64_ivar(u64_obj *o, const char *n) { static u64_v v; return &v; } const char *u64_intern(const char *s) { return s; }\n')
             subprocess.check_call(["gcc", "-w", "-I" + ROOT + "/runtime", "-o", exe, ROOT + "/tests/widgets_test.c", ROOT + "/runtime/u64_widgets.c", t + "/u64_widget_data.c", stub, "-lm"])
             for vw, vh in ((1280, 720), (1920, 1080), (640, 480), (3840, 2160), (800, 450)):          # the UI scale rule: layout space = viewport / scale (16:9 at 720 and 1080 lines -> 1920 x 1080)
                 sc, lw, lh = [float(x) for x in subprocess.check_output([exe, "scale", str(vw), str(vh)], text=True).split()]

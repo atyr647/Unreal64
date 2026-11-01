@@ -73,7 +73,7 @@ def main(content, out):
         fh.write(text)
     try:                                                     # UMG widget blueprints (the HUD, floating status bars, damage numbers)
         import widgets
-        trees = []
+        trees, wanims = [], {}
         for f in sorted(glob.glob(content + "/**/UI_*.uasset", recursive=True)):
             try:
                 t = widgets.read_widget_tree(f)
@@ -81,9 +81,14 @@ def main(content, out):
                 t = None
             if t and t["widgets"]:
                 trees.append(t)
-        wtext = widgets.emit_c(trees)
+                try:
+                    an = widgets.read_animations(f)
+                    if any(a["tracks"] for a in an): wanims[t["blueprint"]] = an
+                except Exception:
+                    pass
+        wtext = widgets.emit_c(trees, wanims)
     except Exception as ex:
-        wtext = '#include "u64_widgets.h"\nconst u64_widget_def u64_widget_defs[] = {{0}};\nconst int u64_widget_count = 0;\n'
+        wtext = '#include "u64_widgets.h"\nconst u64_widget_def u64_widget_defs[] = {{0}};\nconst int u64_widget_count = 0;\nconst u64_widget_anim_def u64_widget_anims[] = {{0}};\n'
         print("widget data skipped:", ex)
     with open(os.path.join(out, "u64_widget_data.c"), "w") as fh:
         fh.write(wtext)

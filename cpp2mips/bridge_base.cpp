@@ -52,8 +52,12 @@ void AGSCharacterBase::SetStamina(float) {}
 void AGSCharacterBase::SetShield(float) {}
 void AGSPlayerController::OnPossess(APawn *) {}
 void AGSPlayerController::OnRep_PlayerState() {}
-void AGSPlayerController::ShowDamageNumber(float, AGSCharacterBase *, FGameplayTagContainer) {}   // the Client RPC: HUD, ignored
-void AGSPlayerController::ShowDamageNumber_Implementation(float, AGSCharacterBase *, FGameplayTagContainer) {}   // HUD: ignored
+extern "C" void u64_gs_damage_number(u64_obj *target, float damage, int headshot); extern "C" int u64_gas_current_spec_headshot(void);
+void AGSPlayerController::ShowDamageNumber(float d, AGSCharacterBase *t, FGameplayTagContainer tags) { ShowDamageNumber_Implementation(d, t, tags); }   // the Client RPC: local call
+void AGSPlayerController::ShowDamageNumber_Implementation(float d, AGSCharacterBase *t, FGameplayTagContainer tags)   // the HUD's floating damage text (runtime widget WC_DamageText)
+{
+  if (t && t->rt) u64_gs_damage_number((u64_obj *)t->rt, d, tags.HasTag(FGameplayTag::RequestGameplayTag(FName("Effect.Damage.HeadShot"))));
+}
 
 namespace {
 struct Proxy;
@@ -127,6 +131,7 @@ extern "C" int u64_cxx_base_post_execute(u64_obj *tgt, const char *name, u64_obj
   sync_in(s); if (so) sync_in(so);
   FGameplayEffectModCallbackData data(s->rt);
   data.EffectSpec.Context.d = nullptr;
+  if (u64_gas_current_spec_headshot()) data.EffectSpec.DynamicAssetTags.AddTagFast(FGameplayTag::RequestGameplayTag(FName("Effect.Damage.HeadShot")));
   static FGameplayEffectContext ctx; ctx.Instigator = so ? &so->rt : nullptr; ctx.EffectCauser = so ? so->info.AvatarActor.p : nullptr;
   if (so) data.EffectSpec.Context.d = &ctx;
   data.EvaluatedData.Attribute = FGameplayAttribute(FindFieldChecked<FProperty>(nullptr, FName(name)));

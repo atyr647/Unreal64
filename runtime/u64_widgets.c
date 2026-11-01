@@ -44,17 +44,29 @@ int u64_widget_layout(const char *bp, float vw, float vh, float (*rects)[4], int
 }
 void u64_widget_instantiate(u64_obj *uw, const char *bp)
 {
-  static const char *const cls[] = {"CanvasPanel", "TextBlock", "ProgressBar", "Image", "WidgetSwitcher"};
+  static const char *const cls[] = {"CanvasPanel", "TextBlock", "ProgressBar", "Image", "WidgetSwitcher", "Overlay", "RetainerBox"};
   int first, n = block(bp, &first);
   for (int i = 0; i < n; i++) {
     const u64_widget_def *w = &u64_widget_defs[first + i];
-    u64_obj *o = u64_new(u64_intern(w->name), w->type >= 0 ? cls[w->type] : "Widget");
+    u64_obj *o = u64_new(u64_intern(w->name), w->type >= 0 && w->type < 7 ? cls[w->type] : "Widget");
     *u64_ivar(o, "Visibility") = u64_int(w->visible);
     if (w->type == 1) *u64_ivar(o, "Text") = u64_str(w->text);
     if (w->type == 2) *u64_ivar(o, "Percent") = u64_float(w->percent);
     if (w->type == 4) *u64_ivar(o, "ActiveWidgetIndex") = u64_int(w->active);
     *u64_ivar(uw, u64_intern(w->name)) = u64_objv(o);
   }
+}
+float u64_anim_channel_eval(const u64_anim_key *k, int n, float t)
+{
+  if (n <= 0) return 0.0f;
+  if (t <= k[0].t) return k[0].v;
+  if (t >= k[n - 1].t) return k[n - 1].v;
+  int i = 0; while (i + 1 < n && t >= k[i + 1].t) i++;
+  const u64_anim_key *a = &k[i], *b = &k[i + 1]; float dt = b->t - a->t, u = (t - a->t) / dt;
+  if (a->interp == 1) return a->v;                                                              // constant
+  if (a->interp == 0) return a->v + (b->v - a->v) * u;                                          // linear
+  float u2 = u * u, u3 = u2 * u;                                                                 // cubic Hermite: the tangents are per second
+  return (2 * u3 - 3 * u2 + 1) * a->v + (u3 - 2 * u2 + u) * dt * a->leave + (-2 * u3 + 3 * u2) * b->v + (u3 - u2) * dt * b->arrive;
 }
 static int shown(int vis) { return vis == 0 || vis == 3 || vis == 4; }
 static float fget(u64_v v, float d) { return v.t == U64_FLOAT ? v.u.f : (v.t == U64_INT || v.t == U64_BOOL) ? (float)v.u.i : d; }
@@ -77,11 +89,22 @@ int u64_widget_draw_list(u64_obj *uw, const char *bp, float vw, float vh, u64_dr
     }
     vis[i] = ok;
   }
+  float atx[64], aty[64], aop[64];                                                               // widget animation (PlayAnimation): render transform translation and opacity, inherited by the subtree
+  float anim_t = -1.0f; { u64_v *st = u64_ivar(uw, "AnimStart"); if (st->t == U64_FLOAT) { float sp = fget(*u64_ivar(uw, "AnimSpeed"), 1.0f); anim_t = (u64_world_time() - st->u.f) * sp; } }
+  for (int i = 0; i < n; i++) {
+    const u64_widget_def *w = &u64_widget_defs[first + i];
+    atx[i] = w->parent >= 0 ? atx[w->parent] : 0.0f; aty[i] = w->parent >= 0 ? aty[w->parent] : 0.0f; aop[i] = w->parent >= 0 ? aop[w->parent] : 1.0f;
+    if (anim_t >= 0) for (const u64_widget_anim_def *d = u64_widget_anims; d->bp; d++) {
+      if (strcmp(d->bp, bp) || strcmp(d->widget, w->name)) continue;
+      float v = u64_anim_channel_eval(d->keys, d->nkeys, anim_t);
+      if (d->channel == 0) aop[i] *= v; else if (d->channel == 1) atx[i] += v; else aty[i] += v;
+    }
+  }
   int k = 0;
   for (int pass = 0; pass < 2; pass++)                                  // slot z-order: z 0 widgets first (tree order), then the raised ones
     for (int i = 0; i < n && k < max; i++) {
       const u64_widget_def *w = &u64_widget_defs[first + i]; if (!vis[i] || (w->z != 0) != pass) continue;
-      u64_draw_cmd *c = &out[k]; memset(c, 0, sizeof *c); c->x = rects[i][0]; c->y = rects[i][1]; c->w = rects[i][2]; c->h = rects[i][3]; c->name = w->name;
+      int k0 = k; u64_draw_cmd *c = &out[k]; memset(c, 0, sizeof *c); c->x = rects[i][0] + atx[i]; c->y = rects[i][1] + aty[i]; c->w = rects[i][2]; c->h = rects[i][3]; c->name = w->name;
       if (w->type == 3) {
         memcpy(c->rgba, w->tint, sizeof c->rgba); c->kind = w->image[0] > 0 || w->tint[3] > 0 ? 0 : 2;
         if (w->parent >= 0 && w->tint[3] <= 0) continue;
@@ -94,9 +117,15 @@ int u64_widget_draw_list(u64_obj *uw, const char *bp, float vw, float vh, u64_dr
       } else if (w->type == 1) {
         u64_v t = ob[i] ? *u64_ivar(ob[i], "Text") : u64_str(w->text);
         c->kind = 1; c->text = t.t == U64_STR || t.t == U64_NAME ? t.u.s : w->text; c->justify = w->justify; c->font = w->font; memcpy(c->rgba, w->color, sizeof c->rgba);
+        if (ob[i]) {                                                                                   // SetColorAndOpacity (a slate colour struct) / SetFont (a font struct with Size)
+          u64_v co = *u64_ivar(ob[i], "ColorAndOpacity"), fo = *u64_ivar(ob[i], "FontOverride");
+          if (co.t == U64_OBJ && co.u.o) { u64_v sc = *u64_ivar(co.u.o, "SpecifiedColor"); if (sc.t == U64_VEC) { c->rgba[0] = sc.u.v[0]; c->rgba[1] = sc.u.v[1]; c->rgba[2] = sc.u.v[2]; } }
+          if (fo.t == U64_OBJ && fo.u.o) { u64_v sz = *u64_ivar(fo.u.o, "Size"); if (sz.t == U64_INT || sz.t == U64_FLOAT) c->font = fget(sz, c->font); }
+        }
         if (!c->text || !*c->text) continue;
         k++;
       }
+      for (int j = k0; j < k; j++) out[j].rgba[3] *= aop[i];                                          // the animation's render opacity (inherited by the subtree)
     }
   return k;
 }

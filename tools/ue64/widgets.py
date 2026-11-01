@@ -5,10 +5,12 @@ auto-size flag and z-order; UMG's rules for turning them into a rectangle are in
 Engine defaults used where the asset leaves a property out: font size 24, text / bar fill white, switcher active index 0, anchors (0,0)-(0,0), canvas slot offsets (0, 0, 100, 30).
 """
 import struct
+import struct
 import uasset, props
 
 DEFAULT_FONT = 24.0
-TYPES = {"CanvasPanel": 0, "TextBlock": 1, "ProgressBar": 2, "Image": 3, "WidgetSwitcher": 4}
+TYPES = {"CanvasPanel": 0, "TextBlock": 1, "ProgressBar": 2, "Image": 3, "WidgetSwitcher": 4, "Overlay": 5, "RetainerBox": 6}
+HALIGN = {"Fill": 0, "Left": 1, "Center": 2, "Right": 3}; VALIGN = {"Fill": 0, "Top": 1, "Center": 2, "Bottom": 3}
 VIS = {"Visible": 0, "Collapsed": 1, "Hidden": 2, "HitTestInvisible": 3, "SelfHitTestInvisible": 4}
 JUST = {"Left": 0, "Center": 1, "Right": 2}
 
@@ -99,7 +101,7 @@ def read_widget_tree(path):
         elif cn == "WidgetSwitcher":
             w["active"] = int(o.get("ActiveWidgetIndex", 0))
         idx = len(widgets); widgets.append(w); index[exp.name] = idx
-        if cn in ("CanvasPanel", "WidgetSwitcher"):
+        if cn in ("CanvasPanel", "WidgetSwitcher", "Overlay", "RetainerBox"):
             for sref in (o.get("Slots") or ("array", []))[1]:
                 se = obj(sref)
                 if se is None:
@@ -115,13 +117,15 @@ def read_widget_tree(path):
 
 
 def _slot(so):
+    ha = str(so.get("HorizontalAlignment", ("enum", "HAlign_Left"))[1]).split("_")[-1]; va = str(so.get("VerticalAlignment", ("enum", "VAlign_Top"))[1]).split("_")[-1]      # overlay slots: Left / Top by default
     ld = so.get("LayoutData")
     d = ld[1] if isinstance(ld, tuple) and ld[0] == "struct" else {}
     an = d.get("Anchors"); an = an[1] if isinstance(an, tuple) and an[0] == "struct" else {}
     mn = _floats(an.get("Minimum"), 2) or (0.0, 0.0); mx = _floats(an.get("Maximum"), 2) or (0.0, 0.0)
     al = _floats(d.get("Alignment"), 2) or (0.0, 0.0)
     off = _margin(d.get("Offsets"))
-    return {"anchors": (mn[0], mn[1], mx[0], mx[1]), "offsets": off, "align": al, "autosize": bool(so.get("bAutoSize", False)), "z": int(so.get("ZOrder", 0))}
+    return {"anchors": (mn[0], mn[1], mx[0], mx[1]), "offsets": off, "align": al, "autosize": bool(so.get("bAutoSize", False)), "z": int(so.get("ZOrder", 0)),
+            "halign": HALIGN.get(ha, 1), "valign": VALIGN.get(va, 1)}
 
 
 def layout(widgets, vw, vh, measure=lambda w: (0.0, 0.0)):
@@ -135,8 +139,15 @@ def layout(widgets, vw, vh, measure=lambda w: (0.0, 0.0)):
             rects[i] = (0.0, 0.0, float(vw), float(vh)); continue
         px, py, pw, ph = rects[w["parent"]]
         par = widgets[w["parent"]]
-        if par["type"] == 4:                                  # switcher child: the parent's rectangle
+        if par["type"] in (4, 6):                             # switcher / retainer child: the parent's rectangle
             rects[i] = (px, py, pw, ph); continue
+        if par["type"] == 5:                                  # overlay child: aligned by the slot (Fill stretches; otherwise its desired size, placed left / centre / right and top / centre / bottom)
+            mw, mh = measure(w); sl = w["slot"]; ox, oy = 0.0, 0.0; cw, ch = mw, mh
+            if sl["halign"] == 0: cw = pw
+            else: ox = {1: 0.0, 2: (pw - mw) / 2.0, 3: pw - mw}[sl["halign"]]
+            if sl["valign"] == 0: ch = ph
+            else: oy = {1: 0.0, 2: (ph - mh) / 2.0, 3: ph - mh}[sl["valign"]]
+            rects[i] = (px + ox, py + oy, cw, ch); continue
         s = w["slot"]; a = s["anchors"]; o = s["offsets"]; al = s["align"]; out = []
         for axis in (0, 1):
             a0, a1 = a[axis], a[axis + 2]; psz = pw if axis == 0 else ph; start_off, end_off = o[axis], o[axis + 2]
@@ -150,7 +161,76 @@ def layout(widgets, vw, vh, measure=lambda w: (0.0, 0.0)):
     return rects
 
 
-def emit_c(trees):
+TICKS_PER_SECOND = 24000.0       # MovieScene tick resolution (the engine default; the asset's own is not read)
+
+
+def _channel(ch):
+    """A float channel: [(time s, value, interp, arrive, leave)]. Times: one int32 per key (frame ticks); values: 23 bytes each (value f32, interp u8, tangent mode u8, arrive f32, leave f32, two weights f32, weight mode u8)."""
+    import struct
+    if not (isinstance(ch, tuple) and ch[0] == "struct"):
+        return []
+    t = ch[1].get("Times"); v = ch[1].get("Values")
+    if not (isinstance(t, tuple) and t[0] == "array" and isinstance(v, tuple) and v[0] == "array" and t[1] and v[1]):
+        return []                                   # a channel with no keys (defaults)
+    tb = t[1][0][1].get("Times", (None, b""))[1]; vb = v[1][0][1].get("Values", (None, b""))[1]
+    n = len(t[1]); keys = []
+    if len(tb) < 4 * n or len(vb) < 23 * n:
+        return []
+    for i in range(n):
+        tick = struct.unpack_from("<i", tb, 4 * i)[0]
+        val, interp, _, arrive, leave = struct.unpack_from("<fBBff", vb, 23 * i)
+        keys.append((tick / TICKS_PER_SECOND, val, interp, arrive, leave))
+    return keys
+
+
+def read_animations(path):
+    """WidgetAnimations of a widget blueprint: [{name, length, tracks: [(widget, property, channel index, keys)]}]; property: RenderOpacity (channel 0), RenderTransform translation (channels 1 = x, 2 = y)."""
+    p = uasset.parse_tables(path); data = open(path, "rb").read(); out = []
+    def obj(ref):
+        return p.exports[ref[2] - 1] if isinstance(ref, tuple) and ref[0] == "obj" and 0 < ref[2] <= len(p.exports) else None
+    for e in p.exports:
+        if uasset.class_name(p, e.cls) != "WidgetAnimation" or e.name.endswith("_INST"):
+            continue
+        o = props.read_object(p, data, e); ms = obj(o.get("MovieScene"))
+        if ms is None:
+            continue
+        mo = props.read_object(p, data, ms); pr = mo.get("PlaybackRange")
+        length = struct.unpack_from("<i", pr[1], 6)[0] / TICKS_PER_SECOND if isinstance(pr, tuple) and pr[0] == "raw" and len(pr[1]) >= 10 else 0.0
+        tracks = []
+        for ob in (mo.get("ObjectBindings") or ("array", []))[1]:
+            bind = ob[1].get("BindingName", "")
+            for tref in (ob[1].get("Tracks") or ("array", []))[1]:
+                te = obj(tref)
+                if te is None:
+                    continue
+                to = props.read_object(p, data, te); prop = to.get("PropertyName", ("name", ""))[1] if isinstance(to.get("PropertyName"), tuple) else str(to.get("PropertyName", ""))
+                for sref in (to.get("Sections") or ("array", []))[1]:
+                    se = obj(sref)
+                    if se is None:
+                        continue
+                    so = props.read_object(p, data, se)
+                    if prop == "RenderOpacity":
+                        keys = _channel(so.get("FloatCurve"))
+                        if keys: tracks.append((bind, "RenderOpacity", 0, keys))
+                    elif prop == "RenderTransform":
+                        for ci, key in ((1, "Translation"), (2, "Translation[1]")):
+                            keys = _channel(so.get(key))
+                            if keys: tracks.append((bind, "RenderTransform", ci, keys))
+        out.append({"name": e.name, "length": length, "tracks": tracks})
+    return out
+
+
+def emit_anims_c(blueprint, anims):
+    rows, arrays = [], []
+    for a in anims:
+        for k, (bind, prop, ch, keys) in enumerate(a["tracks"]):
+            ident = "%s_%s_%d" % (blueprint, a["name"], k)
+            arrays.append("static const u64_anim_key anim_keys_%s[] = {%s};" % (ident, ", ".join("{%rf, %rf, %d, %rf, %rf}" % kk for kk in keys)))
+            rows.append('  {"%s", "%s", "%s", %d, %d, anim_keys_%s, %rf}' % (blueprint, a["name"], bind, ch, len(keys), ident, a["length"]))
+    return "\n".join(arrays), rows
+
+
+def emit_c(trees, anims=None):
     """C table: u64_widget_def (blueprint, name, parent, type, visible, anchors, offsets, align, autosize, z, text, font, justify, color, percent, fill, back, image, tint, active)."""
     def cs(s):
         return '"' + str(s).replace("\\", "\\\\").replace('"', '\\"') + '"'
@@ -162,4 +242,8 @@ def emit_c(trees):
             rows.append("  {%s, %s, %d, %d, %d, {%s}, {%s}, {%s}, %d, %d, %s, %rf, %d, {%s}, %rf, {%s}, {%s}, {%s}, {%s}, %d, %d}" % (
                 cs(t["blueprint"]), cs(w["name"]), w["parent"], w["type"], w["visible"], f(s["anchors"]), f(s["offsets"]), f(s["align"]), int(s["autosize"]), s["z"], cs(w["text"]),
                 w["font"], w["justify"], f(w["color"]), w["percent"], f(w["fill"]), f(w["back"]), f(w["image"]), f(w["tint"]), w.get("active", 0), int(w["variable"])))
-    return "#include \"u64_widgets.h\"\nconst u64_widget_def u64_widget_defs[] = {\n" + ",\n".join(rows) + "\n};\nconst int u64_widget_count = %d;\n" % len(rows)
+    arr, arows = [], []
+    for bp, an in (anims or {}).items():
+        a, r = emit_anims_c(bp, an); arr.append(a); arows += r
+    return ("#include \"u64_widgets.h\"\n" + "\n".join(arr) + "\nconst u64_widget_def u64_widget_defs[] = {\n" + ",\n".join(rows) + "\n};\nconst int u64_widget_count = %d;\n" % len(rows)
+            + "const u64_widget_anim_def u64_widget_anims[] = {\n" + ",\n".join(arows + ["  {0}"]) + "\n};\n")

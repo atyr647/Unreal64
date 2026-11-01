@@ -10,8 +10,13 @@ import itertools
 _ids = itertools.count()
 
 
-def cval(v, owner="o"):
+def cval(v, owner="o", key=None):
     """C expression for a tagged-property value, or None if it can't be represented."""
+    if isinstance(v, tuple) and v[0] == "raw" and key:        # raw vectors by property name: FLinearColor (r, g, b), FIntPoint DrawSize, FVector2D Pivot
+        import struct
+        if key.endswith("Color") and len(v[1]) == 16: r, g, b, _ = struct.unpack("<4f", v[1]); return f"u64_vec({r!r}f, {g!r}f, {b!r}f)"
+        if key == "DrawSize" and len(v[1]) == 8: x, y = struct.unpack("<2i", v[1]); return f"u64_vec({float(x)!r}f, {float(y)!r}f, 0.0f)"
+        if key == "Pivot" and len(v[1]) == 8: x, y = struct.unpack("<2f", v[1]); return f"u64_vec({x!r}f, {y!r}f, 0.0f)"
     if isinstance(v, bool): return f"u64_bool({int(v)})"
     if isinstance(v, int): return f"u64_int({v})"
     if isinstance(v, float): return f"u64_float({v!r}f)"
@@ -45,6 +50,10 @@ def cval(v, owner="o"):
             if all(parts):                                                              # flat array: field name, value, ...
                 return f"u64_array_const({next(_ids)}, {len(parts)}, (u64_v[]){{u64_int(0), {', '.join(parts)}}} + 1)"
             return None
+        if v[0] == "raw" and len(v[1]) > 14 and v[1][:5] == b"\0\0\0\0\0" and v[1][9:10] == b"[":      # an FText (flags, history type, namespace "[...]", key, source string): the source string
+            import widgets
+            t = widgets.parse_ftext(v)
+            return f"u64_str({codegen.cstr(t)})" if t else None
         if v[0] == "tag": return f"u64_name({codegen.cstr(v[1])})"
         if v[0] == "tags":
             items = ", ".join(f"u64_name({codegen.cstr(t)})" for t in v[1])
@@ -111,7 +120,7 @@ def level_actors(p, data):
 def emit_defaults_c(defaults):
     lines = ['#include "u64_gas_core.h"', "void u64_apply_defaults(u64_obj *o, const char *cls) {"]
     for cls in sorted(defaults):
-        sets = [(k, cval(v, "o")) for k, v in defaults[cls].items() if k not in ("UberGraphFrame", "ActorLabel") and not k.startswith("__comp:")]
+        sets = [(k, cval(v, "o", k)) for k, v in defaults[cls].items() if k not in ("UberGraphFrame", "ActorLabel") and not k.startswith("__comp:")]
         sets = [(k, c) for k, c in sets if c]
         comps = []
         for k, v in defaults[cls].items():

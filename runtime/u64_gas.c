@@ -255,7 +255,7 @@ u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
   if (IS("GetMovementComponent")) { u64_v *m = u64_ivar(self, "MovementComponent"); return m->t == U64_OBJ ? *m : u64_objv(self); }
   if (IS("TryGetPawnOwner")) { u64_v *p = u64_ivar(self, "Pawn"); return p->t == U64_OBJ ? *p : u64_objv(self); }
   if (IS("GetMaxSpeed")) return u64_float(u64_max_speed(self));
-  if (IS("PlayAnimation") || IS("GetInstanceAssetPlayerTimeFromEndFraction")) return u64_float(0);
+  if (IS("GetInstanceAssetPlayerTimeFromEndFraction")) return u64_float(0);
   // ---------------- character input, control rotation, rotator math ----------------
   if (IS("AddMovementInput")) {                                                                  // APawn::AddMovementInput
     u64_v *in = u64_ivar(self, "InputVec"); float sc = F(y);
@@ -303,6 +303,11 @@ u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
   if (IS("SetPercent"))    { *u64_ivar(self, "Percent") = x; return NONE_; }
   if (IS("SetVisibility")) { *u64_ivar(self, "Visibility") = x; return NONE_; }
   if (IS("SetOpacity"))    { *u64_ivar(self, "Opacity") = x; return NONE_; }
+  if (IS("SetColorAndOpacity")) { *u64_ivar(self, "ColorAndOpacity") = x; return NONE_; }
+  if (IS("SetFont")) { *u64_ivar(self, "FontOverride") = x; return NONE_; }
+  if (IS("PlayAnimation")) {                                                                       // UUserWidget::PlayAnimation(Animation, StartAtTime, NumLoops, PlayMode, PlaybackSpeed): its tracks run on the widget's clock
+    *u64_ivar(self, "AnimStart") = u64_float(u64_world_time() - (argc > 1 && a[1].t == U64_FLOAT ? a[1].u.f : 0.0f)); *u64_ivar(self, "AnimSpeed") = argc > 4 ? a[4] : u64_float(1.0f); return NONE_;
+  }
   if (IS("SetActiveWidgetIndex")) { *u64_ivar(self, "ActiveWidgetIndex") = x; return NONE_; }       // UWidgetSwitcher: which child is shown
   if (IS("GetUserWidgetObject")) { u64_v *w = u64_ivar(self, "Widget"); return w->t == U64_OBJ ? *w : u64_objv(self); }
   if (IS("GetOwningPlayer")) {                                                                    // a widget's owning player controller (the one that created it), else the player controller
@@ -371,8 +376,9 @@ u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
     u64_obj *spec = u64_new("EffectSpec", "GameplayEffectSpec");
     *u64_ivar(spec, "GEClass") = u64_name(u64_intern(nm(x)));
     *u64_ivar(spec, "Level") = y;
-    *u64_ivar(spec, "Source") = u64_objv(asc_for(self));
-    *u64_ivar(spec, "snapDamage") = u64_float(u64_attr_get(asc_for(self), "Damage"));      // FGameplayEffectAttributeCaptureDefinition: Snapshot = true
+    u64_v *own = u64_ivar(self, "ASC"); u64_obj *src = own->t == U64_OBJ && own->u.o ? own->u.o : asc_for(self);       // an ability's spec comes from the ability system it is granted to
+    *u64_ivar(spec, "Source") = u64_objv(src);
+    *u64_ivar(spec, "snapDamage") = u64_float(u64_attr_get(src, "Damage"));      // FGameplayEffectAttributeCaptureDefinition: Snapshot = true
     return u64_objv(spec);
   }
   if (IS("AssignTagSetByCallerMagnitude")) {
@@ -461,7 +467,7 @@ u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
   // (no audio / widget system is ported). Accepted and ignored, not modelled.
   static const char *const presentation[] = {"PlaySound2D", "PlaySoundAtLocation", "SpawnSoundAttached", "ClientPlayCameraShake", "AddChildToCanvas",
     "RemoveFromParent", "SetAlignment", "SetAnchors", "SetAutoSize", "SetBrushFromAtlasInterface", "SetBrushTintColor",
-    "SetColorAndOpacity", "SetFont", "SetPosition", "SetVectorParameter", "ResetHUDReticle", "SetHUDReticle", "AddGameplayCueLocal",
+    "SetPosition", "SetVectorParameter", "ResetHUDReticle", "SetHUDReticle", "AddGameplayCueLocal",
     "ExecuteGameplayCueLocal", "RemoveGameplayCueLocal", "K2_ExecuteGameplayCueWithParams", 0};
   for (int i = 0; presentation[i]; i++) if (IS(presentation[i])) return NONE_;
   if (IS("GetTagName")) return u64_name(nm(x));

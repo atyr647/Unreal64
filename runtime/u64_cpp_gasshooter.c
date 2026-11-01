@@ -48,6 +48,7 @@ static void gs_pre_attribute_change(u64_obj *asc, const char *name, float *nv)  
   else if (!strcmp(name, "MoveSpeed")) *nv = clampf(*nv, 150, 1000);
 }
 static int is_alive(u64_obj *ch) { return u64_obj_alive(ch) && u64_attr_get(u64_asc_of(ch), "Health") > 0; }   // GetHealth() > 0
+void u64_gs_damage_number(u64_obj *target, float damage, int headshot); int u64_gas_current_spec_headshot(void);
 static int gs_post_execute(u64_obj *tgt, const char *name, u64_obj *src)            // UGSAttributeSetBase / UGSAmmoAttributeSet::PostGameplayEffectExecute
 {
 #ifdef U64_CXX_BASE
@@ -73,7 +74,8 @@ static int gs_post_execute(u64_obj *tgt, const char *name, u64_obj *src)        
         u64_apply_ge(src, src, defs[k].name, 1.0f, 0);
       }
     }
-    (void)source_actor;
+    if (local > 0.0f && target_actor && source_actor && target_actor != source_actor && u64_player_pawn() == source_actor && is_class(target_actor, "GSCharacterBase"))
+      u64_gs_damage_number(target_actor, local, u64_gas_current_spec_headshot());                  // the source is the local player: PC->ShowDamageNumber
     return 1;
   }
   if (!strcmp(name, "Health")) { u64_attr_set_base(tgt, "Health", clampf(u64_attr_get(tgt, "Health"), 0.0f, u64_attr_get(tgt, "MaxHealth"))); return 1; }
@@ -749,6 +751,62 @@ int u64_gs_floating_draw_list(u64_obj *viewer, float lw, float lh, u64_draw_cmd 
   }
   return k;
 }
+// ---------------------------------------------------------------------------------------------------- damage numbers
+// AGSCharacterBase::AddDamageNumber queues (damage, tags) and starts a 0.1 s repeating timer (first call at once); ShowDamageNumber makes one UGSDamageTextWidgetComponent (WC_DamageText, a Blueprint:
+// screen-space widget UI_DamageNumber, draw size 200 x 100, pivot (0.5, 2.0)) at the character's root and calls its SetDamageText; the widget plays its fade animation, the component destroys itself after 1 s.
+void u64_gs_damage_number(u64_obj *target, float damage, int headshot)
+{
+  if (!target) return;
+  u64_v *q = u64_ivar(target, "DamageNumberQueue"); if (q->t != U64_ARRAY) *q = u64_array_of(0, 0);
+  u64_array_push(q, u64_float(damage)); u64_array_push(q, u64_bool(headshot));
+  if (u64_ivar(target, "DamageNumberNext")->t != U64_FLOAT) *u64_ivar(target, "DamageNumberNext") = u64_float(u64_world_time());      // the timer starts with a delay of 0
+}
+static void show_damage_number(u64_obj *hero, float damage, int headshot)
+{
+  u64_obj *c = u64_new("DamageText", "WC_DamageText"), *w = u64_new("DamageNumber", "UI_DamageNumber");
+  *u64_ivar(c, "Owner") = u64_objv(hero); u64_widget_instantiate(w, "UI_DamageNumber"); *u64_ivar(c, "Widget") = u64_objv(w);
+  u64_v *keep = u64_ivar(hero, "DamageTexts"); if (keep->t != U64_ARRAY) *keep = u64_array_of(0, 0);                       // keeps the components reachable; drop the finished ones
+  u64_v live = u64_array_of(0, 0); for (int i = 0; i < u64_array_len(*keep); i++) { u64_obj *o = O(u64_array_get(*keep, i)); if (o && u64_obj_alive(o)) u64_array_push(&live, u64_objv(o)); }
+  u64_array_push(&live, u64_objv(c)); *keep = live;
+  if (u64_has_bp(w, "Construct")) u64_call(w, "Construct", 0, 0);
+  u64_v tags = u64_array_of(0, 0); if (headshot) u64_array_push(&tags, u64_name("Effect.Damage.HeadShot"));
+  u64_v args[2] = {u64_float(damage), tags}; u64_call(c, "SetDamageText", 2, args);
+}
+static void damage_numbers_tick(float now)
+{
+  for (int i = 0; i < u64_obj_count(); i++) {
+    u64_obj *h = u64_obj_at(i); u64_v *nx = u64_ivar(h, "DamageNumberNext");
+    if (nx->t != U64_FLOAT || !u64_obj_alive(h)) continue;
+    while (nx->u.f <= now + 1e-5f) {                                                             // the repeating timer: one number per 0.1 s while the queue has some
+      u64_v *q = u64_ivar(h, "DamageNumberQueue");
+      if (q->t == U64_ARRAY && u64_array_len(*q) >= 2) {
+        float dmg = fv(u64_array_get(*q, 0)); int hs = u64_true(u64_array_get(*q, 1)); u64_v rest = u64_array_of(0, 0);
+        for (int k = 2; k < u64_array_len(*q); k++) u64_array_push(&rest, u64_array_get(*q, k));
+        *q = rest; show_damage_number(h, dmg, hs);
+      }
+      nx = u64_ivar(h, "DamageNumberNext"); nx->u.f += 0.1f;
+    }
+  }
+}
+// The live damage numbers as the player sees them (screen space: the component's origin is the character's root, the widget's top-left sits at the point minus pivot * draw size).
+int u64_gs_damage_draw_list(u64_obj *viewer, float lw, float lh, u64_draw_cmd *out, int max)
+{
+  if (!viewer) return 0;
+  v3 eye, rot; player_view(viewer, &eye, &rot);
+  u64_obj *cam = O(u64_comp(viewer, u64_true(*u64_ivar(viewer, "bIsFirstPersonPerspective")) ? "FirstPersonCamera" : "FollowCamera"));
+  float fov = cam && u64_ivar(cam, "FieldOfView")->t == U64_FLOAT ? u64_ivar(cam, "FieldOfView")->u.f : 90.0f;
+  int k = 0;
+  for (int i = 0; i < u64_obj_count() && k < max; i++) {
+    u64_obj *c = u64_obj_at(i); if (strcmp(u64_obj_class(c), "WC_DamageText") || !u64_obj_alive(c)) continue;
+    u64_obj *owner = O(*u64_ivar(c, "Owner")), *w = O(*u64_ivar(c, "Widget")); if (!owner || !w || !u64_obj_alive(owner)) continue;
+    v3 l = v3_of(*u64_ivar(owner, "Location")); float e[3] = {eye.x, eye.y, eye.z}, r[3] = {rot.x, rot.y, rot.z}, p[3] = {l.x, l.y, l.z}, sx, sy;
+    if (u64_gs_project(e, r, fov, lw / lh, p, lw, lh, &sx, &sy) <= 1e-3f) continue;
+    v3 ds = v3_of(*u64_ivar(c, "DrawSize")), pv = v3_of(*u64_ivar(c, "Pivot")); if (ds.x <= 0) ds = (v3){200, 100, 0};
+    u64_draw_cmd tmp[16]; int n = u64_widget_draw_list(w, "UI_DamageNumber", ds.x, ds.y, tmp, 16);
+    for (int j = 0; j < n && k < max; j++) { out[k] = tmp[j]; out[k].x += sx - pv.x * ds.x; out[k].y += sy - pv.y * ds.y; k++; }
+  }
+  return k;
+}
 // FRotator -> rotation matrix (columns: X, Y, Z axes), as FRotationMatrix
 static void rot_mat(v3 rot, float m[9])
 {
@@ -1170,6 +1228,7 @@ static void interact_tick(void);
 static void gs_world_tick(float dt)
 {
   anim_tick(dt);
+  damage_numbers_tick(u64_world_time());
   { u64_obj *pp = u64_player_pawn(); if (pp && u64_obj_alive(pp)) hud_poll_reserve(pp); }
   interact_tick();
   for (int i = 0; i < u64_obj_count(); i++) {

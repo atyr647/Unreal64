@@ -4,7 +4,10 @@
 typedef struct { const char *name; int parent; float t[3], q[4]; } u64_an_bone;
 typedef struct { int npos, nrot; const float *pos, *rot; } u64_an_track;                       // keys: vec3 / quat xyzw, evenly spaced; 1 key = constant, 0 = reference pose
 typedef struct { const char *name; float length; int frames; const u64_an_track *tracks; } u64_an_seq;
-typedef struct { const char *name; int kind, nlinks, links[8], seq; float rate; int loop, machine, emap[8]; float times[8]; const char *slot; } u64_an_node;
+typedef struct { const char *name; int kind, nlinks, links[8], seq; float rate; int loop, machine, emap[8]; float times[8]; const char *slot; int bs, nfilt, filt[4], depth[4]; } u64_an_node;
+typedef struct { int seq; float x, y; } u64_an_bsample;
+typedef struct { int idx[3]; float w[3]; } u64_an_bgrid;                                         // one grid point: up to three samples and their weights
+typedef struct { const char *name; float min[2], max[2]; int div[2], nsamples; const u64_an_bsample *samples; const u64_an_bgrid *grid; } u64_an_bspace;   // 2D blend space
 typedef struct { const char *name, *slot; float blend_in, blend_out, length; int seq; float start, end, rate; } u64_an_montage;     // one segment montages (the project's)
 typedef struct { int index, node, desired; } u64_an_exit;
 typedef struct { const char *name; int root, nexits; u64_an_exit exits[4]; } u64_an_state;
@@ -13,9 +16,9 @@ typedef struct { const char *name; int initial, nstates; const u64_an_state *sta
 typedef struct { const char *var, *node, *field; } u64_an_copy;
 typedef struct {
   const char *name, *mesh; int nnodes; const u64_an_node *nodes; int nmachines; const u64_an_machine *machines; int ncopies; const u64_an_copy *copies;
-  int nfuncs; const char *const *funcs; int nbones; const u64_an_bone *bones; int nseqs; const u64_an_seq *seqs; int nmontages; const u64_an_montage *montages;
+  int nfuncs; const char *const *funcs; int nbones; const u64_an_bone *bones; int nseqs; const u64_an_seq *seqs; int nmontages; const u64_an_montage *montages; int nbspaces; const u64_an_bspace *bspaces;
 } u64_an_graph;
-#define U64_AN_MAXBONES 16
+#define U64_AN_MAXBONES 32
 typedef struct { float t[U64_AN_MAXBONES][3], q[U64_AN_MAXBONES][4]; } u64_an_pose;
 typedef struct u64_an_inst u64_an_inst;
 u64_an_inst *u64_anim_new(const u64_an_graph *g, u64_obj *instance);                            // instance: the AnimInstance object (variables, node structs)

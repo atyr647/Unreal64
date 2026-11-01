@@ -14,7 +14,8 @@ import skeleton
 import uasset
 
 NODE_KIND = {"Root": 0, "Slot": 1, "StateMachine": 2, "StateResult": 3, "SequencePlayer": 4, "BlendListByBool": 5, "BlendListByEnum": 6,
-             "LayeredBoneBlend": 7, "TransitionResult": 8}
+             "LayeredBoneBlend": 7, "TransitionResult": 8, "BlendSpacePlayer": 9, "UseCachedPose": 10, "SaveCachedPose": 11, "ConvertLocalToComponentSpace": 12,
+             "ConvertComponentToLocalSpace": 12, "Fabrik": 12, "RotationOffsetBlendSpace": 12}
 
 
 def _load(f):
@@ -34,7 +35,7 @@ def read_abp(path):
         kind = v[2][len("AnimNode_"):]
         f = v[1]
         link = lambda s: s[1]["LinkID"]
-        n = {"name": k, "kind": NODE_KIND.get(kind, -1), "links": [], "times": [], "seq": "", "rate": 1.0, "enum_map": [], "machine": -1, "loop": 1, "slot": ""}
+        n = {"name": k, "kind": NODE_KIND.get(kind, -1), "links": [], "times": [], "seq": "", "rate": 1.0, "enum_map": [], "machine": -1, "loop": 1, "slot": "", "bs": "", "filters": [], "cache": ""}
         if kind in ("Root",):
             n["links"] = [link(f["Result"])]
         elif kind == "Slot":
@@ -54,6 +55,19 @@ def read_abp(path):
         elif kind == "LayeredBoneBlend":
             n["links"] = [link(f["BasePose"])] + [link(x) for x in f["BlendPoses"][1]]
             n["times"] = [float(x) for x in f["BlendWeights"][1]]
+            if f["LayerSetup"][1]:
+                n["filters"] = [(b[1]["BoneName"][1], int(b[1].get("BlendDepth", 0))) for b in f["LayerSetup"][1][0][1]["BranchFilters"][1]]
+        elif kind == "BlendSpacePlayer":
+            bs = f.get("BlendSpace"); n["bs"] = bs[1] if isinstance(bs, tuple) and bs[0] == "obj" else ""
+            n["rate"] = float(f.get("PlayRate", 1.0))
+        elif kind == "UseCachedPose":
+            n["links"] = [link(f["LinkToCachingNode"])]
+        elif kind == "SaveCachedPose":
+            n["links"] = [link(f["Pose"])]
+        elif kind in ("ConvertLocalToComponentSpace", "ConvertComponentToLocalSpace", "Fabrik", "RotationOffsetBlendSpace"):
+            key = {"ConvertLocalToComponentSpace": "LocalPose", "ConvertComponentToLocalSpace": "ComponentPose", "Fabrik": "ComponentPose", "RotationOffsetBlendSpace": "BasePose"}[kind]
+            if key in f and isinstance(f[key], tuple) and f[key][0] == "struct" and "LinkID" in f[key][1]:
+                n["links"] = [link(f[key])]
         elif kind == "StateMachine":
             n["machine"] = int(f.get("StateMachineIndexInClass", 0))
         nodes.append(n)
@@ -68,7 +82,7 @@ def read_abp(path):
                            "transitions": [(t[1]["TransitionIndex"], N - 1 - t[1]["CanTakeDelegateIndex"], bool(t[1]["bDesiredTransitionReturnValue"])) for t in s["Transitions"][1]]})
         trans = [{"prev": t[1]["PreviousState"], "next": t[1]["NextState"], "time": float(t[1]["CrossfadeDuration"])} for t in m["Transitions"][1]]
         machines.append({"name": m["MachineName"][1], "initial": m["InitialState"], "states": states, "transitions": trans})
-    lib = cls["PropertyAccessLibrary"][1]
+    lib = cls.get("PropertyAccessLibrary", ("struct", {"PathSegments": ("array", []), "SrcPaths": ("array", []), "DestPaths": ("array", [])}))[1]
     segs = [s[1] for s in lib["PathSegments"][1]]
     copies = []
     for sp, dp in zip(lib["SrcPaths"][1], lib["DestPaths"][1]):
@@ -134,7 +148,7 @@ def _cs(s):
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def emit_c(content, abp_name, mesh_name, socket_bone):
+def emit_c(content, abp_name, mesh_name, target_bones):
     """C tables for one Animation Blueprint driving one skeletal mesh, restricted to the bone chain up to socket_bone (what sockets / aiming need)."""
     path = glob.glob(content + "/**/%s.uasset" % abp_name, recursive=True)[0]
     abp = read_abp(path)
@@ -142,15 +156,20 @@ def emit_c(content, abp_name, mesh_name, socket_bone):
     p, d = _load(mp)
     me = next(e for e in p.exports if uasset.class_name(p, e.cls) == "SkeletalMesh")
     bones = skeleton.ref_skeleton(p, d, me)
-    ch = chain(bones, socket_bone)
+    if isinstance(target_bones, str):
+        target_bones = [target_bones]
+    keep = sorted({i for b in target_bones for i in chain(bones, b)})                  # bone chains to every target, parents first
+    ch = keep
     names = [bones[i][0] for i in ch]
+    sub = {bi: k for k, bi in enumerate(ch)}
     out = ['#include "u64_anim.h"']
     # reference pose of the chain
-    rows = ", ".join("{%s, %d, {%s}, {%s}}" % (_cs(bones[i][0]), k - 1 if k else -1, ", ".join(_f(x) for x in bones[i][2]), ", ".join(_f(x) for x in bones[i][3])) for k, i in enumerate(ch))
+    rows = ", ".join("{%s, %d, {%s}, {%s}}" % (_cs(bones[i][0]), sub[bones[i][1]] if bones[i][1] >= 0 else -1, ", ".join(_f(x) for x in bones[i][2]), ", ".join(_f(x) for x in bones[i][3])) for i in ch)
     pfx = "an_%s_" % abp_name
     out.append("static const u64_an_bone %sbones[] = {%s};" % (pfx, rows))
     montages = find_montages(content, abp_skeleton(path))
-    seqs = sorted({n["seq"] for n in abp["nodes"] if n["seq"]} | {sg[0] for m in montages for sg in m[5]})
+    bspaces = [read_blendspace(content, n) for n in sorted({n["bs"] for n in abp["nodes"] if n["bs"]})]
+    seqs = sorted({n["seq"] for n in abp["nodes"] if n["seq"]} | {sg[0] for m in montages for sg in m[5]} | {a for b in bspaces if b for a in b["samples_anim"]})
     srows = []
     for si, sname in enumerate(seqs):
         sq = find_sequence(content, sname)
@@ -171,9 +190,19 @@ def emit_c(content, abp_name, mesh_name, socket_bone):
         links = (n["links"] + [0] * 8)[:8]
         emap = (n["enum_map"] + [0] * 8)[:8]
         times = (n["times"] + [0.0] * 8)[:8]
-        nrows.append("{%s, %d, %d, {%s}, %d, %s, %d, %d, {%s}, {%s}, %s}" % (
+        bsi = [b["name"] for b in bspaces if b].index(n["bs"]) if n["bs"] and n["bs"] in [b["name"] for b in bspaces if b] else -1
+        fl = [(names.index(b), dep) for b, dep in n["filters"] if b in names][:4]
+        fl_idx = ([str(a) for a, _ in fl] + ["0"] * 4)[:4]
+        fl_dep = ([str(b) for _, b in fl] + ["0"] * 4)[:4]
+        nrows.append("{%s, %d, %d, {%s}, %d, %s, %d, %d, {%s}, {%s}, %s, %d, %d, {%s}, {%s}}" % (
             _cs(n["name"]), n["kind"], len(n["links"]), ", ".join(map(str, links)), seqidx.get(n["seq"], -1), _f(n["rate"]), n["loop"], n["machine"],
-            ", ".join(map(str, emap)), ", ".join(_f(x) for x in times), _cs(n["slot"])))
+            ", ".join(map(str, emap)), ", ".join(_f(x) for x in times), _cs(n["slot"]), bsi, len(fl), ", ".join(fl_idx), ", ".join(fl_dep)))
+    brow = []
+    for bi, b in enumerate([x for x in bspaces if x]):
+        out.append("static const u64_an_bsample %sb%d_s[] = {%s};" % (pfx, bi, ", ".join("{%d, %s, %s}" % (seqidx[a], _f(x), _f(y)) for a, x, y in zip(b["samples_anim"], b["sx"], b["sy"]))))
+        out.append("static const u64_an_bgrid %sb%d_g[] = {%s};" % (pfx, bi, ", ".join("{{%d, %d, %d}, {%s, %s, %s}}" % (g[0], g[1], g[2], _f(g[3]), _f(g[4]), _f(g[5])) for g in b["grid"])))
+        brow.append("{%s, {%s, %s}, {%s, %s}, {%d, %d}, %d, %sb%d_s, %sb%d_g}" % (_cs(b["name"]), _f(b["min"][0]), _f(b["min"][1]), _f(b["max"][0]), _f(b["max"][1]), b["div"][0], b["div"][1], len(b["samples_anim"]), pfx, bi, pfx, bi))
+    out.append("static const u64_an_bspace %sbspaces[] = {%s};" % (pfx, ", ".join(brow) or "{0}"))
     mrows2 = []
     for m in montages:
         sg = m[5][0] if m[5] else None
@@ -195,8 +224,8 @@ def emit_c(content, abp_name, mesh_name, socket_bone):
     frow = ", ".join(_cs(x) for x in abp["functions"])
     out.append("static const u64_an_copy %scopies[] = {%s};" % (pfx, crow))
     out.append("static const char *const %sfuncs[] = {%s};" % (pfx, frow))
-    out.append("const u64_an_graph u64_an_%s = {%s, %s, %d, %snodes, %d, %smachines, %d, %scopies, %d, %sfuncs, %d, %sbones, %d, %sseqs, %d, %smontages};" % (
-        abp_name, _cs(abp_name), _cs(mesh_name), len(abp["nodes"]), pfx, len(abp["machines"]), pfx, len(abp["copies"]), pfx, len(abp["functions"]), pfx, len(ch), pfx, len(seqs), pfx, len(montages), pfx))
+    out.append("const u64_an_graph u64_an_%s = {%s, %s, %d, %snodes, %d, %smachines, %d, %scopies, %d, %sfuncs, %d, %sbones, %d, %sseqs, %d, %smontages, %d, %sbspaces};" % (
+        abp_name, _cs(abp_name), _cs(mesh_name), len(abp["nodes"]), pfx, len(abp["machines"]), pfx, len(abp["copies"]), pfx, len(abp["functions"]), pfx, len(ch), pfx, len(seqs), pfx, len(montages), pfx, len([x for x in bspaces if x]), pfx))
     return "\n".join(out) + "\n", abp
 
 
@@ -242,3 +271,31 @@ def abp_skeleton(path):
     cls = props.read_object(p, d, next(e for e in p.exports if uasset.class_name(p, e.cls) == "AnimBlueprintGeneratedClass"))
     t = cls.get("TargetSkeleton")
     return t[1] if isinstance(t, tuple) and t[0] == "obj" else ""
+
+
+def read_blendspace(content, name):
+    """2D blend space (BlendSpace / AimOffsetBlendSpace): sample animations and positions, axis ranges, precomputed grid (index = xi * (divisions_y + 1) + yi)."""
+    for f in glob.glob(content + "/**/%s.uasset" % name, recursive=True):
+        p, d = _load(f)
+        for e in p.exports:
+            if "BlendSpace" in uasset.class_name(p, e.cls):
+                o = props.read_object(p, d, e)
+                sd = o["SampleData"][1]
+                anims, sx, sy = [], [], []
+                for smp in sd:
+                    smp = smp[1]
+                    a = smp["Animation"]
+                    anims.append(a[1] if isinstance(a, tuple) and a[0] == "obj" else "")
+                    v = smp["SampleValue"][1]
+                    sx.append(float(v[0])); sy.append(float(v[1]))
+                bx, by = o["BlendParameters"][1], o["BlendParameters[1]"][1]
+                grid = []
+                for g in o["GridSamples"][1]:
+                    g = g[1]
+                    grid.append((g.get("Indices", 0), g.get("Indices[1]", 0), g.get("Indices[2]", 0), g.get("Weights", 0.0), g.get("Weights[1]", 0.0), g.get("Weights[2]", 0.0)))
+                dx, dy = int(bx.get("GridNum", 4)), int(by.get("GridNum", 4))
+                if len(grid) != (dx + 1) * (dy + 1):
+                    n = int(round(len(grid) ** 0.5)) - 1
+                    dx = dy = n
+                return {"name": name, "samples_anim": anims, "sx": sx, "sy": sy, "min": (bx.get("Min", 0.0), by.get("Min", 0.0)), "max": (bx.get("Max", 100.0), by.get("Max", 100.0)), "div": (dx, dy), "grid": grid}
+    return None

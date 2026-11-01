@@ -5,17 +5,18 @@
 #include <math.h>
 #include <string.h>
 
-enum { N_ROOT, N_SLOT, N_SM, N_STATERESULT, N_SEQ, N_BLENDBOOL, N_BLENDENUM, N_LAYERED, N_TRANSRESULT };
+enum { N_ROOT, N_SLOT, N_SM, N_STATERESULT, N_SEQ, N_BLENDBOOL, N_BLENDENUM, N_LAYERED, N_TRANSRESULT, N_BSPACE, N_USECACHED, N_SAVECACHED, N_PASS };
 #define MAX_NODES 64
 struct u64_an_inst {
   const u64_an_graph *g; u64_obj *self; int used;
   float acc[MAX_NODES]; unsigned char inited[MAX_NODES];
   float bw[MAX_NODES][8]; int bcur[MAX_NODES];
   int m_cur[4], m_next[4]; float m_xf[4], m_xt[4];
-  int mont; float mont_pos, mont_rate, mont_eval;                                        // the playing montage (-1 = none)
+  int mont; float mont_pos, mont_rate, mont_eval;
+  unsigned frame, cache_frame[MAX_NODES]; signed char cache_slot[MAX_NODES]; u64_an_pose cache_pose[3]; int ncache;                                        // the playing montage (-1 = none)
   u64_an_pose out;
 };
-static u64_an_inst insts[8];
+static u64_an_inst insts[16];                                                           // 4 heroes x (first-person + third-person graph)
 
 // ---- quaternion helpers (xyzw)
 static void qmul(const float a[4], const float b[4], float o[4])
@@ -134,7 +135,46 @@ static void eval(u64_an_inst *a, int n, float dt, u64_an_pose *out)
       if (first) { acc = p; first = 0; used = wi; } else { pose_blend(&acc, &p, wi / (used + wi), nb, &acc); used += wi; }
     }
     *out = acc; break; }
-  case N_LAYERED: eval(a, nd->links[0], dt, out); break;                                      // no branch filters in the project's graphs: the base pose
+  case N_LAYERED: {                                                                            // base pose, with the layer's pose over the filtered branches (weight BlendWeights[0])
+    eval(a, nd->links[0], dt, out);
+    if (nd->nfilt == 0 || nd->nlinks < 2) break;                                              // no filters: the per-bone weights are all zero
+    u64_an_pose lp; eval(a, nd->links[1], dt, &lp);
+    for (int b = 0; b < nb; b++) {
+      int in = 0; for (int p = b; p >= 0 && !in; p = a->g->bones[p].parent) for (int f = 0; f < nd->nfilt; f++) if (nd->filt[f] == p) in = 1;
+      if (in) { for (int k = 0; k < 3; k++) out->t[b][k] += (lp.t[b][k] - out->t[b][k]) * nd->times[0]; slerp(out->q[b], lp.q[b], nd->times[0], out->q[b]); }
+    }
+    break; }
+  case N_PASS: if (nd->nlinks) eval(a, nd->links[0], dt, out); else for (int i = 0; i < nb; i++) { memcpy(out->t[i], a->g->bones[i].t, 12); memcpy(out->q[i], a->g->bones[i].q, 16); } break;   // IK / aim offset / space conversions: not applied
+  case N_USECACHED: eval(a, nd->links[0], dt, out); break;
+  case N_SAVECACHED: {                                                                         // evaluated once per update, shared by every UseCachedPose
+    if (a->cache_slot[n] < 0 || a->cache_frame[n] != a->frame) {
+      if (a->cache_slot[n] < 0) a->cache_slot[n] = a->ncache < 3 ? a->ncache++ : 2;
+      eval(a, nd->links[0], dt, &a->cache_pose[(int)a->cache_slot[n]]); a->cache_frame[n] = a->frame;
+    }
+    *out = a->cache_pose[(int)a->cache_slot[n]]; break; }
+  case N_BSPACE: {
+    const u64_an_bspace *bs = &a->g->bspaces[nd->bs];
+    u64_v *xv = node_field(a, nd->name, "X"), *yv = node_field(a, nd->name, "Y");
+    float x = xv->t == U64_FLOAT ? xv->u.f : 0, y = yv->t == U64_FLOAT ? yv->u.f : 0, w[16] = {0};
+    float nx = (x - bs->min[0]) / (bs->max[0] - bs->min[0]), ny = (y - bs->min[1]) / (bs->max[1] - bs->min[1]);
+    nx = nx < 0 ? 0 : nx > 1 ? 1 : nx; ny = ny < 0 ? 0 : ny > 1 ? 1 : ny; nx *= bs->div[0]; ny *= bs->div[1];
+    int xi = (int)nx, yi = (int)ny; if (xi >= bs->div[0]) xi = bs->div[0] - 1; if (yi >= bs->div[1]) yi = bs->div[1] - 1; float fx = nx - xi, fy = ny - yi;
+    for (int c = 0; c < 4; c++) {
+      int gx = xi + (c & 1), gy = yi + (c >> 1); float cw = ((c & 1) ? fx : 1 - fx) * ((c >> 1) ? fy : 1 - fy);
+      const u64_an_bgrid *g = &bs->grid[gx * (bs->div[1] + 1) + gy];
+      for (int k = 0; k < 3; k++) if (g->w[k] > 0 && g->idx[k] < 16) w[g->idx[k]] += cw * g->w[k];
+    }
+    float len = 0, tot = 0; for (int i = 0; i < bs->nsamples && i < 16; i++) if (w[i] > 0) { len += w[i] * a->g->seqs[bs->samples[i].seq].length; tot += w[i]; }
+    if (tot <= 0) { w[0] = tot = 1; len = a->g->seqs[bs->samples[0].seq].length; }
+    len /= tot;
+    if (a->inited[n]) a->acc[n] += len > 0 ? dt * nd->rate / len : 0; a->inited[n] = 1; a->acc[n] = fmodf(a->acc[n], 1.0f);   // normalized time shared by the samples
+    u64_an_pose acc; float used = 0; int first = 1;
+    for (int i = 0; i < bs->nsamples && i < 16; i++) {
+      if (w[i] <= 0) continue;
+      const u64_an_seq *sq = &a->g->seqs[bs->samples[i].seq]; u64_an_pose p; sample_seq(a, sq, a->acc[n] * sq->length, &p); float wi = w[i] / tot;
+      if (first) { acc = p; first = 0; used = wi; } else { pose_blend(&acc, &p, wi / (used + wi), nb, &acc); used += wi; }
+    }
+    *out = acc; break; }
   default: for (int i = 0; i < nb; i++) { memcpy(out->t[i], a->g->bones[i].t, 12); memcpy(out->q[i], a->g->bones[i].q, 16); }
   }
 }
@@ -146,12 +186,12 @@ int u64_anim_montage_play(u64_an_inst *a, const char *montage, float rate)
 }
 u64_an_inst *u64_anim_new(const u64_an_graph *g, u64_obj *instance)
 {
-  for (int i = 0; i < 8; i++) if (!insts[i].used) { memset(&insts[i], 0, sizeof insts[i]); insts[i].used = 1; insts[i].g = g; insts[i].self = instance; insts[i].mont = -1; return &insts[i]; }
+  for (int i = 0; i < 16; i++) if (!insts[i].used) { memset(&insts[i], 0, sizeof insts[i]); insts[i].used = 1; insts[i].g = g; insts[i].self = instance; insts[i].mont = -1; memset(insts[i].cache_slot, -1, sizeof insts[i].cache_slot); return &insts[i]; }
   return 0;
 }
 void u64_anim_update(u64_an_inst *a, float dt)
 {
-  const u64_an_graph *g = a->g; u64_v d = u64_float(dt);
+  const u64_an_graph *g = a->g; u64_v d = u64_float(dt); a->frame++;
   u64_call(a->self, "BlueprintUpdateAnimation", 1, &d);                                          // the Blueprint sets Speed, IsInAir, ... from the pawn
   for (int i = 0; i < g->ncopies; i++) *node_field(a, g->copies[i].node, g->copies[i].field) = *u64_ivar(a->self, g->copies[i].var);   // property access copies
   for (int i = 0; i < g->nfuncs; i++) u64_call(a->self, g->funcs[i], 0, 0);                    // exposed inputs (transition rules)
@@ -176,7 +216,7 @@ float u64_anim_debug_acc(const u64_an_inst *a, int n) { return a->acc[n]; }
 // GetInstanceAssetPlayerTimeFromEnd(AssetPlayerIndex): the index counts AnimNodeProperties from the other end (position N-1-index in the graph order)
 float u64_anim_time_from_end(u64_obj *instance, int index)
 {
-  for (int i = 0; i < 8; i++) {
+  for (int i = 0; i < 16; i++) {
     u64_an_inst *a = &insts[i];
     if (!a->used || a->self != instance) continue;
     int n = a->g->nnodes - 1 - index;

@@ -12,14 +12,16 @@ static int verbose_ = 1;
 static void tick(int n) { for (int i = 0; i < n; i++) u64_world_tick(1.0f / 30.0f); }
 static void err_log(const char *f, ...) { va_list a; va_start(a, f); if (strstr(f, "error")) { vprintf(f, a); putchar('\n'); } va_end(a); }
 static u64_obj *hero;
-// World z of a physics body of a character's mesh in the reference pose: actor z + the Mesh component's relative z + the body's z (HeroTPP_Physics / b_Hips ...).
+// World z of a character's physics body (centre, current animated pose)
 static float body_z(u64_obj *a, const char *bone)
 {
-  const u64_skel_comp_def *sd = u64_skel_comps;
-  for (; sd->cls; sd++) if (!strcmp(sd->comp, "Mesh") && u64_class_is(u64_obj_class(a), sd->cls)) break;
-  for (const u64_phys_mesh *m = u64_phys_meshes; sd->cls && m->name; m++)
-    if (!strcmp(m->name, sd->mesh)) for (int i = 0; i < m->n; i++) if (!strcmp(m->bodies[i].bone, bone)) return u64_ivar(a, "Location")->u.v[2] + sd->loc[2] + m->bodies[i].t[2];
-  return u64_ivar(a, "Location")->u.v[2];
+  extern int u64_body_world_center(u64_obj *a, const char *bone, float out[3]); float c[3];
+  return u64_body_world_center(a, bone, c) ? c[2] : u64_ivar(a, "Location")->u.v[2];
+}
+static void body_xy(u64_obj *a, const char *bone, float *x, float *y)
+{
+  extern int u64_body_world_center(u64_obj *a, const char *bone, float out[3]); float c[3];
+  if (u64_body_world_center(a, bone, c)) { *x = c[0]; *y = c[1]; } else { *x = u64_ivar(a, "Location")->u.v[0]; *y = u64_ivar(a, "Location")->u.v[1]; }
 }
 static float attr(const char *n) { return u64_attr_get(u64_asc_of(hero), n); }
 static const char *s(u64_v v) { return v.u.s ? v.u.s : ""; }
@@ -204,7 +206,8 @@ int u64_run_shooter_scenarios(int verbose)
     u64_v loc = *u64_ivar(me, "Location");
     u64_v rel = *u64_ivar(u64_comp(me, "FirstPersonCamera").u.o, "RelativeLocation");
     float cx = loc.u.v[0] + rel.u.v[0], cy = loc.u.v[1] + rel.u.v[1], cz = loc.u.v[2] + rel.u.v[2];
-    float dx = el.u.v[0] - cx, dy = el.u.v[1] - cy, dz = body_z(enemy, "b_head") - cz;
+    float hx, hy; body_xy(enemy, "b_head", &hx, &hy);
+    float dx = hx - cx, dy = hy - cy, dz = body_z(enemy, "b_head") - cz;
     *u64_ivar(me, "ControlRotation") = u64_vec(atan2f(dz, sqrtf(dx * dx + dy * dy)) * 57.29578f, atan2f(dy, dx) * 57.29578f, 0);
     hero = enemy; float sh0 = attr("Shield"); hero = me;
     int clip0 = u64_as_int(call(me, "GetPrimaryClipAmmo"));
@@ -295,6 +298,28 @@ int u64_run_shooter_scenarios(int verbose)
     hero = enemy;
     CHECK(fabsf((sh0 - attr("Shield")) - 60.0f * 100.0f / 120.0f) < 0.01f);
     hero = me;
+  }
+  // --- third-person animation: ABP_Hero3P standing still sits in its Run state at blend space (Direction 0, Speed 0): the RunTPP Idle sample (3.2333 s loop). Mesh-space positions
+  // of b_head, b_LeftHand, b_RightFoot at idle time k/30 s from the independent Python evaluation (animation.py), k = 40, 50, 60.
+  {
+    extern u64_an_inst *u64_gs_anim3p_of(u64_obj *hero); extern float u64_anim_debug_acc(const u64_an_inst *a, int n);
+    static const float ref[3][3][3] = {{{-10.106f, 7.403f, 150.030f}, {-5.459f, 66.388f, 125.857f}, {-21.793f, -20.653f, 11.293f}},
+                                       {{-10.074f, 7.432f, 150.159f}, {-4.700f, 66.817f, 126.462f}, {-21.775f, -20.631f, 11.293f}},
+                                       {{-9.751f, 7.444f, 150.744f}, {-3.845f, 67.140f, 127.068f}, {-21.730f, -20.603f, 11.292f}}};
+    static const char *const bn[3] = {"b_head", "b_LeftHand", "b_RightFoot"};
+    u64_an_inst *a = u64_gs_anim3p_of(hero); const u64_an_graph *g = u64_anim_find_graph("ABP_Hero3P"); int bs = -1;
+    for (int n = 0; g && n < g->nnodes; n++) if (g->nodes[n].kind == 9) bs = n;
+    CHECK(a && bs >= 0);
+    int checked = 0, ok = 1;
+    for (int i = 0; a && i < 120 && checked < 3; i++) {
+      float time = u64_anim_debug_acc(a, bs) * 3.2333333f;
+      for (int k = 0; k < 3; k++) if (fabsf(time - (40 + 10 * k) / 30.0f) < 0.004f) {
+        for (int b = 0; b < 3; b++) { float t[3], q[4]; ok &= u64_anim_bone_cs(a, bn[b], t, q) && fabsf(t[0] - ref[k][b][0]) < 0.05f && fabsf(t[1] - ref[k][b][1]) < 0.05f && fabsf(t[2] - ref[k][b][2]) < 0.05f; }
+        checked++;
+      }
+      tick(1);
+    }
+    CHECK(checked >= 2 && ok);
   }
   // --- pickups (AGSPickup): standing on one applies its effects; it respawns after RespawnTime (5 s) and, with the hero still on it, is taken again
   {

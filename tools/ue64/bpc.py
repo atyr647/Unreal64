@@ -59,9 +59,10 @@ def main(content, out):
     try:                                                              # animation: compiled AnimBPs of character meshes (bone chain to the weapon socket)
         import animgraph
         anim_c, graphs = [], []
-        for abp, mesh, bone in (("ABP_Hero1P", "HeroFPP", "b_RightWeapon"),):
+        for abp, mesh, bone in (("ABP_Hero1P", "HeroFPP", "b_RightWeapon"), ("ABP_Hero3P", "HeroTPP", None)):
             if glob.glob(content + "/**/%s.uasset" % abp, recursive=True) and glob.glob(content + "/**/%s.uasset" % mesh, recursive=True):
-                c, _ = animgraph.emit_c(content, abp, mesh, bone); anim_c.append(c); graphs.append(abp)
+                bones = bone or sorted({x[0] for x in gasdata.PHYS.get(mesh + "_Physics", [])} | {"b_RightWeapon"})
+                c, _ = animgraph.emit_c(content, abp, mesh, bones); anim_c.append(c); graphs.append(abp)
         text = "".join(anim_c) + '#include "u64_anim.h"\n' + "".join("extern const u64_an_graph u64_an_%s;\n" % g for g in graphs)
         text += "const u64_an_graph *const u64_an_graphs[] = {%s0};\n" % "".join("&u64_an_%s, " % g for g in graphs)
         text += animgraph.emit_sockets(content)

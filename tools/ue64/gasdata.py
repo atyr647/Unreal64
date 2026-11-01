@@ -282,7 +282,7 @@ def _skeletal_bodies(bones, bodies):
             a = (dims[0], 0.0, 0.0)
         else:
             a = (dims[0], dims[1] / 2, 0.0)
-        out.append((bone, kind, t, _quat_matrix(q), a[0], a[1], a[2]))
+        out.append((bone, kind, t, _quat_matrix(q), a[0], a[1], a[2], tuple(c), _quat_matrix(eq)))
     return out
 
 
@@ -615,7 +615,8 @@ def emit_gas_data_c(ges, montages, shapes, moves=None, projs=None, parents=None,
             ", ".join(_f(v) for v in c["scale"]), c["enabled"], len(c["responses"]), ci))
     pms = []                                                                            # physics bodies of skeletal meshes and the character Mesh components
     for mi, (mname, bodies) in enumerate(sorted(SKELMESHES.items())):
-        rows = ", ".join("{%s, %d, {%s}, {%s}, %s, %s, %s}" % (_cs(b[0]), b[1], ", ".join(_f(v) for v in b[2]), ", ".join(_f(v) for v in b[3]), _f(b[4]), _f(b[5]), _f(b[6])) for b in bodies)
+        rows = ", ".join("{%s, %d, {%s}, {%s}, %s, %s, %s, {%s}, {%s}}" % (_cs(b[0]), b[1], ", ".join(_f(v) for v in b[2]), ", ".join(_f(v) for v in b[3]), _f(b[4]), _f(b[5]), _f(b[6]),
+                                                                      ", ".join(_f(v) for v in b[7]), ", ".join(_f(v) for v in b[8])) for b in bodies)
         out.append("static const u64_phys_body pb_%d[] = {%s%s{0}};" % (mi, rows, ", " if rows else ""))
         pms.append("{%s, %d, pb_%d}" % (_cs(mname), len(bodies), mi))
     out.append("const u64_phys_mesh u64_phys_meshes[] = {%s%s{0}};" % (", ".join(pms), ", " if pms else ""))

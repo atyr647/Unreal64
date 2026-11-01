@@ -917,33 +917,41 @@ static u64_v w_pickup_on_touch(u64_obj *w, int c, const u64_v *a)
 #define MAX_TOUCH 96
 static struct { u64_obj *a, *b; } touching[MAX_TOUCH]; static int ntouch;
 static int touch_find(u64_obj *a, u64_obj *b) { for (int i = 0; i < ntouch; i++) if (touching[i].a == a && touching[i].b == b) return i; return -1; }
-// First-person hero animation: one ABP_Hero1P instance per hero, updated every tick (BlueprintUpdateAnimation + state machine + pose of the weapon socket chain).
-static struct { u64_obj *hero; u64_an_inst *a; u64_obj *inst; } anims[8];
+// Hero animation: per hero one ABP_Hero1P instance (first-person arms: sockets, muzzle) and one ABP_Hero3P instance (body bones: physics bodies), updated every tick
+// (BlueprintUpdateAnimation + state machine + pose of the bone set in the graph tables).
+static struct { u64_obj *hero; u64_an_inst *a; u64_obj *inst; } anims[2][8];
+static const char *const anim_graphs[2] = {"ABP_Hero1P", "ABP_Hero3P"};
 static void anim_tick(float dt)
 {
-  const u64_an_graph *g = u64_anim_find_graph("ABP_Hero1P");
-  if (!g) return;
-  for (int i = 0; i < 8; i++) if (anims[i].a && !u64_obj_alive(anims[i].hero)) { u64_anim_free(anims[i].a); memset(&anims[i], 0, sizeof anims[i]); }
-  for (int j = 0; j < u64_obj_count(); j++) {
-    u64_obj *h = u64_obj_at(j);
-    if (!u64_obj_alive(h) || !u64_obj_is_actor(h) || !is_class(h, "GSHeroCharacter")) continue;
-    int k = -1, free_ = -1;
-    for (int i = 0; i < 8; i++) { if (anims[i].a && anims[i].hero == h) k = i; if (!anims[i].a && free_ < 0) free_ = i; }
-    if (k < 0) {
-      if (free_ < 0) continue;
-      u64_v cm = u64_comp(h, "CharacterMovement"); *u64_ivar(h, "CharacterMovement") = cm;
-      if (u64_ivar(cm.u.o, "MaxWalkSpeed")->t != U64_FLOAT) *u64_ivar(cm.u.o, "MaxWalkSpeed") = u64_float(600.0f);          // UCharacterMovementComponent default (the Blueprint sets none)
-      u64_obj *inst = u64_new("ABP_Hero1P_inst", "ABP_Hero1P"); *u64_ivar(inst, "Pawn") = u64_objv(h); *u64_ivar(h, "AnimInstance1P") = u64_objv(inst);
-      anims[free_].hero = h; anims[free_].inst = inst; anims[free_].a = u64_anim_new(g, inst); k = free_;
+  for (int gi = 0; gi < 2; gi++) {
+    const u64_an_graph *g = u64_anim_find_graph(anim_graphs[gi]);
+    if (!g) continue;
+    for (int i = 0; i < 8; i++) if (anims[gi][i].a && !u64_obj_alive(anims[gi][i].hero)) { u64_anim_free(anims[gi][i].a); memset(&anims[gi][i], 0, sizeof anims[gi][i]); }
+    for (int j = 0; j < u64_obj_count(); j++) {
+      u64_obj *h = u64_obj_at(j);
+      if (!u64_obj_alive(h) || !u64_obj_is_actor(h) || !is_class(h, "GSHeroCharacter")) continue;
+      int k = -1, free_ = -1;
+      for (int i = 0; i < 8; i++) { if (anims[gi][i].a && anims[gi][i].hero == h) k = i; if (!anims[gi][i].a && free_ < 0) free_ = i; }
+      if (k < 0) {
+        if (free_ < 0) continue;
+        u64_v cm = u64_comp(h, "CharacterMovement"); *u64_ivar(h, "CharacterMovement") = cm;
+        if (u64_ivar(cm.u.o, "MaxWalkSpeed")->t != U64_FLOAT) *u64_ivar(cm.u.o, "MaxWalkSpeed") = u64_float(600.0f);        // UCharacterMovementComponent default (the Blueprint sets none)
+        char nmb[32]; snprintf(nmb, sizeof nmb, "%s_inst", anim_graphs[gi]);
+        u64_obj *inst = u64_new(u64_intern(nmb), anim_graphs[gi]); *u64_ivar(inst, "Pawn") = u64_objv(h); *u64_ivar(h, gi ? "AnimInstance3P" : "AnimInstance1P") = u64_objv(inst);
+        anims[gi][free_].hero = h; anims[gi][free_].inst = inst; anims[gi][free_].a = u64_anim_new(g, inst); k = free_;
+      }
+      if (anims[gi][k].a) u64_anim_update(anims[gi][k].a, dt);
     }
-    if (anims[k].a) u64_anim_update(anims[k].a, dt);
   }
 }
-void u64_cpp_montage_hook(u64_obj *actor, const char *name, float rate)       // PlayMontage on the first-person mesh: the AnimBP's slot blends it in
+void u64_cpp_montage_hook(u64_obj *actor, const char *name, float rate)       // PlayMontage: the AnimBP slots blend it in (a montage of the other skeleton is ignored)
 {
-  for (int i = 0; i < 8; i++) if (anims[i].a && anims[i].hero == actor) u64_anim_montage_play(anims[i].a, name, rate);
+  for (int gi = 0; gi < 2; gi++) for (int i = 0; i < 8; i++) if (anims[gi][i].a && anims[gi][i].hero == actor) u64_anim_montage_play(anims[gi][i].a, name, rate);
 }
-u64_an_inst *u64_gs_anim_of(u64_obj *hero) { for (int i = 0; i < 8; i++) if (anims[i].a && anims[i].hero == hero) return anims[i].a; return 0; }
+u64_an_inst *u64_gs_anim_of(u64_obj *hero) { for (int i = 0; i < 8; i++) if (anims[0][i].a && anims[0][i].hero == hero) return anims[0][i].a; return 0; }
+u64_an_inst *u64_cpp_body_pose_of(u64_obj *actor);
+u64_an_inst *u64_gs_anim3p_of(u64_obj *hero) { for (int i = 0; i < 8; i++) if (anims[1][i].a && anims[1][i].hero == hero) return anims[1][i].a; return 0; }
+u64_an_inst *u64_cpp_body_pose_of(u64_obj *actor) { return u64_gs_anim3p_of(actor); }
 static void interact_tick(void);
 static void gs_world_tick(float dt)
 {

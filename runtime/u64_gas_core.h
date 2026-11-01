@@ -36,7 +36,7 @@ typedef struct { const char *chan; int resp; } u64_resp;                        
 typedef struct { const char *cls, *comp, *mesh, *parent; float loc[3], rot[3], scale[3]; int enabled, nresp; const u64_resp *resp; } u64_comp_def;
 // Skeletal meshes: the physics asset's simple shapes in mesh space (reference pose). kind 0 box (half extents a, b, c), 1 sphere (radius a), 2 sphyl
 // (radius a, half length of the cylinder b; axis = local z). The character Mesh component places them in the actor.
-typedef struct { const char *bone; int kind; float t[3], r[9], a, b, c; } u64_phys_body;
+typedef struct { const char *bone; int kind; float t[3], r[9], a, b, c, rt[3], rr[9]; } u64_phys_body;   // t / r: bone * element in the reference pose; rt / rr: the element relative to its bone (for an animated pose)
 typedef struct { const char *name; int n; const u64_phys_body *bodies; } u64_phys_mesh;
 typedef struct { const char *cls, *comp, *mesh; float loc[3], rot[3], scale[3]; int enabled, nresp; const u64_resp *resp; } u64_skel_comp_def;
 typedef struct { const char *mesh; float loc[3], rot[3], scale[3]; } u64_world_mesh;   // a static mesh actor placed in the map (default collision: blocks everything)

@@ -163,6 +163,19 @@ static int ray_body(const u64_phys_body *b, const float p[3], const float d[3], 
   for (int i = 0; i < 3; i++) n_out[i] = b->r[i * 3] * n[0] + b->r[i * 3 + 1] * n[1] + b->r[i * 3 + 2] * n[2];   // normal back to mesh space
   return 1;
 }
+#include "u64_anim.h"
+__attribute__((weak)) u64_an_inst *u64_cpp_body_pose_of(u64_obj *actor) { (void)actor; return 0; }        // the project port: the actor's third-person animation instance
+// The body in the animated pose: bone component-space transform * element-in-bone transform (falls back to the reference pose when the bone is not in the pose)
+static int posed_body(const u64_an_inst *an, const u64_phys_body *b, u64_phys_body *o)
+{
+  float bt[3], bq[4];
+  if (!an || !u64_anim_bone_cs(an, b->bone, bt, bq)) return 0;
+  *o = *b;
+  float x = bq[0], y = bq[1], z = bq[2], w = bq[3], R[9] = {1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w), 2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w), 2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)};
+  for (int i = 0; i < 3; i++) { o->t[i] = bt[i] + R[i * 3] * b->rt[0] + R[i * 3 + 1] * b->rt[1] + R[i * 3 + 2] * b->rt[2];
+    for (int j = 0; j < 3; j++) o->r[i * 3 + j] = R[i * 3] * b->rr[j] + R[i * 3 + 1] * b->rr[3 + j] + R[i * 3 + 2] * b->rr[6 + j]; }
+  return 1;
+}
 static const u64_phys_mesh *find_phys(const char *name) { for (const u64_phys_mesh *m = u64_phys_meshes; m->name; m++) if (!strcmp(m->name, name)) return m; return 0; }
 
 // ---- queries by collision profile (UWorld::LineTraceMultiByProfile)
@@ -261,7 +274,8 @@ int u64_trace_profile(const float s[3], const float e[3], const char *profile, u
         ld[k] = inv.r[k * 3] * d[0] + inv.r[k * 3 + 1] * d[1] + inv.r[k * 3 + 2] * d[2];
       }
       float best = 2, bn[3] = {0, 0, 1}; const char *bone = 0;
-      for (int bi = 0; bi < pm->n; bi++) { float t, n[3]; if (ray_body(&pm->bodies[bi], lp, ld, &t, n) && t < best) { best = t; bone = pm->bodies[bi].bone; memcpy(bn, n, sizeof bn); } }
+      u64_an_inst *pose = u64_cpp_body_pose_of(a);
+      for (int bi = 0; bi < pm->n; bi++) { float t, n[3]; u64_phys_body pb; const u64_phys_body *bd = posed_body(pose, &pm->bodies[bi], &pb) ? &pb : &pm->bodies[bi]; if (ray_body(bd, lp, ld, &t, n) && t < best) { best = t; bone = pm->bodies[bi].bone; memcpy(bn, n, sizeof bn); } }
       if (!bone) continue;
       u64_world_hit_t *h = &found[nf++]; h->actor = a; h->comp = comp; h->t = best; h->blocking = resp == 2; h->bone = bone;
       for (int k = 0; k < 3; k++) h->loc[k] = s[k] + d[k] * best;
@@ -292,4 +306,23 @@ u64_obj *u64_hit_result_new(const u64_world_hit_t *h, const float s[3], const fl
   *u64_ivar(r, "BoneName") = u64_name(h->bone ? h->bone : "None");
   *u64_ivar(r, "TraceStart") = u64_vec(s[0], s[1], s[2]); *u64_ivar(r, "TraceEnd") = u64_vec(e[0], e[1], e[2]);
   return r;
+}
+
+// World-space centre of a character's physics body on `bone` (first element), in the current animated pose
+int u64_body_world_center(u64_obj *a, const char *bone, float out[3])
+{
+  for (const u64_skel_comp_def *sd = u64_skel_comps; sd->cls; sd++) {
+    if (!sd->mesh[0] || !u64_class_is(u64_obj_class(a), sd->cls)) continue;
+    const u64_phys_mesh *pm = find_phys(sd->mesh); if (!pm) continue;
+    for (int bi = 0; bi < pm->n; bi++) {
+      if (strcmp(pm->bodies[bi].bone, bone)) continue;
+      u64_phys_body pb; const u64_phys_body *bd = posed_body(u64_cpp_body_pose_of(a), &pm->bodies[bi], &pb) ? &pb : &pm->bodies[bi];
+      xf_t m, l; actor_xf(a, &m);
+      float loc[3] = {sd->loc[0], sd->loc[1], sd->loc[2]}, rot[3] = {sd->rot[0], sd->rot[1], sd->rot[2]};
+      xf_from(loc, rot, sd->scale, &l); xf_mul(&m, &l, &m);
+      for (int k = 0; k < 3; k++) out[k] = m.r[k * 3] * bd->t[0] + m.r[k * 3 + 1] * bd->t[1] + m.r[k * 3 + 2] * bd->t[2] + m.t[k];
+      return 1;
+    }
+  }
+  return 0;
 }

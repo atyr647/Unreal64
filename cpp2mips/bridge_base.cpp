@@ -10,8 +10,14 @@
 #include "Characters/Abilities/GSTargetType.h"
 #include "Characters/Heroes/GSHeroCharacter.h"
 #include "Weapons/GSWeapon.h"
+#include "Characters/Abilities/GSGATA_LineTrace.h"
+#include "Characters/Abilities/GSGATA_SphereTrace.h"
 extern "C" {
 #include "u64_gas_core.h"
+int u64_cpp_player_view(u64_obj *hero, float loc[3], float rot[3]);
+void u64_cpp_targeting(u64_v info, u64_obj *source, float loc[3], float rot[3]);
+void u64_target_data_ready(u64_obj *target_actor, u64_v handle);
+u64_v u64_td_handle_from_hits(u64_v hits);
 }
 
 
@@ -214,10 +220,11 @@ int level_hook(void *ab) { u64_v *l = u64_ivar((u64_obj *)ab, "Level"); return l
 UObject *source_hook(void *ab) { return weapon_proxy(O_(*u64_ivar((u64_obj *)ab, "SourceObject"))); }
 bool commit2(void *ab) { return u64_ability_commit((u64_obj *)ab, 1, 1); }
 void end2(void *ab, bool c) { u64_ability_end((u64_obj *)ab, c); }
+void AbilityRtInit() { AbilityRt.level = level_hook; AbilityRt.make_spec = make_spec_hook; AbilityRt.source = source_hook; AbilityCommitHook = commit2; AbilityEndHook = end2; }
 // the instance for runtime ability `ab`: class-default flags from the runtime object, actor info of its ASC
 UGSGameplayAbility *gsa_bind(u64_obj *ab, FGameplayAbilitySpec *spec)
 {
-  AbilityRt.level = level_hook; AbilityRt.make_spec = make_spec_hook; AbilityRt.source = source_hook; AbilityCommitHook = commit2; AbilityEndHook = end2;
+  AbilityRtInit();
   UGSGameplayAbility *g = gsa_inst(); g->rt = ab;
   g->bActivateAbilityOnGranted = u64_true(*u64_ivar(ab, "bActivateAbilityOnGranted")); g->bActivateOnInput = u64_true(*u64_ivar(ab, "bActivateOnInput"));
   g->bSourceObjectMustEqualCurrentWeaponToActivate = u64_true(*u64_ivar(ab, "bSourceObjectMustEqualCurrentWeaponToActivate"));
@@ -240,9 +247,11 @@ UClass *target_class(const char *name)                       // the project's ta
   if (!strcmp(name, "GSTargetType_UseEventData")) return UGSTargetType_UseEventData::StaticClass();
   return UGSTargetType::StaticClass();
 }
-AActor *actor_ref(u64_obj *o)                                // a stand-in for any runtime actor: only its runtime identity matters to the target types
+AActor *actor_ref(u64_obj *o)                                // a stand-in for any runtime actor, one per runtime object (pointer identity = actor identity, as the target code compares)
 {
-  static AActor pool[32]; static int n; int k = n++ & 31; pool[k].rt = o; return &pool[k];
+  static AActor pool[64]; static int n;
+  for (int i = 0; i < n && i < 64; i++) if (pool[i].rt == o) return &pool[i];
+  int k = n++ & 63; pool[k].rt = o; return &pool[k];
 }
 }
 extern "C" int u64_cxx_gsa_calls;
@@ -334,3 +343,144 @@ extern "C" u64_v u64_cxx_gsa_make_container_spec(u64_obj *ab, const char *tag, u
   for (int i = 0; i < spec.TargetGameplayEffectSpecs.Num(); i++) if (spec.TargetGameplayEffectSpecs[i].Data) u64_array_push(specs, *(u64_v *)spec.TargetGameplayEffectSpecs[i].Data->Rt);
   return u64_objv(out);
 }
+
+// ---- AGSGATA_Trace / AGSGATA_LineTrace / AGSGATA_SphereTrace: the project's weapon targeting (aim from the player view point, range clip, spread cone, the trace, hit filtering, the
+// default hit at the end of a missed trace, target data) runs as written. One C++ actor per runtime actor; its configuration is synced from the runtime object's properties on every call
+// (the Blueprint sets them), the state that persists (CurrentTargetingSpread, persistent hit results) lives in the C++ actor. World queries are the runtime's (u64_collision.c) through hooks.
+namespace {
+template <class B> struct TraceProbe : B {                      // the protected entry points the runtime calls
+  TArray<FHitResult> perform(AActor *src) { return this->PerformTrace(src); }
+  FVector end() const { return this->CurrentTraceEnd; }
+  void defaults_out(u64_obj *o, const FVector &) const;
+};
+typedef TraceProbe<AGSGATA_LineTrace> LineProbe; typedef TraceProbe<AGSGATA_SphereTrace> SphereProbe;
+struct TraceSlot { u64_obj *key = nullptr; AGSGATA_Trace *t = nullptr; bool sphere = false; };
+TraceSlot tslots[16]; int ntslots;
+float f_(u64_v v) { return v.t == U64_FLOAT ? v.u.f : (v.t == U64_INT || v.t == U64_BOOL) ? (float)v.u.i : 0.0f; }
+FVector vec_(u64_v v) { return v.t == U64_VEC ? FVector(v.u.v[0], v.u.v[1], v.u.v[2]) : FVector(); }
+u64_v vec_v(const FVector &a) { return u64_vec(a.X, a.Y, a.Z); }
+FHitResult hit_from_rt(u64_obj *h)
+{
+  FHitResult f; f.Rt = h; f.Location = vec_(*u64_ivar(h, "Location")); f.ImpactPoint = f.Location; f.Normal = vec_(*u64_ivar(h, "Normal"));
+  f.Time = f_(*u64_ivar(h, "Time")); f.Distance = f_(*u64_ivar(h, "Distance")); f.bBlockingHit = u64_true(*u64_ivar(h, "bBlockingHit"));
+  if (u64_obj *a = O_(*u64_ivar(h, "HitActor"))) f.Actor = actor_ref(a);
+  f.BoneName = FName(nm_(*u64_ivar(h, "BoneName"))); f.TraceStart = vec_(*u64_ivar(h, "TraceStart")); f.TraceEnd = vec_(*u64_ivar(h, "TraceEnd"));
+  return f;
+}
+u64_obj *hit_to_rt(const FHitResult &f)                         // the runtime's HitResult object for a C++ hit (a hit that came from the runtime keeps its object)
+{
+  u64_obj *h = (u64_obj *)f.Rt;
+  if (!h) {
+    h = u64_new("HitResult", "HitResult");                      // the default hit the project adds at the end of a trace that hit nothing
+    *u64_ivar(h, "Time") = u64_float(f.Time); *u64_ivar(h, "Distance") = u64_float(f.Distance); *u64_ivar(h, "bBlockingHit") = u64_bool(f.bBlockingHit);
+    *u64_ivar(h, "Location") = vec_v(f.Location); *u64_ivar(h, "Normal") = vec_v(f.Normal); *u64_ivar(h, "BoneName") = u64_name(f.BoneName.ToString());
+    *u64_ivar(h, "HitActor") = u64_objv(f.Actor.Get() ? (u64_obj *)f.Actor.Get()->rt : nullptr); *u64_ivar(h, "HitComponent") = u64_objv(nullptr);
+  }
+  *u64_ivar(h, "TraceStart") = vec_v(f.TraceStart); *u64_ivar(h, "TraceEnd") = vec_v(f.TraceEnd);
+  return h;
+}
+bool trace_line_hook(const FVector &a, const FVector &b, FName profile, const FCollisionQueryParams &p, TArray<FHitResult> &out)
+{
+  u64_world_hit_t wh[16]; float s[3] = {a.X, a.Y, a.Z}, e[3] = {b.X, b.Y, b.Z};
+  int n = u64_trace_profile(s, e, profile.ToString(), p.nIgnored ? (u64_obj *)p.Ignored[0]->rt : nullptr, wh, 16);
+  for (int i = 0; i < n; i++) out.Add(hit_from_rt(u64_hit_result_new(&wh[i], s, e)));
+  return n > 0;
+}
+bool trace_sweep_hook(const FVector &a, const FVector &b, float radius, FName, const FCollisionQueryParams &p, TArray<FHitResult> &out)   // the characters' capsules (not profile-filtered)
+{
+  u64_obj *hits[16]; float s[3] = {a.X, a.Y, a.Z}, e[3] = {b.X, b.Y, b.Z};
+  int n = u64_trace_multi(s, e, radius, p.nIgnored ? (u64_obj *)p.Ignored[0]->rt : nullptr, hits, 16);
+  for (int i = 0; i < n; i++) out.Add(hit_from_rt(hits[i]));
+  return n > 0;
+}
+void view_hook(const void *pc, FVector &loc, FRotator &rot)
+{
+  float l[3], r[3]; if (!u64_cpp_player_view((u64_obj *)((const AActor *)pc)->rt, l, r)) return;
+  loc = FVector(l[0], l[1], l[2]); rot = FRotator(r[0], r[1], r[2]);
+}
+void data_ready_hook(void *ctx, const FGameplayAbilityTargetDataHandle &h)      // TargetDataReadyDelegate.Broadcast -> the runtime's target data + the waiting task
+{
+  u64_obj *s = (u64_obj *)ctx; u64_v hits = u64_array_of(0, 0);
+  for (int i = 0; i < h.Num(); i++) if (const FHitResult *hr = h.Get(i)->GetHitResult()) u64_array_push(&hits, u64_objv(hit_to_rt(*hr)));
+  u64_target_data_ready(s, u64_td_handle_from_hits(hits));
+}
+TraceSlot *tslot(u64_obj *s, bool create_sphere = false, bool force = false)
+{
+  AbilityRtInit();
+  WorldLineTraceHook = trace_line_hook; WorldSweepHook = trace_sweep_hook; PlayerViewHook = view_hook;
+  if (!force) for (int i = 0; i < ntslots; i++) if (tslots[i].key == s) return &tslots[i];
+  TraceSlot *sl = &tslots[ntslots < 16 ? ntslots++ : 0];          // a full table recycles the first slot (the runtime reuses object slots too)
+  sl->key = s; sl->sphere = create_sphere || u64_class_is(u64_obj_class(s), "GSGATA_SphereTrace");
+  sl->t = sl->sphere ? (AGSGATA_Trace *)new SphereProbe() : (AGSGATA_Trace *)new LineProbe();
+  return sl;
+}
+// the runtime object's properties -> the C++ actor (Blueprint-set / Configure()d values), and the actor's changing state back
+void trace_sync_in(TraceSlot *sl, u64_obj *s, u64_obj *source)
+{
+  AGSGATA_Trace *t = sl->t;
+  t->BaseSpread = f_(*u64_ivar(s, "BaseSpread")); t->AimingSpreadMod = f_(*u64_ivar(s, "AimingSpreadMod")); t->TargetingSpreadIncrement = f_(*u64_ivar(s, "TargetingSpreadIncrement"));
+  t->TargetingSpreadMax = f_(*u64_ivar(s, "TargetingSpreadMax")); t->CurrentTargetingSpread = f_(*u64_ivar(s, "CurrentTargetingSpread")); t->bUseAimingSpreadMod = u64_true(*u64_ivar(s, "bUseAimingSpreadMod"));
+  const char *at = nm_(*u64_ivar(s, "AimingTag")), *rt = nm_(*u64_ivar(s, "AimingRemovalTag"));
+  t->AimingTag = *at ? FGameplayTag::RequestGameplayTag(FName(at)) : FGameplayTag(); t->AimingRemovalTag = *rt ? FGameplayTag::RequestGameplayTag(FName(rt)) : FGameplayTag();
+  t->MaxRange = f_(*u64_ivar(s, "MaxRange")); t->TraceProfile.Name = FName(nm_(*u64_ivar(s, "TraceProfile"))); t->bTraceAffectsAimPitch = u64_true(*u64_ivar(s, "bTraceAffectsAimPitch"));
+  t->MaxHitResultsPerTrace = u64_as_int(*u64_ivar(s, "MaxHitResultsPerTrace")); t->NumberOfTraces = u64_as_int(*u64_ivar(s, "NumberOfTraces"));
+  t->bIgnoreBlockingHits = u64_true(*u64_ivar(s, "bIgnoreBlockingHits")); t->bTraceFromPlayerViewPoint = u64_true(*u64_ivar(s, "bTraceFromPlayerViewPoint"));
+  t->bUsePersistentHitResults = u64_true(*u64_ivar(s, "bUsePersistentHitResults")); t->bDebug = false;       // debug drawing is not backed
+  t->ShouldProduceTargetDataOnServer = u64_true(*u64_ivar(s, "ShouldProduceTargetDataOnServer"));
+  u64_v rc = *u64_ivar(s, "ReticleClass"); t->ReticleClass = rc.t == U64_NONE || !*nm_(rc) ? TSubclassOf<AGameplayAbilityWorldReticle>() : TSubclassOf<AGameplayAbilityWorldReticle>(rt_class(rc));
+  if (sl->sphere) static_cast<AGSGATA_SphereTrace *>(t)->TraceSphereRadius = f_(*u64_ivar(s, "TraceSphereRadius"));
+  float l[3], r[3]; u64_cpp_targeting(*u64_ivar(s, "StartLocation"), source, l, r);
+  t->StartLocation.LiteralTransform.Location = FVector(l[0], l[1], l[2]); t->StartLocation.LiteralTransform.Rotation.R = FRotator(r[0], r[1], r[2]);
+  if (source) { Actor *a = actor_for(source); t->MasterPC = a && a->player ? (APlayerController *)&a->pc : nullptr; if (a) a->pc.rt = source; t->SourceActor = a ? a->avatar() : nullptr; }
+  t->TargetDataReadyDelegate.fn = data_ready_hook; t->TargetDataReadyDelegate.ctx = s;
+}
+void trace_sync_out(TraceSlot *sl, u64_obj *s)
+{
+  *u64_ivar(s, "CurrentTargetingSpread") = u64_float(sl->t->CurrentTargetingSpread);
+  *u64_ivar(s, "CurrentTraceEnd") = vec_v(sl->sphere ? static_cast<SphereProbe *>(sl->t)->end() : static_cast<LineProbe *>(sl->t)->end());
+}
+}
+extern "C" int u64_cxx_trace_calls;
+int u64_cxx_trace_calls;
+extern "C" void u64_cxx_trace_ctor(u64_obj *s, int sphere)       // AGSGATA_Trace / AGSGATA_SphereTrace constructors: the defaults
+{
+  TraceSlot *sl = tslot(s, sphere != 0, true); AGSGATA_Trace *t = sl->t; u64_cxx_trace_calls++;
+  *u64_ivar(s, "bTraceAffectsAimPitch") = u64_bool(t->bTraceAffectsAimPitch); *u64_ivar(s, "MaxHitResultsPerTrace") = u64_int(t->MaxHitResultsPerTrace); *u64_ivar(s, "NumberOfTraces") = u64_int(t->NumberOfTraces);
+  *u64_ivar(s, "bIgnoreBlockingHits") = u64_bool(t->bIgnoreBlockingHits); *u64_ivar(s, "bTraceFromPlayerViewPoint") = u64_bool(t->bTraceFromPlayerViewPoint);
+  *u64_ivar(s, "MaxRange") = u64_float(t->MaxRange); *u64_ivar(s, "bUseAimingSpreadMod") = u64_bool(t->bUseAimingSpreadMod); *u64_ivar(s, "bUsePersistentHitResults") = u64_bool(t->bUsePersistentHitResults);
+  *u64_ivar(s, "BaseSpread") = u64_float(t->BaseSpread); *u64_ivar(s, "AimingSpreadMod") = u64_float(t->AimingSpreadMod); *u64_ivar(s, "TargetingSpreadIncrement") = u64_float(t->TargetingSpreadIncrement);
+  *u64_ivar(s, "TargetingSpreadMax") = u64_float(t->TargetingSpreadMax); *u64_ivar(s, "CurrentTargetingSpread") = u64_float(t->CurrentTargetingSpread);
+  if (sl->sphere) *u64_ivar(s, "TraceSphereRadius") = u64_float(static_cast<AGSGATA_SphereTrace *>(t)->TraceSphereRadius);
+}
+extern "C" void u64_cxx_trace_reset(u64_obj *s)                  // ResetSpread
+{
+  TraceSlot *sl = tslot(s); u64_cxx_trace_calls++; trace_sync_in(sl, s, O_(*u64_ivar(s, "SourceActor")));
+  sl->t->ResetSpread();
+  *u64_ivar(s, "bUseAimingSpreadMod") = u64_bool(sl->t->bUseAimingSpreadMod); *u64_ivar(s, "BaseSpread") = u64_float(sl->t->BaseSpread); *u64_ivar(s, "AimingSpreadMod") = u64_float(sl->t->AimingSpreadMod);
+  *u64_ivar(s, "TargetingSpreadIncrement") = u64_float(sl->t->TargetingSpreadIncrement); *u64_ivar(s, "TargetingSpreadMax") = u64_float(sl->t->TargetingSpreadMax); trace_sync_out(sl, s);
+}
+extern "C" void u64_cxx_trace_start(u64_obj *s, u64_obj *ability)  // StartTargeting(Ability)
+{
+  TraceSlot *sl = tslot(s); u64_cxx_trace_calls++;
+  UGSGameplayAbility *g = ability ? gsa_bind(ability, nullptr) : nullptr;
+  u64_obj *src = ability ? O_(*u64_ivar(ability, "Avatar")) : nullptr; trace_sync_in(sl, s, src);
+  if (g && g->CurrentActorInfo) sl->t->StartTargeting(g);
+  *u64_ivar(s, "OwningAbility") = u64_objv(ability); *u64_ivar(s, "SourceActor") = u64_objv(src);
+}
+extern "C" u64_v u64_cxx_trace_perform(u64_obj *s, u64_obj *source)   // PerformTrace(SourceActor) -> the hit results (array of runtime HitResult objects)
+{
+  TraceSlot *sl = tslot(s); u64_cxx_trace_calls++; trace_sync_in(sl, s, source);
+  u64_obj *ab = O_(*u64_ivar(s, "OwningAbility")); if (ab) sl->t->OwningAbility = gsa_bind(ab, nullptr);
+  Actor *a = actor_for(source); AActor *src = a ? a->avatar() : nullptr;
+  TArray<FHitResult> hr = sl->sphere ? static_cast<SphereProbe *>(sl->t)->perform(src) : static_cast<LineProbe *>(sl->t)->perform(src);
+  trace_sync_out(sl, s);
+  u64_v out = u64_array_of(0, 0); for (int i = 0; i < hr.Num(); i++) u64_array_push(&out, u64_objv(hit_to_rt(hr[i])));
+  return out;
+}
+extern "C" void u64_cxx_trace_confirm(u64_obj *s)                // ConfirmTargetingAndContinue: trace, MakeTargetData, TargetDataReadyDelegate
+{
+  TraceSlot *sl = tslot(s); u64_cxx_trace_calls++; u64_obj *src = O_(*u64_ivar(s, "SourceActor")); trace_sync_in(sl, s, src);
+  u64_obj *ab = O_(*u64_ivar(s, "OwningAbility")); if (ab) sl->t->OwningAbility = gsa_bind(ab, nullptr);
+  sl->t->ConfirmTargetingAndContinue(); trace_sync_out(sl, s);
+}
+extern "C" void u64_cxx_trace_stop(u64_obj *s) { TraceSlot *sl = tslot(s); u64_cxx_trace_calls++; sl->t->StopTargeting(); }

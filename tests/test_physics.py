@@ -56,12 +56,14 @@ class SkeletalBodyTests(unittest.TestCase):
         s = math.sqrt(0.5)
         bones = [("root", -1, (0, 0, 0), (0, 0, 0, 1), (1, 1, 1)), ("arm", 0, (0, 0, 100), (0, 0, s, s), (1, 1, 1))]
         (b,) = gasdata._skeletal_bodies(bones, [("arm", 2, (10, 0, 0), (0, 0, 0), (7.0, 30.0, 0.0))])
-        bone, kind, t, r, rad, half, _ = b
+        bone, kind, t, r, rad, half, _, rt, rr = b                           # rt / rr: the element's transform in the bone's own frame (for posing)
         self.assertEqual((bone, kind), ("arm", 2))
         self.assertAlmostEqual(rad, 7.0); self.assertAlmostEqual(half, 15.0)      # radius, half the cylinder length
         # the element offset (10, 0, 0) in the bone's frame is (0, 10, 0) in mesh space
         self.assertAlmostEqual(t[0], 0.0, places=5); self.assertAlmostEqual(t[1], 10.0, places=5); self.assertAlmostEqual(t[2], 100.0, places=5)
         self.assertAlmostEqual(r[0], 0.0, places=5); self.assertAlmostEqual(r[3], 1.0, places=5)    # local x maps to mesh y
+        self.assertEqual(tuple(round(v, 5) for v in rt), (10.0, 0.0, 0.0))                       # bone-relative: the offset as given
+        self.assertAlmostEqual(rr[0], 1.0, places=5); self.assertAlmostEqual(rr[4], 1.0, places=5)   # identity element rotation
 
 
 if __name__ == "__main__":

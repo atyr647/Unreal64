@@ -106,4 +106,18 @@ mitigation `100 / (100 + Armor)`, the `Effect.Damage.HeadShot` dynamic tag) runs
 and output, `FAggregatorEvaluateParameters`); the runtime resolves the captures (`u64_exec_in`) and applies the output modifier. One behaviour change: the runtime used to notify
 `WaitReceiveDamage` tasks from this calculation; the project's code does not, so on this path it no longer does (GASDocumentation's calculation, a different class, still does).
 
-15 -> 19 of 45 files compile (`GSGameplayAbility`, `GSAbilityTypes`, `GSAbilitySystemGlobals`, `GSDamageExecutionCalc` now).
+### Weapon targeting (GSGATA_Trace / LineTrace / SphereTrace)
+
+The reusable trace target actor the weapons use runs as written (`bridge_base.cpp`, `-DU64_CXX_TRACE`): `PerformTrace` (trace start from the player view point, `AimWithPlayerController`,
+`ClipCameraRayToAbilityRange`, the spread cone through `FRandomStream::VRandCone`, `LineTraceWithFilter` / `SphereTraceWithFilter`, trimming to `MaxHitResultsPerTrace`, the default hit at the end of a
+trace that hit nothing, persistent hit results), `GetCurrentSpread`, `ResetSpread`, `StartTargeting`, `ConfirmTargetingAndContinue` (-> `MakeTargetData` -> `TargetDataReadyDelegate`),
+`StopTargeting`. The runtime object keeps the Blueprint-visible properties; they are synced into one C++ actor per runtime actor on each call, and `CurrentTargetingSpread` / `CurrentTraceEnd` are
+synced back. World queries are hooks into `u64_collision.c` (`LineTraceMultiByProfile` = `u64_trace_profile`; `SweepMultiByProfile` = the characters' capsules, **not** profile-filtered, as before).
+New shim math (`ue_math.h`): `FRotator`, `FVector::Rotation / RotateAngleAxis`, `FRandomStream` (seed mutation `Seed*196314165+907633515`, `GetFraction` bit trick, the elliptical `VRandCone`);
+`FMath::Rand` is a fixed LCG (the same sequence on host and N64). `tests/test_random_stream.py` checks these against an independent Python implementation of the same definitions (it checks the port, not
+the engine: the engine's source is not available here, so the formulas are from my knowledge of it and unverified against a build).
+Behaviour changes found by running the project's code: a trace that hits nothing now returns the default end-of-trace hit (as the project does; the hand port returned an empty array), and spread cones
+use the engine's sampling (not uniform in solid angle) instead of the hand-written one. Approximations that remain: the start location's rotation is the hero's control rotation (the real one is
+the weapon socket's rotation), reticle actors are not spawned (HUD), debug drawing is off.
+
+15 -> 22 of 45 files compile (`GSGameplayAbility`, `GSAbilityTypes`, `GSAbilitySystemGlobals`, `GSDamageExecutionCalc`, `GSGATA_Trace`, `GSGATA_LineTrace`, `GSGATA_SphereTrace` now).

@@ -460,6 +460,9 @@ int u64_run_shooter_scenarios(int verbose)
 #endif
 #ifdef U64_CXX_JUMP
   { extern int u64_cxx_jump_calls; printf("jump ability run by the project's C++: %d activations\n", u64_cxx_jump_calls); CHECK(u64_cxx_jump_calls > 0); }
+#ifdef U64_CXX_TRACE
+  { extern int u64_cxx_trace_calls; printf("weapon targeting (GSGATA_Trace.cpp) run by the project's C++: %d calls\n", u64_cxx_trace_calls); CHECK(u64_cxx_trace_calls > 0); }
+#endif
 #ifdef U64_CXX_EXEC
   { extern int u64_cxx_exec_calls; printf("damage formula (GSDamageExecutionCalc.cpp) run by the project's C++: %d executions\n", u64_cxx_exec_calls); CHECK(u64_cxx_exec_calls > 0); }
 #endif

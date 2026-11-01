@@ -523,8 +523,15 @@ static u64_v gm_respawn_hero(u64_obj *gm, int c, const u64_v *a)    // AGASShoot
 // The reusable trace target actor the weapons' abilities configure and hand to WaitTargetDataWithReusableActor.
 extern void u64_target_data_ready(u64_obj *target_actor, u64_v handle);
 extern u64_v u64_td_handle_from_hits(u64_v hits);
+#ifdef U64_CXX_TRACE                                                  // the project's own GSGATA_Trace / LineTrace / SphereTrace (unmodified): see cpp2mips/bridge_base.cpp
+void u64_cxx_trace_ctor(u64_obj *s, int sphere); void u64_cxx_trace_reset(u64_obj *s); void u64_cxx_trace_start(u64_obj *s, u64_obj *ability);
+u64_v u64_cxx_trace_perform(u64_obj *s, u64_obj *source); void u64_cxx_trace_confirm(u64_obj *s); void u64_cxx_trace_stop(u64_obj *s);
+#endif
 static void ctor_trace(u64_obj *o)                                  // AGSGATA_Trace::AGSGATA_Trace
 {
+#ifdef U64_CXX_TRACE
+  u64_cxx_trace_ctor(o, is_class(o, "GSGATA_SphereTrace")); return;
+#endif
   *u64_ivar(o, "MaxHitResultsPerTrace") = u64_int(1); *u64_ivar(o, "NumberOfTraces") = u64_int(1);
   *u64_ivar(o, "bIgnoreBlockingHits") = u64_bool(0); *u64_ivar(o, "bTraceAffectsAimPitch") = u64_bool(1);
   *u64_ivar(o, "bTraceFromPlayerViewPoint") = u64_bool(0); *u64_ivar(o, "MaxRange") = u64_float(999999.0f);
@@ -533,7 +540,14 @@ static void ctor_trace(u64_obj *o)                                  // AGSGATA_T
   for (int i = 0; i < 5; i++) *u64_ivar(o, zeros[i]) = u64_float(0.0f);
   *u64_ivar(o, "bUsePersistentHitResults") = u64_bool(0);
 }
-static void ctor_sphere_trace(u64_obj *o) { *u64_ivar(o, "TraceSphereRadius") = u64_float(100.0f); }
+static void ctor_sphere_trace(u64_obj *o)
+{
+#ifndef U64_CXX_TRACE
+  *u64_ivar(o, "TraceSphereRadius") = u64_float(100.0f);
+#else
+  (void)o;                                                          // set by the project's constructor (u64_cxx_trace_ctor)
+#endif
+}
 static u64_v tr_configure(u64_obj *s, int c, const u64_v *a)         // Configure(...): the line version has 21 parameters, the sphere version adds the radius after MaxRange
 {
   static const char *const line_names[] = {"StartLocation", "AimingTag", "AimingRemovalTag", "TraceProfile", "Filter", "ReticleClass", "ReticleParams",
@@ -552,6 +566,9 @@ static u64_v tr_configure(u64_obj *s, int c, const u64_v *a)         // Configur
 static u64_v tr_reset_spread(u64_obj *s, int c, const u64_v *a)
 {
   (void)c; (void)a;
+#ifdef U64_CXX_TRACE
+  u64_cxx_trace_reset(s); return NONE_;
+#endif
   *u64_ivar(s, "bUseAimingSpreadMod") = u64_bool(0);
   static const char *const zeros[] = {"BaseSpread", "AimingSpreadMod", "TargetingSpreadIncrement", "TargetingSpreadMax", "CurrentTargetingSpread"};
   for (int i = 0; i < 5; i++) *u64_ivar(s, zeros[i]) = u64_float(0.0f);
@@ -635,6 +652,17 @@ int u64_gs_muzzle_world(u64_obj *hero, float out[3])             // the current 
   out[0] = p.x; out[1] = p.y; out[2] = p.z; return 1;
 }
 // FGameplayAbilityTargetingLocationInfo::GetTargetingTransform().GetLocation(): literal transform, the source actor, or a socket on a component
+static v3 targeting_location(u64_v info, u64_obj *source_actor);
+int u64_cpp_player_view(u64_obj *hero, float loc[3], float rot[3])      // the player controller's view point (0 when the hero is not the player pawn)
+{
+  v3 l, r; if (!hero || u64_player_pawn() != hero) return 0;
+  player_view(hero, &l, &r); loc[0] = l.x; loc[1] = l.y; loc[2] = l.z; rot[0] = r.x; rot[1] = r.y; rot[2] = r.z; return 1;
+}
+void u64_cpp_targeting(u64_v info, u64_obj *source, float loc[3], float rot[3])   // GetTargetingTransform: location (socket / literal / actor), rotation = the hero's control rotation
+{
+  v3 l = targeting_location(info, source), r = source && is_class(source, "GSHeroCharacter") ? v3_of(*u64_ivar(source, "ControlRotation")) : (v3){0, 0, 0};
+  loc[0] = l.x; loc[1] = l.y; loc[2] = l.z; rot[0] = r.x; rot[1] = r.y; rot[2] = r.z;
+}
 static v3 targeting_location(u64_v info, u64_obj *source_actor)
 {
   u64_obj *io = O(info);
@@ -714,6 +742,9 @@ static int one_trace(u64_obj *s, u64_obj *source, v3 trace_start, u64_obj **hits
 static u64_v tr_perform_trace(u64_obj *s, int c, const u64_v *a)    // PerformTrace(SourceActor) -> hit results (array)
 {
   u64_obj *source = O(A(c, a, 0)); if (!source) source = O(*u64_ivar(s, "SourceActor"));
+#ifdef U64_CXX_TRACE
+  return u64_cxx_trace_perform(s, source);
+#endif
   u64_v out = u64_array_of(0, 0);
   v3 start = targeting_location(*u64_ivar(s, "StartLocation"), source);
   u64_obj *hero = is_class(source, "GSHeroCharacter") ? source : 0;
@@ -729,6 +760,9 @@ static u64_v tr_perform_trace(u64_obj *s, int c, const u64_v *a)    // PerformTr
 static u64_v tr_start_targeting(u64_obj *s, int c, const u64_v *a)  // StartTargeting(Ability)
 {
   u64_obj *ab = O(A(c, a, 0));
+#ifdef U64_CXX_TRACE
+  u64_cxx_trace_start(s, ab); return NONE_;
+#endif
   *u64_ivar(s, "OwningAbility") = u64_objv(ab); *u64_ivar(s, "SourceActor") = u64_objv(ab ? O(*u64_ivar(ab, "Avatar")) : 0);
   return NONE_;
 }
@@ -737,11 +771,21 @@ static u64_v tr_confirm(u64_obj *s, int c, const u64_v *a)           // ConfirmT
   (void)c; (void)a;
   u64_obj *source = O(*u64_ivar(s, "SourceActor"));
   if (!source) return NONE_;
+#ifdef U64_CXX_TRACE
+  u64_cxx_trace_confirm(s); return NONE_;
+#endif
   u64_v hits = tr_perform_trace(s, 0, 0), handle = u64_td_handle_from_hits(hits);
   u64_target_data_ready(s, handle);
   return NONE_;
 }
-static u64_v tr_stop_targeting(u64_obj *s, int c, const u64_v *a) { (void)c; (void)a; *u64_ivar(s, "WaitingTask") = u64_objv(0); return NONE_; }
+static u64_v tr_stop_targeting(u64_obj *s, int c, const u64_v *a)
+{
+  (void)c; (void)a;
+#ifdef U64_CXX_TRACE
+  u64_cxx_trace_stop(s);
+#endif
+  *u64_ivar(s, "WaitingTask") = u64_objv(0); return NONE_;
+}
 
 // ---------------------------------------------------------------------------------------------------- UGSGameplayAbility
 static void ctor_gs_jump(u64_obj *o)                                 // UGSGA_CharacterJump::UGSGA_CharacterJump

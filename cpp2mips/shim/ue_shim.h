@@ -7,6 +7,7 @@
 #include <string.h>
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <type_traits>
 
 typedef int8_t int8; typedef int16_t int16; typedef int32_t int32; typedef int64_t int64;
@@ -85,7 +86,7 @@ struct UObject {
   virtual ~UObject() {}
   virtual bool InstanceOf(const UClass *) const { return false; }     // generated per class (Cast<> without RTTI)
   template <class T, class... A> T *CreateDefaultSubobject(A...) { return new T(); }
-  void *rt = nullptr; struct UWorld *GetWorld() const { return nullptr; }                                                     // the Unreal64 runtime object this one stands for
+  void *rt = nullptr; struct UWorld *GetWorld() const;                                                     // the Unreal64 runtime object this one stands for
 };
 template <class T> UObject *ShimMake() { if constexpr (std::is_base_of_v<UObject, T> && std::is_default_constructible_v<T> && !std::is_abstract_v<T>) return new T(); else return nullptr; }
 template <class T, class U> T *Cast(U *p) { return p && p->InstanceOf(T::StaticClass()) ? static_cast<T *>(p) : nullptr; }
@@ -101,7 +102,7 @@ struct UPackage {};
 FORCEINLINE UPackage *GetTransientPackage() { static UPackage p; return &p; }
 template <class T> T *NewObject(UPackage *, FName = FName()) { return new T(); }
 struct FObjectInitializer {};
-struct FTimerHandle {};
+struct FTimerHandle {}; struct FDelegateHandle {}; struct FDelegateRemoveShim { void Remove(FDelegateHandle) {} };
 struct UAnimMontage; struct USoundCue; struct UWidgetComponent;
 template <class T> T *FindFieldChecked(UClass *cls, FName name)      // one FProperty per name, stable for the program's lifetime
 {
@@ -115,13 +116,14 @@ template <class T> FORCEINLINE T Clamp(T v, T lo, T hi) { return v < lo ? lo : (
 template <class T> FORCEINLINE T Max(T a, T b) { return a > b ? a : b; }
 template <class T> FORCEINLINE T Min(T a, T b) { return a < b ? a : b; }
 template <class T> FORCEINLINE T Lerp(T a, T b, float t) { return a + (b - a) * t; }
-FORCEINLINE float Sqrt(float x) { return sqrtf(x); }
+FORCEINLINE float Sqrt(float x) { return sqrtf(x); } FORCEINLINE float DegreesToRadians(float d) { return d * (3.1415926535897932f / 180.f); } FORCEINLINE int32 Rand() { static uint32 s = 1; s = s * 1103515245u + 12345u; return (int32)((s >> 16) & 0x7fff); }   // not libc rand(): the same sequence on the host and on the N64 template <class T> FORCEINLINE T Square(T x) { return x * x; }
 FORCEINLINE bool IsNearlyEqual(float a, float b, float tol = 1.e-4f) { return fabsf(a - b) <= tol; }
 }
 
 template <class T> struct TArray {                             // the part of TArray the gameplay code uses; fixed capacity, no allocation
   T d[64]; int32 n = 0;
   int32 Add(const T &v) { if (n < 64) d[n++] = v; return n - 1; }
+  void RemoveAt(int32 i) { if (i >= 0 && i < n) { for (int k = i; k + 1 < n; k++) d[k] = d[k + 1]; n--; } }
   int32 AddUnique(const T &v) { for (int i = 0; i < n; i++) if (d[i] == v) return i; return Add(v); }
   void Append(const TArray &o) { for (int i = 0; i < o.n; i++) Add(o.d[i]); }
   template <class U> void Append(const TArray<U> &o) { for (int i = 0; i < o.n; i++) Add(T(o.d[i])); }
@@ -137,6 +139,7 @@ template <class T> struct TArray {                             // the part of TA
 struct FVector { float X = 0, Y = 0, Z = 0; FVector() {} FVector(float x, float y, float z) : X(x), Y(y), Z(z) {} static const FVector ZeroVector;
   FVector operator+(const FVector &o) const { return FVector(X + o.X, Y + o.Y, Z + o.Z); } FVector operator-(const FVector &o) const { return FVector(X - o.X, Y - o.Y, Z - o.Z); }
   FVector operator*(float f) const { return FVector(X * f, Y * f, Z * f); } FVector GetSafeNormal() const { float l = Size(); return l > 1e-8f ? FVector(X / l, Y / l, Z / l) : FVector(); } bool IsZero() const { return X == 0 && Y == 0 && Z == 0; } FVector GetLocation() const { return *this; }
+  FVector RotateAngleAxis(float deg, const FVector &axis) const; struct FRotator Rotation() const;
   static float DistSquared(const FVector &a, const FVector &b) { return (a - b).SizeSquared(); } static float DotProduct(const FVector &a, const FVector &b) { return a.X * b.X + a.Y * b.Y + a.Z * b.Z; } float SizeSquared() const { return X * X + Y * Y + Z * Z; } float Size() const { return sqrtf(SizeSquared()); } };
 typedef FVector FVector_NetQuantize;
 template <class K, class V> struct TMap { K k[32]; V v[32]; int n = 0;                            // the lookups the gameplay code does; fixed capacity

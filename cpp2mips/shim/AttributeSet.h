@@ -94,6 +94,7 @@ public:
   virtual void NotifyAbilityEnded(FGameplayAbilitySpecHandle, UGameplayAbility *, bool) {}
   virtual int32 GetTagCount(const FGameplayTag &) const { return 0; }
   virtual bool TryActivateAbility(FGameplayAbilitySpecHandle, bool = true) { return false; }
+  template <class E, class H, class K> FDelegateRemoveShim AbilityReplicatedEventDelegate(E, H, K) { return FDelegateRemoveShim(); } FDelegateBase GenericLocalConfirmCallbacks, GenericLocalCancelCallbacks;
   void AddLooseGameplayTag(const FGameplayTag &, int32 = 1) {} void AddLooseGameplayTags(const FGameplayTagContainer &, int32 = 1) {}
   void RemoveLooseGameplayTag(const FGameplayTag &, int32 = 1) {} void RemoveLooseGameplayTags(const FGameplayTagContainer &, int32 = 1) {}
   AActor *GetOwnerActor() const { return nullptr; } AActor *GetAvatarActor() const { return nullptr; }

@@ -8,7 +8,12 @@ struct FWorldReticleParameters { FVector AOEScale; };
 enum ETickingGroupShim { TG_PrePhysics, TG_PostPhysics, TG_PostUpdateWork };
 struct FCollisionProfileName { FName Name; };
 struct FCollisionQueryParams { bool bTraceComplex = false, bReturnPhysicalMaterial = false, bIgnoreBlocks = false; FCollisionQueryParams() {} FCollisionQueryParams(FName, bool c) : bTraceComplex(c) {}
-  void AddIgnoredActor(const AActor *) {} void AddIgnoredActors(const TArray<TWeakObjectPtr<AActor>> &) {} };
+  const AActor *Ignored[8]; int nIgnored = 0;
+  void AddIgnoredActor(const AActor *a) { if (nIgnored < 8) Ignored[nIgnored++] = a; } void AddIgnoredActors(const TArray<TWeakObjectPtr<AActor>> &l) { for (int i = 0; i < l.Num(); i++) AddIgnoredActor(l[i].Get()); }
+  void AddIgnoredActors(const TArray<AActor *> &l) { for (int i = 0; i < l.Num(); i++) AddIgnoredActor(l[i]); } };
+#define SCENE_QUERY_STAT(X) FName(#X)
+#define ABILITY_LOG(...) ((void)0)
+#define ENABLE_DRAW_DEBUG 0
 struct UActorComponent : UObject { template <class... A> void SetIsReplicated(A...) {} template <class... A> void RegisterComponent(A...) {} template <class... A> void SetActive(A...) {} };
 struct USceneComponent : UActorComponent { template <class... A> void SetRelativeLocation(A...) {} template <class... A> void SetRelativeRotation(A...) {} template <class... A> void SetupAttachment(A...) {} template <class... A> void AttachToComponent(A...) {}
   template <class... A> void SetVisibility(A...) {} template <class... A> void SetHiddenInGame(A...) {} template <class... A> void SetCollisionEnabled(A...) {} template <class... A> void SetCollisionResponseToChannel(A...) {} template <class... A> void SetCollisionProfileName(A...) {}
@@ -17,22 +22,36 @@ struct UAnimInstance : UObject {}; struct UUserWidget : UObject { template <clas
 struct APlayerState : AActor {}; struct AGameModeBase : AActor {}; struct UCharacterMovementComponent : UActorComponent { virtual float GetMaxSpeed() const { return 0; } virtual struct FNetworkPredictionData_Client_Character *GetPredictionData_Client() const { return nullptr; } virtual void UpdateFromCompressedFlags(uint8) {} }; struct UProjectileMovementComponent : UActorComponent { float InitialSpeed = 0, MaxSpeed = 0, ProjectileGravityScale = 1; bool bRotationFollowsVelocity = false; };
 enum class EWorldType { None, Game, Editor, PIE };
 enum ENetMode { NM_Standalone, NM_DedicatedServer, NM_ListenServer, NM_Client };
-struct UWorld : UObject { EWorldType WorldType = EWorldType::Game; float GetTimeSeconds() const { return 0; } ENetMode GetNetMode() const { return NM_Standalone; } template <class... A> bool LineTraceMultiByProfile(A...) const { return false; } };
+struct FQuatIdentityShim {}; struct FCollisionShape { float Radius = 0; static FCollisionShape MakeSphere(float r) { FCollisionShape s; s.Radius = r; return s; } };
+// world queries are the runtime's (u64_collision.c); the bridge sets the hooks. LineTraceMultiByProfile: profile responses decide blocking / overlap, sorted, stops at the first block.
+inline bool (*WorldLineTraceHook)(const FVector &, const FVector &, FName, const struct FCollisionQueryParams &, TArray<FHitResult> &) = nullptr;
+inline bool (*WorldSweepHook)(const FVector &, const FVector &, float, FName, const struct FCollisionQueryParams &, TArray<FHitResult> &) = nullptr;
+struct UWorld : UObject { EWorldType WorldType = EWorldType::Game; float GetTimeSeconds() const { return 0; } ENetMode GetNetMode() const { return NM_Standalone; }
+  bool LineTraceMultiByProfile(TArray<FHitResult> &out, const FVector &a, const FVector &b, FName profile, const FCollisionQueryParams &p) const { return WorldLineTraceHook ? WorldLineTraceHook(a, b, profile, p, out) : false; }
+  bool SweepMultiByProfile(TArray<FHitResult> &out, const FVector &a, const FVector &b, const FQuat &, FName profile, const FCollisionShape &sh, const FCollisionQueryParams &p) const { return WorldSweepHook ? WorldSweepHook(a, b, sh.Radius, profile, p, out) : false; }
+  template <class T> T *SpawnActor(TSubclassOf<T>, const FVector &, const FRotator &) const { ShimUnimplemented("SpawnActor"); return nullptr; } };
+inline UWorld *UObject::GetWorld() const { static UWorld w; return &w; }
 struct UGameplayStatics { template <class... A> static UObject *GetPlayerController(A...) { return nullptr; } };
 #define UPARAM(...)
 #define GENERATED_UCLASS_BODY() GENERATED_BODY()
-struct IRepChangedPropertyTracker {}; struct FLinearColor { float R = 0, G = 0, B = 0, A = 1; }; struct FDelegateHandle {};  struct FSubsystemCollectionBase {}; struct USubsystem : UObject { virtual void Initialize(FSubsystemCollectionBase &) {} virtual void Deinitialize() {} };
+struct IRepChangedPropertyTracker {}; struct FLinearColor { float R = 0, G = 0, B = 0, A = 1; };  struct FSubsystemCollectionBase {}; struct USubsystem : UObject { virtual void Initialize(FSubsystemCollectionBase &) {} virtual void Deinitialize() {} };
 enum class EAbilityTaskNetSyncType { BothWait, OnlyServerWait, OnlyClientWait };
 struct FOnAttributeChangeData { FGameplayAttribute Attribute; float NewValue = 0, OldValue = 0; };
-struct FGameplayAbilityTargetingLocationInfo { FVector LiteralTransform; FVector GetTargetingTransform() const { return LiteralTransform; } };
+struct FGameplayAbilityTargetingLocationInfo { FTransform LiteralTransform; FTransform GetTargetingTransform() const { return LiteralTransform; } };
 struct UPrimitiveComponent : USceneComponent {};
 struct UGameplayCueManager : UObject { virtual bool ShouldAsyncLoadRuntimeObjectLibraries() const { return true; } };
-struct AGameplayAbilityWorldReticle : AActor {};
-struct AGameplayAbilityTargetActor : AActor { FGameplayAbilityTargetingLocationInfo StartLocation; TSubclassOf<AGameplayAbilityWorldReticle> ReticleClass; FWorldReticleParameters ReticleParams; bool bDestroyOnConfirmationX = true;
-  UGameplayAbility *OwningAbility = nullptr; AActor *SourceActor = nullptr; APlayerController *MasterPC = nullptr; FGameplayTargetDataFilterHandle Filter; bool bDestroyOnConfirmation = true; bool ShouldProduceTargetData_ = true;
-  virtual void StartTargeting(UGameplayAbility *) {} virtual void ConfirmTargetingAndContinue() {} virtual void ConfirmTargeting() {} virtual void CancelTargeting() {} virtual void Tick(float) {}
+struct AGameplayAbilityWorldReticle : AActor { bool bSnapToTargetedActor = false; template <class... A> void Destroy(A...) {} void SetActorHiddenInGame(bool) {} void SetActorLocation(const FVector &) {} void SetIsTargetAnActor(bool) {} void SetReplicates(bool) {}
+  template <class... A> void InitializeReticle(A...) {} };
+struct FTargetDataDelegateShim { void (*fn)(void *, const FGameplayAbilityTargetDataHandle &) = nullptr; void *ctx = nullptr;               // TargetDataReadyDelegate / CanceledDelegate: one bound receiver, set by the bridge
+  void Broadcast(const FGameplayAbilityTargetDataHandle &h) const { if (fn) fn(ctx, h); } void Clear() { fn = nullptr; ctx = nullptr; } };
+struct FActorTickFunctionShim { bool bCanEverTick = false; int TickGroup = 0; };
+struct AGameplayAbilityTargetActor : AActor { FGameplayAbilityTargetingLocationInfo StartLocation; TSubclassOf<AGameplayAbilityWorldReticle> ReticleClass; FWorldReticleParameters ReticleParams; bool bDestroyOnConfirmation = true;
+  UGameplayAbility *OwningAbility = nullptr; AActor *SourceActor = nullptr; APlayerController *MasterPC = nullptr; FGameplayTargetDataFilterHandle Filter; bool bDebug = false; bool ShouldProduceTargetDataOnServer = false;
+  FCollisionProfileName TraceProfileBase; FTargetDataDelegateShim TargetDataReadyDelegate, CanceledDelegate; UAbilitySystemComponent *GenericDelegateBoundASC = nullptr; FDelegateHandle GenericCancelHandle; FActorTickFunctionShim PrimaryActorTick;
+  virtual void StartTargeting(UGameplayAbility *) {} virtual void ConfirmTargetingAndContinue() {} virtual void ConfirmTargeting() {} virtual void CancelTargeting() {} virtual void Tick(float) {} virtual void StopTargeting() {}
   virtual bool IsConfirmTargetingAllowed() { return true; } virtual void BindToConfirmCancelInputs() {} virtual bool ShouldProduceTargetData() const { return true; }
-  bool bDebug = false; template <class... A> void Destroy(A...) {} }; struct EGameplayTargetingConfirmation { enum Type { Instant, UserConfirmed, Custom, CustomMulti }; };
+  void SetActorTickEnabled(bool) {} void SetActorLocationAndRotation(const FVector &, const FRotator &) {} FVector GetActorLocation() const { return FVector(); } FRotator GetActorRotation() const { return FRotator(); }
+  template <class... A> void Destroy(A...) {} }; struct EGameplayTargetingConfirmation { enum Type { Instant, UserConfirmed, Custom, CustomMulti }; };
 struct UCurveFloat : UObject { float GetFloatValue(float) const { return 0; } };
 struct FOnMontageBlendingOutStarted {}; struct FOnMontageEnded {};
 struct UAbilityTask : UObject {

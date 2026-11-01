@@ -71,6 +71,22 @@ def main(content, out):
         print("animation data skipped:", ex)
     with open(os.path.join(out, "u64_anim_data.c"), "w") as fh:
         fh.write(text)
+    try:                                                     # UMG widget blueprints (the HUD, floating status bars, damage numbers)
+        import widgets
+        trees = []
+        for f in sorted(glob.glob(content + "/**/UI_*.uasset", recursive=True)):
+            try:
+                t = widgets.read_widget_tree(f)
+            except Exception:
+                t = None
+            if t and t["widgets"]:
+                trees.append(t)
+        wtext = widgets.emit_c(trees)
+    except Exception as ex:
+        wtext = '#include "u64_widgets.h"\nconst u64_widget_def u64_widget_defs[] = {{0}};\nconst int u64_widget_count = 0;\n'
+        print("widget data skipped:", ex)
+    with open(os.path.join(out, "u64_widget_data.c"), "w") as fh:
+        fh.write(wtext)
     with open(os.path.join(out, "u64_defaults.c"), "w") as fh:
         fh.write(leveldata.emit_defaults_c(defaults))
     with open(os.path.join(out, "u64_level.c"), "w") as fh:

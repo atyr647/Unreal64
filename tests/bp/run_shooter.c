@@ -3,7 +3,10 @@
 #include "u64_gas_core.h"
 #include "u64_anim.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <math.h>
+#include "u64_widgets.h"
+extern u64_obj *u64_gs_hud_of(u64_obj *hero);
 #include <stdarg.h>
 const u64_bpfn *u64_bp_registry(void); int u64_bp_registry_count(void);
 static int fails;
@@ -28,6 +31,11 @@ static const char *s(u64_v v) { return v.u.s ? v.u.s : ""; }
 static u64_obj *asc_of_hero(void) { return u64_asc_of(hero); }
 static u64_v call(u64_obj *o, const char *fn) { return u64_call(o, fn, 0, 0); }
 
+// ---- HUD draw-list helpers
+static const char *hud_text(const u64_draw_cmd *dl, int n, const char *name) { for (int i = 0; i < n; i++) if (dl[i].kind == 1 && !strcmp(dl[i].name, name)) return dl[i].text; return "(none)"; }
+static int hud_has(const u64_draw_cmd *dl, int n, const char *name) { for (int i = 0; i < n; i++) if (!strcmp(dl[i].name, name)) return 1; return 0; }
+static const u64_draw_cmd *hud_bar(const u64_draw_cmd *dl, int n, const char *name, int nth) { int k = 0; for (int i = 0; i < n; i++) if (!strcmp(dl[i].name, name) && k++ == nth) return &dl[i]; return 0; }
+static int hud_text_at(const u64_draw_cmd *dl, int n, const char *name, float x, float y) { for (int i = 0; i < n; i++) if (dl[i].kind == 1 && !strcmp(dl[i].name, name)) return fabsf(dl[i].x - x) < 0.06f && fabsf(dl[i].y - y) < 0.06f; return 0; }
 int u64_run_shooter_scenarios(int verbose)
 {
   verbose_ = verbose;
@@ -78,6 +86,19 @@ int u64_run_shooter_scenarios(int verbose)
   CHECK(u64_as_int(call(hero, "GetPrimaryClipAmmo")) == 30 && u64_as_int(call(hero, "GetMaxPrimaryClipAmmo")) == 30);   // BP_Rifle: 30 / 30
   CHECK(u64_as_int(call(hero, "GetPrimaryReserveAmmo")) == 60);                      // Weapon.Ammo.Rifle -> RifleReserveAmmo
   CHECK(u64_tag_has(asc, "Weapon.Equipped.Rifle") && !u64_tag_has(asc, "Weapon.Equipped.None") == 1);   // CurrentWeaponTag = WeaponTag, loose
+  // --- the HUD (UI_HUD, a UMG widget blueprint): created by AGSPlayerController::CreateHUD when the player's hero is possessed; the compiled widget formats the values. What is drawn in a
+  // 1280 x 720 viewport (the layout is the asset's: canvas anchors / offsets / alignment) is checked with exact values: status panel bottom-left, ammo panel bottom-right.
+  {
+    u64_obj *hud = u64_gs_hud_of(hero); u64_draw_cmd dl[64]; int n = hud ? u64_widget_draw_list(hud, "UI_HUD", 1280, 720, dl, 64) : 0;
+    CHECK(hud && n > 20);
+    CHECK(!strcmp(hud_text(dl, n, "TextBlock_Health"), "100 / 100") && !strcmp(hud_text(dl, n, "TextBlock_Shield"), "100 / 100") && !strcmp(hud_text(dl, n, "TextBlock_Mana"), "100 / 100") && !strcmp(hud_text(dl, n, "TextBlock_Stamina"), "100 / 100"));
+    CHECK(!strcmp(hud_text(dl, n, "TextBlock_HealthRegen"), "+ 1.0") && !strcmp(hud_text(dl, n, "TextBlock_ManaRegen"), "+ 1.0") && !strcmp(hud_text(dl, n, "TextBlock_StaminaRegen"), "+ 2.0") && !strcmp(hud_text(dl, n, "TextBlock_ShieldRegen"), "+ 0.0"));
+    CHECK(!strcmp(hud_text(dl, n, "TextBlock_ClipAmmo"), "30") && !strcmp(hud_text(dl, n, "TextBlock_ReserveAmmo"), "60") && !strcmp(hud_text(dl, n, "TextBlock_XP"), "0") && !strcmp(hud_text(dl, n, "TextBlock_Gold"), "0"));
+    const u64_draw_cmd *hb = hud_bar(dl, n, "ProgressBar_Health", 1);                    // the fill (second rectangle of the bar): 580 wide at full health
+    CHECK(hb && fabsf(hb->w - 580.0f) < 1e-3f && fabsf(hb->x - 11.126678f) < 0.001f && fabsf(hb->y - 630.52922f) < 0.001f);
+    CHECK(hud_text_at(dl, n, "TextBlock_ClipAmmo", 1034.1f, 646.9f) && hud_text_at(dl, n, "TextBlock_Health", 25.1267f, 630.5292f));
+    CHECK(!hud_has(dl, n, "TextBlock_RespawnCountdown") && !hud_has(dl, n, "TextBlock_ConfirmCancel") && !hud_has(dl, n, "ProgressBar_InteractionDuration"));     // collapsed / hidden at the start
+  }
   // 7 CharacterAbilities (BP_HeroCharacter) + 5 weapon Abilities (BP_Rifle)
   CHECK(u64_asc_ability_count(asc) == 12);
   CHECK(u64_class_is(u64_obj_class(hero), "GSCharacterBase") && u64_true(call(hero, "IsAlive")));
@@ -208,6 +229,18 @@ int u64_run_shooter_scenarios(int verbose)
     tick(150);                                                                          // the reload montage plays out
     int clip2 = u64_as_int(call(hero, "GetPrimaryClipAmmo")), res2 = u64_as_int(call(hero, "GetPrimaryReserveAmmo"));
     CHECK(clip2 == 30 && clip2 + res2 == clip1 + res1);
+    {                                                                                  // the HUD follows: the clip text through the weapon's ammo delegate, the reserve through the attribute
+      u64_obj *hud = u64_gs_hud_of(hero); u64_draw_cmd dl[64]; int n = hud ? u64_widget_draw_list(hud, "UI_HUD", 1280, 720, dl, 64) : 0; char want[16];
+      snprintf(want, sizeof want, "%d", res2);
+      CHECK(!strcmp(hud_text(dl, n, "TextBlock_ClipAmmo"), "30") && !strcmp(hud_text(dl, n, "TextBlock_ReserveAmmo"), want));
+      // health changes reach the bar and the text through the widget's attribute listener (AsyncTaskAttributeChanged)
+      u64_attr_set_base(asc_of_hero(), "Health", 75.0f); tick(1);
+      n = u64_widget_draw_list(hud, "UI_HUD", 1280, 720, dl, 64); const u64_draw_cmd *fill = hud_bar(dl, n, "ProgressBar_Health", 1);
+      CHECK(!strcmp(hud_text(dl, n, "TextBlock_Health"), "75 / 100") && fill && fabsf(fill->w - 435.0f) < 1e-3f);
+      u64_attr_set_base(asc_of_hero(), "Health", 100.0f); tick(1);
+      n = u64_widget_draw_list(hud, "UI_HUD", 1280, 720, dl, 64);
+      CHECK(!strcmp(hud_text(dl, n, "TextBlock_Health"), "100 / 100") && fabsf(hud_bar(dl, n, "ProgressBar_Health", 1)->w - 580.0f) < 1e-3f);
+    }
   }
   // --- headshot: the line trace hits the mesh's b_head body (HeroTPP_Physics: a sphyl, radius 9.7); GSDamageExecutionCalc: Effect.Damage.CanHeadShot
   // (GE_RifleDamage) and BoneName == b_head -> x1.5 and Effect.Damage.HeadShot is added: 10 * 1.5 * 100/120 = 12.5
@@ -368,11 +401,19 @@ int u64_run_shooter_scenarios(int verbose)
     *u64_ivar(hero, "ControlRotation") = u64_vec(atan2f(dz, sqrtf(dx * dx + dy * dy)) * 57.29578f, atan2f(dy, dx) * 57.29578f, 0);   // look at the lock
     tick(12);
     CHECK(!u64_tag_has(u64_asc_of(ch), "Object.Chest.State.Open"));
-    u64_input_press(hero, "EGSAbilityInputID::Interact");
-    tick(2 * 30);
+    u64_input_press(hero, "EGSAbilityInputID::Interact"); tick(2 * 30);
     CHECK(u64_tag_has(asc_of_hero(), "State.Interacting") && !u64_tag_has(u64_asc_of(ch), "Object.Chest.State.Open"));   // still holding after 2 s
+    {                                                                                  // the interaction prompt while holding: "Hold 'E'" and the duration bar (the asset's slots: text at (590, 422.5), bar at (490, 467.5), 300 x 30)
+      u64_obj *hud = u64_gs_hud_of(hero); u64_draw_cmd dl[64]; int n = u64_widget_draw_list(hud, "UI_HUD", 1280, 720, dl, 64);
+      const u64_draw_cmd *bar = hud_bar(dl, n, "ProgressBar_InteractionDuration", 1), *bg = hud_bar(dl, n, "ProgressBar_InteractionDuration", 0);
+      CHECK(!strcmp(hud_text(dl, n, "TextBlock"), "Hold 'E'") && hud_text_at(dl, n, "TextBlock", 590.0f, 422.5f) && !hud_has(dl, n, "TextBlock_147"));
+      CHECK(bg && fabsf(bg->x - 490.0f) < 0.01f && fabsf(bg->y - 467.5f) < 0.01f && fabsf(bg->w - 300.0f) < 0.01f && fabsf(bg->h - 30.0f) < 0.01f);
+      CHECK(bar && bar->w >= 180.0f && bar->w <= 200.0f);                                // about 2 s of the 3 s hold (the widget\'s timer steps; the press starts it a tick or two late)
+    }
     tick(1 * 30 + 6);
     CHECK(u64_tag_has(u64_asc_of(ch), "Object.Chest.State.Open") && !u64_tag_has(asc_of_hero(), "State.Interacting"));    // done after the 3 s hold
+    { u64_obj *hud = u64_gs_hud_of(hero); u64_draw_cmd dl[64]; int n = u64_widget_draw_list(hud, "UI_HUD", 1280, 720, dl, 64);       // the prompt goes away with the interaction
+      CHECK(!hud_has(dl, n, "ProgressBar_InteractionDuration") && strcmp(hud_text(dl, n, "TextBlock"), "Hold 'E'") && !hud_has(dl, n, "TextBlock_147")); }
     u64_input_release_id(hero, "EGSAbilityInputID::Interact");                              // let go of the button
     tick(2);
     int cnt_rocket1 = 0, cnt_hp1 = 0;

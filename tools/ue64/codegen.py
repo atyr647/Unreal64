@@ -100,7 +100,7 @@ class Gen:
             return f"({{ u64_v _o = {obj}; {self.ex(a[3], 'u64_asobj(_o)', c)}; }})"
         if o == "TextConst":
             kind = a[0]
-            if kind in (2, 3) and len(a) > 1: return self.ex(a[1], s)
+            if kind in (1, 2, 3) and len(a) > 1: return self.ex(a[1], s)      # localized text: its source string; invariant text; literal string
             return 'u64_str("")'
         if o == "SwitchValue":
             _, _, idx, cases, default = a

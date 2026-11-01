@@ -111,6 +111,7 @@ u64_v u64_native(u64_obj *self, const char *fn, int argc, const u64_v *a)
   }
   if (IS("GetOwner") || IS("GetOwningActorFromActorInfo")) {
     HIT;
+    if (IS("GetOwningActorFromActorInfo")) { u64_v *av = u64_ivar(self, "Avatar"); if (av->t == U64_OBJ && av->u.o) return *av; }     // an ability's owning actor (the ability system's owner: the hero here)
     if (!strcmp(u64_obj_class(self), "Component")) return *u64_ivar(self, "Owner");     // a component's owner is its actor
     u64_v *o = u64_ivar(self, "Owner");
     return o->t == U64_OBJ ? *o : u64_objv(self);

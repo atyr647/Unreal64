@@ -180,18 +180,46 @@ u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
   // ---------------- math / text ----------------
   if (IS("Add_DoubleDouble")) return u64_float(F(x) + F(y));
   if (IS("Conv_IntToText")) { snprintf(b1, sizeof b1, "%d", x.u.i); return text(b1); }
-  if (IS("Conv_FloatToText")) {
-    int maxfrac = argc > 7 ? (int)F(a[7]) : 3; if (maxfrac < 0 || maxfrac > 6) maxfrac = 3;
-    snprintf(b1, sizeof b1, "%.*f", maxfrac, F(x));
-    if (strchr(b1, '.')) { char *e = b1 + strlen(b1) - 1; while (*e == '0') *e-- = 0; if (*e == '.') *e = 0; }
+  if (IS("Conv_FloatToText") || IS("Conv_DoubleToText")) {            // FText::AsNumber with FNumberFormattingOptions: (Value, RoundingMode, AlwaysSign, UseGrouping, MinInt, MaxInt, MinFrac, MaxFrac)
+    int mode = argc > 1 ? (int)F(a[1]) : 0, sign = argc > 2 && u64_true(a[2]), group = argc > 3 ? u64_true(a[3]) : 1;
+    int minint = argc > 4 ? (int)F(a[4]) : 1, minfrac = argc > 6 ? (int)F(a[6]) : 0, maxfrac = argc > 7 ? (int)F(a[7]) : 3;
+    if (maxfrac < 0 || maxfrac > 6) maxfrac = 3; if (minfrac > maxfrac) minfrac = maxfrac; if (minint < 0) minint = 0; if (minint > 8) minint = 8;
+    double v = (double)F(x), sc = 1; for (int i = 0; i < maxfrac; i++) sc *= 10;
+    double t = v * sc, r;
+    switch (mode) { case 1: r = t < 0 ? -floor(-t + 0.5) : floor(t + 0.5); break; case 2: r = t < 0 ? -ceil(-t - 0.5) : ceil(t - 0.5); break;          // half from / to zero
+                    case 3: r = t < 0 ? floor(t) : ceil(t); break; case 4: r = trunc(t); break; case 5: r = floor(t); break; case 6: r = ceil(t); break;
+                    default: r = rint(t); }                                                                                                         // half to even
+    int neg = r < 0; if (neg) r = -r;
+    char digits[48]; snprintf(digits, sizeof digits, "%.0f", r);
+    int nd = (int)strlen(digits), frac = maxfrac;                               // value = digits / 10^frac
+    while (frac > minfrac && nd > 0 && digits[nd - 1] == '0' && frac > 0) { digits[--nd] = 0; frac--; }          // trim trailing zeros down to MinFrac
+    char ip[48], fp[16]; int il;
+    if (nd <= frac) { il = 0; memmove(digits + (frac - nd), digits, (size_t)nd + 1); for (int i = 0; i < frac - nd; i++) digits[i] = '0'; nd = frac; }
+    il = nd - frac; memcpy(ip, digits, (size_t)il); ip[il] = 0; memcpy(fp, digits + il, (size_t)frac); fp[frac] = 0;
+    char ipad[64]; int k = 0; for (int i = il; i < minint; i++) ipad[k++] = '0'; memcpy(ipad + k, ip, (size_t)il); ipad[k + il] = 0;
+    int len = (int)strlen(ipad), o = 0; b1[0] = 0;
+    if (neg && (r != 0)) b1[o++] = '-'; else if (sign) b1[o++] = '+';
+    for (int i = 0; i < len; i++) { if (group && i > 0 && (len - i) % 3 == 0) b1[o++] = ','; b1[o++] = ipad[i]; }
+    if (frac > 0) { b1[o++] = '.'; memcpy(b1 + o, fp, (size_t)frac); o += frac; }
+    b1[o] = 0;
     return text(b1);
   }
   if (IS("Conv_NameToString")) return text(nm(x));
-  if (IS("Format")) {
-    char out[160]; int n = 0; const char *p = nm(x);
+  if (IS("Format")) {                                                // FText::Format: {Name} placeholders from FFormatArgumentData structs (ArgumentName / ArgumentValue), or {0} positions
+    char out[160]; int n = 0; const char *p = nm(x); u64_v args = A(argc, a, 1);
     while (*p && n < 150) {
-      if (*p == '{' && p[1] >= '0' && p[1] <= '9' && p[2] == '}') { n += snprintf(out + n, sizeof out - n, "%s", tostr(A(argc, a, 1 + p[1] - '0'), b2, sizeof b2)); p += 3; }
-      else out[n++] = *p++;
+      const char *close = *p == '{' ? strchr(p, '}') : 0;
+      if (close && close - p > 1 && close - p < 40) {
+        char key[40]; memcpy(key, p + 1, (size_t)(close - p - 1)); key[close - p - 1] = 0;
+        u64_v val = {U64_NONE}; int found = 0;
+        if (args.t == U64_ARRAY) for (int i = 0; i < u64_array_len(args) && !found; i++) {
+          u64_v e = u64_array_get(args, i);
+          if (e.t == U64_OBJ && e.u.o && !strcmp(nm(*u64_ivar(e.u.o, "ArgumentName")), key)) { val = *u64_ivar(e.u.o, "ArgumentValue"); found = 1; }
+        }
+        if (!found && key[0] >= '0' && key[0] <= '9' && !key[1]) { val = A(argc, a, 1 + key[0] - '0'); found = 1; }
+        if (found) { n += snprintf(out + n, sizeof out - n, "%s", tostr(val, b2, sizeof b2)); p = close + 1; continue; }
+      }
+      out[n++] = *p++;
     }
     out[n] = 0; return text(out);
   }
@@ -275,8 +303,12 @@ u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
   if (IS("SetPercent"))    { *u64_ivar(self, "Percent") = x; return NONE_; }
   if (IS("SetVisibility")) { *u64_ivar(self, "Visibility") = x; return NONE_; }
   if (IS("SetOpacity"))    { *u64_ivar(self, "Opacity") = x; return NONE_; }
+  if (IS("SetActiveWidgetIndex")) { *u64_ivar(self, "ActiveWidgetIndex") = x; return NONE_; }       // UWidgetSwitcher: which child is shown
   if (IS("GetUserWidgetObject")) { u64_v *w = u64_ivar(self, "Widget"); return w->t == U64_OBJ ? *w : u64_objv(self); }
-  if (IS("GetOwningPlayer")) return u64_objv(u64_find("PlayerController"));
+  if (IS("GetOwningPlayer")) {                                                                    // a widget's owning player controller (the one that created it), else the player controller
+    u64_v *op = u64_ivar(self, "OwningPlayer");
+    return op->t == U64_OBJ && op->u.o ? *op : u64_objv(u64_find("PlayerController"));
+  }
   // ---------------- property setters, components, collision ----------------
   if (IS("SetObjectPropertyByName") || IS("SetDoublePropertyByName") || IS("SetStructurePropertyByName")) {
     if (x.t == U64_OBJ && x.u.o) *u64_ivar(x.u.o, u64_intern(nm(y))) = z;
@@ -316,7 +348,11 @@ u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
   if (IS("BeginSpawningActor")) return u64_objv(u64_spawn_actor(nm(y), u64_vec(0, 0, 0)));
   // ---------------- arrays ----------------
   // ---------------- Gameplay Ability System ----------------
-  if (IS("GetAbilitySystemComponent")) return u64_objv(u64_asc_of(x.t == U64_OBJ ? x.u.o : self));
+  if (IS("GetAbilitySystemComponent")) {
+    u64_obj *o = x.t == U64_OBJ ? x.u.o : self; u64_v *own = o ? u64_ivar(o, "ASC") : 0;
+    if (own && own->t == U64_OBJ && own->u.o && !u64_obj_is_actor(o)) return *own;                  // a player state: its ability system component
+    return u64_objv(u64_asc_of(o));
+  }
   if (IS("GetActorInfo")) {
     u64_v *av = u64_ivar(self, "Avatar");
     u64_obj *info = u64_new_copy("ActorInfo", "GameplayAbilityActorInfo");
@@ -424,7 +460,7 @@ u64_v u64_native_gas(u64_obj *self, const char *fn, int argc, const u64_v *a)
   // Presentation only: audio, UI widgets, HUD reticles, camera shakes and gameplay-cue visuals have no counterpart on the target
   // (no audio / widget system is ported). Accepted and ignored, not modelled.
   static const char *const presentation[] = {"PlaySound2D", "PlaySoundAtLocation", "SpawnSoundAttached", "ClientPlayCameraShake", "AddChildToCanvas",
-    "RemoveFromParent", "SetActiveWidgetIndex", "SetAlignment", "SetAnchors", "SetAutoSize", "SetBrushFromAtlasInterface", "SetBrushTintColor",
+    "RemoveFromParent", "SetAlignment", "SetAnchors", "SetAutoSize", "SetBrushFromAtlasInterface", "SetBrushTintColor",
     "SetColorAndOpacity", "SetFont", "SetPosition", "SetVectorParameter", "ResetHUDReticle", "SetHUDReticle", "AddGameplayCueLocal",
     "ExecuteGameplayCueLocal", "RemoveGameplayCueLocal", "K2_ExecuteGameplayCueWithParams", 0};
   for (int i = 0; presentation[i]; i++) if (IS(presentation[i])) return NONE_;

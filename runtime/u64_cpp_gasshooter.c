@@ -9,6 +9,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include "u64_widgets.h"
 
 static const char *nm(u64_v v)
 {
@@ -274,6 +275,7 @@ static void add_ammo_effect(u64_obj *s, u64_obj *w)                // the transi
   u64_apply_ge(hero_asc(s), hero_asc(s), defs[k].name, 1.0f, 0);
 }
 static u64_v h_set_current_weapon(u64_obj *s, int c, const u64_v *a);
+static u64_obj *hud_of(u64_obj *hero); static void hud_call(u64_obj *hero, const char *fn, u64_v arg); static void hud_show_weapon(u64_obj *hero, u64_obj *w); static void create_hud(u64_obj *hero, u64_obj *pc);
 static u64_v h_unequip_current_weapon(u64_obj *s, int c, const u64_v *a);
 static u64_v h_equip_weapon(u64_obj *s, int c, const u64_v *a)           // EquipWeapon (authority): SetCurrentWeapon(New, CurrentWeapon)
 {
@@ -343,6 +345,7 @@ static u64_v h_unequip_current_weapon(u64_obj *s, int c, const u64_v *a)
   set_weapon_tag(s, nm(*u64_ivar(s, "NoWeaponTag")));
   unequip_weapon(s, O(*u64_ivar(s, "CurrentWeapon")));
   *u64_ivar(s, "CurrentWeapon") = u64_objv(0);
+  if (hud_of(s)) { hud_call(s, "SetEquippedWeaponSprite", NONE_); hud_call(s, "SetEquippedWeaponStatusText", u64_str("")); hud_call(s, "SetPrimaryClipAmmo", u64_int(0)); hud_call(s, "SetPrimaryReserveAmmo", u64_int(0)); hud_call(s, "SetReticle", NONE_); }
   return NONE_;
 }
 static u64_v h_set_current_weapon(u64_obj *s, int c, const u64_v *a)
@@ -366,6 +369,7 @@ static u64_v h_set_current_weapon(u64_obj *s, int c, const u64_v *a)
     const char *m1 = nm(*u64_ivar(nw, "Equip1PMontage")), *m3 = nm(*u64_ivar(nw, "Equip3PMontage"));      // GetFirstPersonMesh()->GetAnimInstance()->Montage_Play(Equip1PMontage), then the 3P one
     if (*m1) u64_montage_play(s, m1, 1.0f);
     if (*m3) u64_montage_play(s, m3, 1.0f);
+    if (hud_of(s)) hud_show_weapon(s, nw);                                                         // the controller's part: icon, status text, ammo, reticle
   } else h_unequip_current_weapon(s, 0, 0);
   return NONE_;
 }
@@ -429,7 +433,79 @@ static u64_v h_post_initialize_components(u64_obj *s, int c, const u64_v *a)
   u64_timer_call(0.0f, s, "SpawnDefaultInventory", NONE_);          // SetTimerForNextTick
   return NONE_;
 }
-static u64_v h_ammo_noop(u64_obj *s, int c, const u64_v *a) { (void)s; (void)c; (void)a; return NONE_; }   // HUD-only delegates (PlayerController widgets)
+// ---------------------------------------------------------------------------------------------------- the HUD (AGSPlayerController::CreateHUD and the calls that keep it current)
+// The widget Blueprint (UI_HUD, compiled) does the formatting and sets its widgets; the controller's part is C++: create it once for the local player, then forward the weapon /
+// ammo changes. The widgets are objects made from the exported widget table (u64_widgets.c); what is drawn comes from their state (u64_widget_draw_list).
+static u64_obj *pc_of(u64_obj *hero) { return hero ? O(*u64_ivar(hero, "Controller")) : 0; }
+static u64_obj *hud_of(u64_obj *hero) { u64_obj *pc = pc_of(hero); return pc ? O(*u64_ivar(pc, "UIHUDWidget")) : 0; }
+static void hud_call(u64_obj *hero, const char *fn, u64_v arg)                                   // UIHUDWidget->Fn(arg), only when the Blueprint implements it
+{
+  u64_obj *h = hud_of(hero);
+  if (h && u64_has_bp(h, fn)) u64_call(h, fn, 1, &arg);
+}
+u64_obj *u64_gs_hud_of(u64_obj *hero) { return hud_of(hero); }
+static float hattr(u64_obj *asc, const char *n) { return u64_attr_get(asc, n); }
+static void hud_set_attrs(u64_obj *hero, u64_obj *asc)                                           // the attribute part of CreateHUD
+{
+  float h = hattr(asc, "Health"), mh = hattr(asc, "MaxHealth"), m = hattr(asc, "Mana"), mm = hattr(asc, "MaxMana"), st = hattr(asc, "Stamina"), ms = hattr(asc, "MaxStamina"), sh = hattr(asc, "Shield"), msh = hattr(asc, "MaxShield");
+  hud_call(hero, "SetCurrentHealth", u64_float(h)); hud_call(hero, "SetMaxHealth", u64_float(mh)); hud_call(hero, "SetHealthPercentage", u64_float(h / mh));
+  hud_call(hero, "SetCurrentMana", u64_float(m)); hud_call(hero, "SetMaxMana", u64_float(mm)); hud_call(hero, "SetManaPercentage", u64_float(m / mm));
+  hud_call(hero, "SetHealthRegenRate", u64_float(hattr(asc, "HealthRegenRate"))); hud_call(hero, "SetManaRegenRate", u64_float(hattr(asc, "ManaRegenRate")));
+  hud_call(hero, "SetCurrentStamina", u64_float(st)); hud_call(hero, "SetMaxStamina", u64_float(ms)); hud_call(hero, "SetStaminaPercentage", u64_float(st / ms)); hud_call(hero, "SetStaminaRegenRate", u64_float(hattr(asc, "StaminaRegenRate")));
+  hud_call(hero, "SetCurrentShield", u64_float(sh)); hud_call(hero, "SetMaxShield", u64_float(msh)); hud_call(hero, "SetShieldRegenRate", u64_float(hattr(asc, "ShieldRegenRate"))); hud_call(hero, "SetShieldPercentage", u64_float(sh / msh));
+  hud_call(hero, "SetExperience", u64_int((int)hattr(asc, "XP"))); hud_call(hero, "SetGold", u64_int((int)hattr(asc, "Gold"))); hud_call(hero, "SetHeroLevel", u64_int((int)hattr(asc, "CharacterLevel")));
+}
+static void hud_show_weapon(u64_obj *hero, u64_obj *w)                                           // the weapon part of CreateHUD / SetCurrentWeapon
+{
+  u64_obj *asc = u64_asc_of(hero);
+  hud_call(hero, "SetEquippedWeaponSprite", *u64_ivar(w, "PrimaryIcon")); hud_call(hero, "SetEquippedWeaponStatusText", *u64_ivar(w, "DefaultStatusText"));
+  hud_call(hero, "SetPrimaryClipAmmo", u64_call(hero, "GetPrimaryClipAmmo", 0, 0)); hud_call(hero, "SetReticle", *u64_ivar(w, "PrimaryHUDReticleClass"));
+  const char *ra = ammo_attr(nm(*u64_ivar(w, "PrimaryAmmoType")), 0);
+  if (ra && asc) { hud_call(hero, "SetPrimaryReserveAmmo", u64_int((int)hattr(asc, ra))); *u64_ivar(hero, "HudReserve1") = u64_int((int)hattr(asc, ra)); }
+}
+// CurrentWeaponPrimaryReserveAmmoChanged: the engine calls it from the ability system's attribute-value-change delegate; here the controller's HUD is refreshed when the reserve attribute differs from what it shows
+static void hud_poll_reserve(u64_obj *hero)
+{
+  u64_obj *w = O(*u64_ivar(hero, "CurrentWeapon")), *asc = u64_asc_of(hero); if (!w || !asc || !hud_of(hero)) return;
+  const char *ra = ammo_attr(nm(*u64_ivar(w, "PrimaryAmmoType")), 0); if (!ra) return;
+  int v = (int)hattr(asc, ra), shown = u64_ivar(hero, "HudReserve1")->t == U64_INT ? u64_ivar(hero, "HudReserve1")->u.i : v;
+  if (v != shown) { hud_call(hero, "SetPrimaryReserveAmmo", u64_int(v)); *u64_ivar(hero, "HudReserve1") = u64_int(v); }
+}
+static void create_hud(u64_obj *hero, u64_obj *pc)                                                // AGSPlayerController::CreateHUD
+{
+  if (O(*u64_ivar(pc, "UIHUDWidget"))) return;                                                  // only once
+  u64_v cls = *u64_ivar(pc, "UIHUDWidgetClass"); if (!*nm(cls)) return;
+  u64_obj *asc = u64_asc_of(hero); if (!asc) return;
+  u64_obj *ps = O(*u64_ivar(pc, "PlayerState"));                                                 // the player state the widget reads its ability system from
+  if (!ps) { ps = u64_new("PlayerState", "GSPlayerState"); *u64_ivar(ps, "ASC") = u64_objv(asc); *u64_ivar(ps, "Hero") = u64_objv(hero); *u64_ivar(pc, "PlayerState") = u64_objv(ps); *u64_ivar(hero, "PlayerState") = u64_objv(ps); }
+  u64_obj *hud = u64_new(nm(cls), nm(cls));                                                       // CreateWidget<UGSHUDWidget>(this, UIHUDWidgetClass)
+  u64_widget_instantiate(hud, nm(cls)); *u64_ivar(hud, "OwningPlayer") = u64_objv(pc);
+  { u64_obj *snap[96]; int nt = u64_tasks_snapshot(snap, 96);                                  // listeners of an earlier HUD that point at a dead ability system component (the previous hero)
+    for (int i = 0; i < nt; i++) { const char *c = u64_obj_class(snap[i]); u64_obj *la = 0;
+      if (!strcmp(c, "AsyncTaskAttributeChanged")) la = O(*u64_ivar(snap[i], "ASC")); else if (!strcmp(c, "AsyncTaskGameplayTagAddedRemoved")) la = O(*u64_ivar(snap[i], "ListenASC"));
+      else continue;
+      if (!la || !u64_obj_alive(la)) u64_task_untrack(snap[i]); } }
+  *u64_ivar(pc, "UIHUDWidget") = u64_objv(hud);
+  if (u64_has_bp(hud, "Construct")) u64_call(hud, "Construct", 0, 0);                              // AddToViewport(): the widget is constructed
+  hud_set_attrs(hero, asc);
+  u64_obj *w = O(*u64_ivar(hero, "CurrentWeapon")); if (w) hud_show_weapon(hero, w);
+}
+static void hud_call0(u64_obj *hero, const char *fn) { u64_obj *h = hud_of(hero); if (h && u64_has_bp(h, fn)) u64_call(h, fn, 0, 0); }
+// AGSPlayerState's forwarders to the HUD (the ability Blueprints cast the owning actor to GSPlayerState; in this runtime that actor is the hero, which answers for its player state)
+static u64_obj *ps_hero(u64_obj *ps) { return ps ? O(*u64_ivar(ps, "Hero")) : 0; }
+static u64_v ps_show_prompt(u64_obj *s, int c, const u64_v *a) { hud_call(ps_hero(s), "ShowInteractionPrompt", A(c, a, 0)); return NONE_; }
+static u64_v ps_hide_prompt(u64_obj *s, int c, const u64_v *a) { (void)c; (void)a; hud_call0(ps_hero(s), "HideInteractionPrompt"); return NONE_; }
+static u64_v ps_start_timer(u64_obj *s, int c, const u64_v *a) { hud_call(ps_hero(s), "StartInteractionTimer", A(c, a, 0)); return NONE_; }
+static u64_v ps_stop_timer(u64_obj *s, int c, const u64_v *a) { (void)c; (void)a; hud_call0(ps_hero(s), "StopInteractionTimer"); return NONE_; }
+static u64_v ps_confirm_prompt(u64_obj *s, int c, const u64_v *a) { hud_call(ps_hero(s), "ShowAbilityConfirmPrompt", A(c, a, 0)); return NONE_; }
+u64_obj *u64_cpp_cast_hook(u64_obj *o, const char *cls)                  // Cast<AGSPlayerState>(an ability's owning actor): in the engine the ability system lives on the player state; here its owner is the hero, which answers with its player state
+{
+  if (strcmp(cls, "GSPlayerState") || !is_class(o, "GSCharacterBase")) return 0;
+  return O(*u64_ivar(o, "PlayerState"));
+}
+static u64_v h_clip_changed(u64_obj *s, int c, const u64_v *a) { hud_call(s, "SetPrimaryClipAmmo", A(c, a, 1)); return NONE_; }          // CurrentWeaponPrimaryClipAmmoChanged(Old, New)
+static u64_v h_clip2_changed(u64_obj *s, int c, const u64_v *a) { hud_call(s, "SetSecondaryClipAmmo", A(c, a, 1)); return NONE_; }
+static u64_v h_ammo_noop(u64_obj *s, int c, const u64_v *a) { (void)s; (void)c; (void)a; return NONE_; }   // delegates with no widget counterpart
 
 // knock down / dying
 static void remove_death_effects(u64_obj *asc)
@@ -910,6 +986,7 @@ static u64_v h_possessed_by(u64_obj *s, int c, const u64_v *a)         // AGSHer
   *u64_ivar(pc, "Pawn") = u64_objv(s); *u64_ivar(s, "Controller") = u64_objv(pc);
   u64_obj *asc = u64_asc_of(s);
   if (asc) u64_remove_ge_with_tags(asc, "State.Dead");                // RemoveActiveEffectsWithGrantedTags(DeadTag)
+  if (player) create_hud(s, pc);                                                        // PC->CreateHUD()
   if (player) *u64_ivar(s, "bIsFirstPersonPerspective") = *u64_ivar(s, "bStartInFirstPersonPerspective");     // SetupStartupPerspective
   return NONE_;
 }
@@ -1031,6 +1108,7 @@ static void interact_tick(void);
 static void gs_world_tick(float dt)
 {
   anim_tick(dt);
+  { u64_obj *pp = u64_player_pawn(); if (pp && u64_obj_alive(pp)) hud_poll_reserve(pp); }
   interact_tick();
   for (int i = 0; i < u64_obj_count(); i++) {
     u64_obj *o = u64_obj_at(i);
@@ -1242,13 +1320,15 @@ static const m_t methods[] = {
   {"GSHeroCharacter", "GetSecondaryClipAmmo", h_secondary_clip}, {"GSHeroCharacter", "GetMaxSecondaryClipAmmo", h_max_secondary_clip},
   {"GSHeroCharacter", "GetPrimaryReserveAmmo", h_primary_reserve}, {"GSHeroCharacter", "GetSecondaryReserveAmmo", h_secondary_reserve},
   {"GSHeroCharacter", "SpawnDefaultInventory", h_spawn_default_inventory}, {"GSHeroCharacter", "PostInitializeComponents", h_post_initialize_components},
-  {"GSHeroCharacter", "CurrentWeaponPrimaryClipAmmoChanged", h_ammo_noop}, {"GSHeroCharacter", "CurrentWeaponSecondaryClipAmmoChanged", h_ammo_noop},
+  {"GSHeroCharacter", "CurrentWeaponPrimaryClipAmmoChanged", h_clip_changed}, {"GSHeroCharacter", "CurrentWeaponSecondaryClipAmmoChanged", h_clip2_changed},
   {"GSHeroCharacter", "KnockDown", h_knock_down}, {"GSHeroCharacter", "FinishDying", h_finish_dying},
   {"GASShooterGameModeBase", "RespawnHero", gm_respawn_hero},
   {"GSGATA_Trace", "Configure", tr_configure}, {"GSGATA_Trace", "ResetSpread", tr_reset_spread}, {"GSGATA_Trace", "PerformTrace", tr_perform_trace},
   {"GSGATA_Trace", "StartTargeting", tr_start_targeting}, {"GSGATA_Trace", "ConfirmTargetingAndContinue", tr_confirm}, {"GSGATA_Trace", "StopTargeting", tr_stop_targeting},
   {"GSGameplayAbility", "MakeEffectContainerSpec", ga_make_container_spec}, {"GSGameplayAbility", "OnAvatarSet", ga_on_avatar_set},
   {"GSHeroCharacter", "PossessedBy", h_possessed_by},
+  {"GSPlayerState", "ShowInteractionPrompt", ps_show_prompt}, {"GSPlayerState", "HideInteractionPrompt", ps_hide_prompt}, {"GSPlayerState", "StartInteractionTimer", ps_start_timer},
+  {"GSPlayerState", "StopInteractionTimer", ps_stop_timer}, {"GSPlayerState", "ShowAbilityConfirmPrompt", ps_confirm_prompt},
   {"GSCharacterBase", "StartSprinting", mv_start_sprinting}, {"GSCharacterBase", "StopSprinting", mv_stop_sprinting},
   {"GSCharacterBase", "StartAimDownSights", mv_start_ads}, {"GSCharacterBase", "StopAimDownSights", mv_stop_ads},
   {"GSPickup", "PickupOnTouch", pk_pickup_on_touch}, {"GSPickup", "RespawnPickup", pk_respawn}, {"GSWeapon", "PickUpOnTouch", w_pickup_on_touch},

@@ -9,7 +9,7 @@ python3 "$here/cpp2mips/uht_lite.py" "$out/ugen" $(find "$gs/Public" -name "*.h"
 mkdir -p "$out/stubs"
 for c in "AGSHeroCharacter Characters/Heroes/GSHeroCharacter.h hero" "AGSWeapon Weapons/GSWeapon.h weapon" "UGSAbilitySystemComponent Characters/Abilities/GSAbilitySystemComponent.h asc"; do set -- $c; python3 "$here/cpp2mips/stubgen.py" --skip IsInFirstPersonPerspective $1 "$gs/Public/$2" > "$out/stubs/stubs_$3.inc"; done
 objs=()
-for f in u64_rt u64_natives u64_gas u64_gas_core u64_gas_extra u64_collision u64_anim u64_math u64_movement u64_cpp_game u64_cpp_gasshooter; do
+for f in u64_rt u64_natives u64_gas u64_gas_core u64_gas_extra u64_collision u64_anim u64_widgets u64_math u64_movement u64_cpp_game u64_cpp_gasshooter; do
   gcc -g ${SAN:+-fsanitize=address,undefined} -w -DU64_CXX_AMMO -DU64_CXX_BASE -DU64_CXX_JUMP -DU64_CXX_ABILITY -DU64_CXX_EXEC -DU64_CXX_TRACE -DU64_CXX_TASKS -I"$here/runtime" -c -o "$out/$f.o" "$here/runtime/$f.c"; objs+=("$out/$f.o"); done
 gcc -g ${SAN:+-fsanitize=address,undefined} -w -DU64_CXX_AMMO -DU64_CXX_BASE -DU64_CXX_JUMP -DU64_CXX_ABILITY -DU64_CXX_EXEC -DU64_CXX_TRACE -DU64_CXX_TASKS -I"$here/runtime" -c -o "$out/run_shooter.o" "$here/tests/bp/run_shooter.c"; objs+=("$out/run_shooter.o")
 for f in "$out"/gen/*.c; do gcc -g ${SAN:+-fsanitize=address,undefined} -w -I"$here/runtime" -c -o "$f.o" "$f"; objs+=("$f.o"); done

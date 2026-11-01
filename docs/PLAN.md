@@ -184,8 +184,13 @@ a real map, 91 Blueprints and ~8k lines of C++. Run its tests with `tools/run_sh
   Montages play through the AnimBP slots (blend in / out, plain segments; the rifle fire recoil is checked against Python).
   Third person: `ABP_Hero3P` is evaluated too (BlendSpacePlayer 2D grid, cached poses, layered blends with branch filters, pass-through for Fabrik / aim offset /
   space conversions); the heroes' physics bodies follow the animated pose (headshot test aims at the posed head; idle bodies checked against Python).
-  Animation, not done: aim offset (RotationOffsetBlendSpace) and Fabrik IK are passed through unchanged, so the 3P pose lacks pitch aim and foot/hand IK;
-  AnimNotifies from sequences; montages on the 3P skeleton.
+  Notify states of montages run (`AnimNotifyState_*`: begin at the notify time, end after its Duration, through the Blueprint's `ReceivedNotifyBegin` / `End`): the equip montages add
+  `Ability.Weapon.IsChanging` for 0.3539 s, which blocks the weapon abilities; equipping now plays the weapon's 1P and 3P equip montages (the hand port had skipped them). Checked with
+  exact times. Not interrupted when a montage is stopped early (the end still fires at its nominal time). The sequence-level notifies in the project's assets are all `PlaySound` /
+  `GSAnimNotify_PlaySoundForPerspective` (audio: not played); the reload / equip montages' `GenericEventByTag` notifies already worked.
+  Animation, not done: aim offset (`RotationOffsetBlendSpace`: mesh-space rotation-additive samples against the Idle frame) and Fabrik IK are passed through unchanged. I held back on the aim
+  offset because its exact composition order and the additive blend-space accumulation can't be checked against an engine build here, and for characters that never pitch (every placed hero) it
+  is close to the identity; montages on the 3P skeleton beyond the equip one.
 * HUD / player controller widgets (ignored), audio, networking, AI behaviour of the placed heroes.
 * Unverified engine assumption: the first execution of a periodic effect happens on the next tick (see below).
 

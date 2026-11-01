@@ -809,6 +809,45 @@ int u64_gs_damage_draw_list(u64_obj *viewer, float lw, float lh, u64_draw_cmd *o
   }
   return k;
 }
+// ---------------------------------------------------------------------------------------------------- the 3D world as a wireframe
+// The level's collision geometry (placed meshes, door / chest components, character capsules) and a ground grid at the characters' feet, seen from the player's camera: the segments are clipped
+// against a near plane 10 units in front and projected like every screen-space widget (UE axes, horizontal FOV). Kind 3 draw commands: a line from (x, y) to (w, h).
+extern int u64_world_segments(float (*out)[6], int max); extern int u64_pawn_capsule(u64_obj *o, float c[3], float *r, float *seg);
+static int emit_line(const float eye[3], const float rot[3], float fov, float lw, float lh, const float a[6], float rgb0, float rgb1, float rgb2, u64_draw_cmd *out)
+{
+  float pr = rot[0] * 0.017453292f, yw = rot[1] * 0.017453292f, cp = cosf(pr), sp = sinf(pr), cy = cosf(yw), sy = sinf(yw), t = tanf(fov * 0.5f * 0.017453292f), cam[2][3];
+  for (int e = 0; e < 2; e++) {
+    float d[3] = {a[e * 3] - eye[0], a[e * 3 + 1] - eye[1], a[e * 3 + 2] - eye[2]};
+    cam[e][0] = d[0] * cp * cy + d[1] * cp * sy + d[2] * sp; cam[e][1] = -d[0] * sy + d[1] * cy; cam[e][2] = -d[0] * sp * cy - d[1] * sp * sy + d[2] * cp;     // forward, right, up
+  }
+  const float near_ = 10.0f;
+  if (cam[0][0] < near_ && cam[1][0] < near_) return 0;
+  for (int e = 0; e < 2; e++) if (cam[e][0] < near_) {                                       // clip the end behind the near plane
+    const float *o = cam[1 - e]; float k = (near_ - o[0]) / (cam[e][0] - o[0]);
+    for (int q = 0; q < 3; q++) cam[e][q] = o[q] + (cam[e][q] - o[q]) * k;
+  }
+  float p[4];
+  for (int e = 0; e < 2; e++) { p[e * 2] = (cam[e][1] / cam[e][0] / t * 0.5f + 0.5f) * lw; p[e * 2 + 1] = (0.5f - cam[e][2] / cam[e][0] / (t * lh / lw) * 0.5f) * lh; }
+  memset(out, 0, sizeof *out); out->kind = 3; out->x = p[0]; out->y = p[1]; out->w = p[2]; out->h = p[3]; out->rgba[0] = rgb0; out->rgba[1] = rgb1; out->rgba[2] = rgb2; out->rgba[3] = 1.0f; out->name = "wire";
+  return 1;
+}
+int u64_gs_world_draw_list(u64_obj *viewer, float lw, float lh, u64_draw_cmd *out, int max)
+{
+  if (!viewer) return 0;
+  v3 eye3, rot3; player_view(viewer, &eye3, &rot3); float eye[3] = {eye3.x, eye3.y, eye3.z}, rot[3] = {rot3.x, rot3.y, rot3.z};
+  u64_obj *cam = O(u64_comp(viewer, u64_true(*u64_ivar(viewer, "bIsFirstPersonPerspective")) ? "FirstPersonCamera" : "FollowCamera"));
+  float fov = cam && u64_ivar(cam, "FieldOfView")->t == U64_FLOAT ? u64_ivar(cam, "FieldOfView")->u.f : 90.0f;
+  static float seg[1024][6]; int ns = u64_world_segments(seg, 1024), k = 0; float floor_z = 1e9f;
+  for (int i = 0; i < u64_obj_count(); i++) { u64_obj *a = u64_obj_at(i); float c[3], r, sg; if (u64_obj_alive(a) && u64_pawn_capsule(a, c, &r, &sg) && c[2] - sg - r < floor_z) floor_z = c[2] - sg - r; }
+  if (floor_z < 1e8f)                                                                           // a ground grid at the characters' feet (the floor mesh is not exported yet)
+    for (int g = -10; g <= 10 && k < max; g++) {
+      float a[6] = {g * 500.0f, -5000, floor_z, g * 500.0f, 5000, floor_z}, b[6] = {-5000, g * 500.0f, floor_z, 5000, g * 500.0f, floor_z};
+      if (emit_line(eye, rot, fov, lw, lh, a, 0.25f, 0.30f, 0.38f, &out[k])) k++;
+      if (k < max && emit_line(eye, rot, fov, lw, lh, b, 0.25f, 0.30f, 0.38f, &out[k])) k++;
+    }
+  for (int i = 0; i < ns && k < max; i++) if (emit_line(eye, rot, fov, lw, lh, seg[i], 0.62f, 0.72f, 0.85f, &out[k])) k++;
+  return k;
+}
 // FRotator -> rotation matrix (columns: X, Y, Z axes), as FRotationMatrix
 static void rot_mat(v3 rot, float m[9])
 {

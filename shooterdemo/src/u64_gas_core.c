@@ -884,6 +884,13 @@ int u64_ray_pawn_capsule(u64_obj *o, const float s[3], const float e[3], float *
   float d[3] = {e[0] - s[0], e[1] - s[1], e[2] - s[2]}, seg = sh.b - sh.a; if (seg < 0) seg = 0;
   return ray_vcapsule(s, d, sh.cx, sh.cy, sh.cz - seg, sh.cz + seg, sh.a, t, n);
 }
+int u64_pawn_capsule(u64_obj *o, float c[3], float *r, float *seg)   // a character's collision capsule: centre, radius, half length of the cylinder part
+{
+  shape_t sh;
+  if (!is_pawn(o) || !shape_world(o, &sh) || sh.s->kind != 2) return 0;
+  c[0] = sh.cx; c[1] = sh.cy; c[2] = sh.cz; *r = sh.a; *seg = sh.b - sh.a > 0 ? sh.b - sh.a : 0;
+  return 1;
+}
 int u64_line_trace(const float start[3], const float end[3], u64_obj *ignore, u64_obj **hits, int max) { return u64_trace_multi(start, end, 0.0f, ignore, hits, max); }
 
 // ---------------------------------------------------------------------------------------------------- montage notifies and gameplay events

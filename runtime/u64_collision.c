@@ -326,3 +326,64 @@ int u64_body_world_center(u64_obj *a, const char *bone, float out[3])
   }
   return 0;
 }
+
+// ---------------------------------------------------------------------------------------------------- wireframe of the level's collision (the N64 build draws it as its 3D world)
+// A convex hull's edges: vertices are the intersections of plane triples that lie inside every plane; two vertices form an edge when they share two planes. World = m * local.
+static int hull_edges(const u64_hull *h, const xf_t *m, float (*out)[6], int max)
+{
+  float v[32][3]; unsigned long long on[32]; int nv = 0, ne = 0; int np = h->n < 24 ? h->n : 24;
+  for (int i = 0; i < np; i++) for (int j = i + 1; j < np; j++) for (int k = j + 1; k < np; k++) {
+    const float *a = h->planes + i * 4, *b = h->planes + j * 4, *c = h->planes + k * 4;
+    float cx[3] = {b[1] * c[2] - b[2] * c[1], b[2] * c[0] - b[0] * c[2], b[0] * c[1] - b[1] * c[0]};
+    float det = a[0] * cx[0] + a[1] * cx[1] + a[2] * cx[2]; if (fabsf(det) < 1e-6f) continue;
+    float bc[3] = {c[1] * a[2] - c[2] * a[1], c[2] * a[0] - c[0] * a[2], c[0] * a[1] - c[1] * a[0]}, ca[3] = {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+    float p[3]; for (int q = 0; q < 3; q++) p[q] = (a[3] * cx[q] + b[3] * bc[q] + c[3] * ca[q]) / det;
+    unsigned long long mask = 0; int inside = 1;
+    for (int q = 0; q < np && inside; q++) { const float *pl = h->planes + q * 4; float e = pl[0] * p[0] + pl[1] * p[1] + pl[2] * p[2] - pl[3]; if (e > 1e-2f) inside = 0; else if (fabsf(e) < 1e-2f) mask |= 1ull << q; }
+    if (!inside) continue;
+    int dup = 0; for (int q = 0; q < nv; q++) if (fabsf(v[q][0] - p[0]) + fabsf(v[q][1] - p[1]) + fabsf(v[q][2] - p[2]) < 1e-2f) { on[q] |= mask; dup = 1; break; }
+    if (!dup && nv < 32) { memcpy(v[nv], p, sizeof p); on[nv++] = mask; }
+  }
+  for (int i = 0; i < nv; i++) for (int j = i + 1; j < nv && ne < max; j++) {
+    unsigned long long both = on[i] & on[j]; if (!both || (both & (both - 1)) == 0) continue;          // share at least two planes
+    float *o = out[ne++];
+    for (int q = 0; q < 3; q++) { o[q] = m->r[q * 3] * v[i][0] + m->r[q * 3 + 1] * v[i][1] + m->r[q * 3 + 2] * v[i][2] + m->t[q]; o[3 + q] = m->r[q * 3] * v[j][0] + m->r[q * 3 + 1] * v[j][1] + m->r[q * 3 + 2] * v[j][2] + m->t[q]; }
+  }
+  return ne;
+}
+int u64_pawn_capsule(u64_obj *o, float c[3], float *r, float *seg);
+// Every edge of the placed static meshes' and the actors' static-mesh components' collision hulls, then each live character's capsule (a prism: 8 sides, rings at the cylinder's ends and a cross for the caps).
+int u64_world_segments(float (*out)[6], int max)
+{
+  int n = 0;
+  for (const u64_world_mesh *wm = u64_world_meshes; wm->mesh && n < max; wm++) {
+    const u64_mesh_def *mesh = find_mesh(wm->mesh); if (!mesh) continue;
+    xf_t m; xf_from(wm->loc, wm->rot, wm->scale, &m);
+    for (int hi = 0; hi < mesh->nhulls && n < max; hi++) n += hull_edges(&mesh->hulls[hi], &m, out + n, max - n);
+  }
+  for (int i = 0; i < u64_obj_count() && n < max; i++) {
+    u64_obj *a = u64_obj_at(i); if (!u64_obj_alive(a) || !u64_obj_is_actor(a)) continue;
+    const char *cls = u64_obj_class(a);
+    for (const u64_comp_def *def = u64_comp_defs; def->cls && n < max; def++) {
+      if (!u64_class_is(cls, def->cls)) continue;
+      const u64_mesh_def *mesh = find_mesh(def->mesh); if (!mesh) continue;
+      xf_t m; actor_xf(a, &m);
+      const u64_comp_def *chain[8]; int k = 0; const u64_comp_def *c = def;
+      while (c && k < 8) { chain[k++] = c; c = *c->parent ? find_def(cls, c->parent) : 0; }
+      for (int q = k - 1; q >= 0; q--) { xf_t l; comp_local(a, chain[q], &l); xf_mul(&m, &l, &m); }
+      for (int hi = 0; hi < mesh->nhulls && n < max; hi++) n += hull_edges(&mesh->hulls[hi], &m, out + n, max - n);
+    }
+    float c[3], r, seg;
+    if (n + 24 <= max && u64_pawn_capsule(a, c, &r, &seg)) {
+      float top = c[2] + seg + r, bot = c[2] - seg - r, ang[9];
+      for (int q = 0; q <= 8; q++) ang[q] = q * 0.78539816f;
+      for (int q = 0; q < 8; q++) {
+        float x0 = c[0] + r * cosf(ang[q]), y0 = c[1] + r * sinf(ang[q]), x1 = c[0] + r * cosf(ang[q + 1]), y1 = c[1] + r * sinf(ang[q + 1]);
+        float *o = out[n++]; o[0] = x0; o[1] = y0; o[2] = bot + r; o[3] = x1; o[4] = y1; o[5] = bot + r;
+        o = out[n++]; o[0] = x0; o[1] = y0; o[2] = top - r; o[3] = x1; o[4] = y1; o[5] = top - r;
+        o = out[n++]; o[0] = x0; o[1] = y0; o[2] = bot + r; o[3] = x0; o[4] = y0; o[5] = top - r;
+      }
+    }
+  }
+  return n;
+}

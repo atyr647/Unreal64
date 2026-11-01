@@ -16,7 +16,7 @@ float u64_anim_channel_eval(const u64_anim_key *k, int n, float t);             
 extern const u64_widget_def u64_widget_defs[];
 extern const int u64_widget_count;
 
-typedef struct { int kind; float x, y, w, h; float rgba[4]; const char *text; int justify; float font; const char *name; } u64_draw_cmd;     // kind: 0 rectangle, 1 text, 2 image placeholder
+typedef struct { int kind; float x, y, w, h; float rgba[4]; const char *text; int justify; float font; const char *name; } u64_draw_cmd;     // kind: 0 rectangle, 1 text, 2 image placeholder, 3 line from (x, y) to (w, h) (absolute end point; the 3D world's wireframe)
 // The UI scale of a viewport (UUserInterfaceSettings, no project override): the "shortest side" rule with the default curve (480 -> 4/9, 720 -> 2/3, 1080 -> 1.0, 8640 -> 8.0, linear in between,
 // constant below the first key). Widgets are laid out in viewport / scale units: a 16:9 viewport of 720 or 1080 lines gives the 1920 x 1080 layout space the HUD was designed in.
 float u64_ui_scale(float vw, float vh);

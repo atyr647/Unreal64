@@ -102,9 +102,11 @@ int u64_class_known(const char *cls)                      // a Blueprint class o
   for (int i = 0; i < u64_bp_count; i++) if (!strcmp(u64_bp_table[i].cls, cls)) return 1;
   return u64_cpp_class_registered(cls);
 }
+__attribute__((weak)) u64_obj *u64_cpp_cast_hook(u64_obj *o, const char *cls) { (void)o; (void)cls; return 0; }     // the project's cast of one actor to a class the runtime models differently (an ability's owning actor -> its player state)
 u64_v u64_cast(u64_v v, const char *cls)
 {
   if (v.t != U64_OBJ || !v.u.o) return v.t == U64_NONE ? v : u64_objv(0);
+  { u64_obj *r = u64_cpp_cast_hook(v.u.o, cls); if (r) return u64_objv(r); }
   if (!strcmp(v.u.o->cls, "Component") || !u64_class_known(cls) || u64_class_is(v.u.o->cls, cls)) return v;     // components are not typed here
   return u64_objv(0);
 }

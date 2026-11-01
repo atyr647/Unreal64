@@ -269,7 +269,7 @@ void bp_UI_HUD__ExecuteUbergraph_UI_HUD(u64_obj *self, const u64_v *args, int ar
   L_3729:; (*u64_member(&(*u64_pframe(self, "K2Node_MakeStruct_FormatArgumentData_2")), "ArgumentValueFloat")) = u64_float(0.0f);
   L_3761:; (*u64_member(&(*u64_pframe(self, "K2Node_MakeStruct_FormatArgumentData_2")), "ArgumentValueGender")) = u64_int(0);
   L_3790:; u64_array_set(&(*u64_pframe(self, "K2Node_MakeArray_Array_2")), 1, (u64_v[]){u64_int(0), (*u64_pframe(self, "K2Node_MakeStruct_FormatArgumentData_2"))} + 1);
-  L_3810:; (*u64_pframe(self, "CallFunc_Format_ReturnValue_2")) = U64_CALL(self, "Format", u64_str(""), (*u64_pframe(self, "K2Node_MakeArray_Array_2")));
+  L_3810:; (*u64_pframe(self, "CallFunc_Format_ReturnValue_2")) = U64_CALL(self, "Format", u64_str("+ {H}"), (*u64_pframe(self, "K2Node_MakeArray_Array_2")));
   L_3892:; 
   L_3893:; ({ u64_v _o = (*u64_ivar(self, "TextBlock_ManaRegen")); U64_CALL(u64_asobj(_o), "SetText", (*u64_pframe(self, "CallFunc_Format_ReturnValue_2"))); });
   L_3938:; 
@@ -308,7 +308,7 @@ void bp_UI_HUD__ExecuteUbergraph_UI_HUD(u64_obj *self, const u64_v *args, int ar
   L_4288:; (*u64_member(&(*u64_pframe(self, "K2Node_MakeStruct_FormatArgumentData_3")), "ArgumentValueFloat")) = u64_float(0.0f);
   L_4320:; (*u64_member(&(*u64_pframe(self, "K2Node_MakeStruct_FormatArgumentData_3")), "ArgumentValueGender")) = u64_int(0);
   L_4349:; u64_array_set(&(*u64_pframe(self, "K2Node_MakeArray_Array_3")), 1, (u64_v[]){u64_int(0), (*u64_pframe(self, "K2Node_MakeStruct_FormatArgumentData_3"))} + 1);
-  L_4369:; (*u64_pframe(self, "CallFunc_Format_ReturnValue_3")) = U64_CALL(self, "Format", u64_str(""), (*u64_pframe(self, "K2Node_MakeArray_Array_3")));
+  L_4369:; (*u64_pframe(self, "CallFunc_Format_ReturnValue_3")) = U64_CALL(self, "Format", u64_str("+ {H}"), (*u64_pframe(self, "K2Node_MakeArray_Array_3")));
   L_4451:; 
   L_4452:; ({ u64_v _o = (*u64_ivar(self, "TextBlock_StaminaRegen")); U64_CALL(u64_asobj(_o), "SetText", (*u64_pframe(self, "CallFunc_Format_ReturnValue_3"))); });
   L_4497:; 
@@ -375,7 +375,7 @@ void bp_UI_HUD__ExecuteUbergraph_UI_HUD(u64_obj *self, const u64_v *args, int ar
   L_5259:; (*u64_member(&(*u64_pframe(self, "K2Node_MakeStruct_FormatArgumentData_4")), "ArgumentValueFloat")) = u64_float(0.0f);
   L_5291:; (*u64_member(&(*u64_pframe(self, "K2Node_MakeStruct_FormatArgumentData_4")), "ArgumentValueGender")) = u64_int(0);
   L_5320:; u64_array_set(&(*u64_pframe(self, "K2Node_MakeArray_Array_4")), 1, (u64_v[]){u64_int(0), (*u64_pframe(self, "K2Node_MakeStruct_FormatArgumentData_4"))} + 1);
-  L_5340:; (*u64_pframe(self, "CallFunc_Format_ReturnValue_4")) = U64_CALL(self, "Format", u64_str(""), (*u64_pframe(self, "K2Node_MakeArray_Array_4")));
+  L_5340:; (*u64_pframe(self, "CallFunc_Format_ReturnValue_4")) = U64_CALL(self, "Format", u64_str("+ {H}"), (*u64_pframe(self, "K2Node_MakeArray_Array_4")));
   L_5422:; 
   L_5423:; ({ u64_v _o = (*u64_ivar(self, "TextBlock_ShieldRegen")); U64_CALL(u64_asobj(_o), "SetText", (*u64_pframe(self, "CallFunc_Format_ReturnValue_4"))); });
   L_5468:; 
@@ -455,7 +455,7 @@ void bp_UI_HUD__ExecuteUbergraph_UI_HUD(u64_obj *self, const u64_v *args, int ar
   L_7584:; (*u64_member(&(*u64_pframe(self, "K2Node_MakeStruct_FormatArgumentData")), "ArgumentValueFloat")) = u64_float(0.0f);
   L_7616:; (*u64_member(&(*u64_pframe(self, "K2Node_MakeStruct_FormatArgumentData")), "ArgumentValueGender")) = u64_int(0);
   L_7645:; u64_array_set(&(*u64_pframe(self, "K2Node_MakeArray_Array")), 1, (u64_v[]){u64_int(0), (*u64_pframe(self, "K2Node_MakeStruct_FormatArgumentData"))} + 1);
-  L_7665:; (*u64_pframe(self, "CallFunc_Format_ReturnValue")) = U64_CALL(self, "Format", u64_str(""), (*u64_pframe(self, "K2Node_MakeArray_Array")));
+  L_7665:; (*u64_pframe(self, "CallFunc_Format_ReturnValue")) = U64_CALL(self, "Format", u64_str("Respawning in: {R}"), (*u64_pframe(self, "K2Node_MakeArray_Array")));
   L_7760:; 
   L_7761:; ({ u64_v _o = (*u64_ivar(self, "TextBlock_RespawnCountdown")); U64_CALL(u64_asobj(_o), "SetText", (*u64_pframe(self, "CallFunc_Format_ReturnValue"))); });
   L_7806:; 
@@ -478,7 +478,7 @@ void bp_UI_HUD__ExecuteUbergraph_UI_HUD(u64_obj *self, const u64_v *args, int ar
   L_8118:; (*u64_member(&(*u64_pframe(self, "K2Node_MakeStruct_FormatArgumentData_1")), "ArgumentValueFloat")) = u64_float(0.0f);
   L_8150:; (*u64_member(&(*u64_pframe(self, "K2Node_MakeStruct_FormatArgumentData_1")), "ArgumentValueGender")) = u64_int(0);
   L_8179:; u64_array_set(&(*u64_pframe(self, "K2Node_MakeArray_Array_1")), 1, (u64_v[]){u64_int(0), (*u64_pframe(self, "K2Node_MakeStruct_FormatArgumentData_1"))} + 1);
-  L_8199:; (*u64_pframe(self, "CallFunc_Format_ReturnValue_1")) = U64_CALL(self, "Format", u64_str(""), (*u64_pframe(self, "K2Node_MakeArray_Array_1")));
+  L_8199:; (*u64_pframe(self, "CallFunc_Format_ReturnValue_1")) = U64_CALL(self, "Format", u64_str("Respawning in: {R}"), (*u64_pframe(self, "K2Node_MakeArray_Array_1")));
   L_8294:; 
   L_8295:; ({ u64_v _o = (*u64_ivar(self, "TextBlock_RespawnCountdown")); U64_CALL(u64_asobj(_o), "SetText", (*u64_pframe(self, "CallFunc_Format_ReturnValue_1"))); });
   L_8340:; 
@@ -625,7 +625,7 @@ void bp_UI_HUD__ExecuteUbergraph_UI_HUD(u64_obj *self, const u64_v *args, int ar
   L_9932:; (*u64_member(&(*u64_pframe(self, "K2Node_MakeStruct_FormatArgumentData_5")), "ArgumentValueFloat")) = u64_float(0.0f);
   L_9964:; (*u64_member(&(*u64_pframe(self, "K2Node_MakeStruct_FormatArgumentData_5")), "ArgumentValueGender")) = u64_int(0);
   L_9993:; u64_array_set(&(*u64_pframe(self, "K2Node_MakeArray_Array_6")), 1, (u64_v[]){u64_int(0), (*u64_pframe(self, "K2Node_MakeStruct_FormatArgumentData_5"))} + 1);
-  L_10013:; (*u64_pframe(self, "CallFunc_Format_ReturnValue_5")) = U64_CALL(self, "Format", u64_str(""), (*u64_pframe(self, "K2Node_MakeArray_Array_6")));
+  L_10013:; (*u64_pframe(self, "CallFunc_Format_ReturnValue_5")) = U64_CALL(self, "Format", u64_str("+ {H}"), (*u64_pframe(self, "K2Node_MakeArray_Array_6")));
   L_10095:; 
   L_10096:; ({ u64_v _o = (*u64_ivar(self, "TextBlock_HealthRegen")); U64_CALL(u64_asobj(_o), "SetText", (*u64_pframe(self, "CallFunc_Format_ReturnValue_5"))); });
   L_10141:; 
@@ -1333,7 +1333,7 @@ void bp_UI_HUD__SetHealth(u64_obj *self, const u64_v *args, int argc) {
   L_439:; (*u64_member(&L.K2Node_MakeStruct_FormatArgumentData_1, "ArgumentValueFloat")) = u64_float(0.0f);
   L_471:; (*u64_member(&L.K2Node_MakeStruct_FormatArgumentData_1, "ArgumentValueGender")) = u64_int(0);
   L_500:; u64_array_set(&L.K2Node_MakeArray_Array, 2, (u64_v[]){u64_int(0), L.K2Node_MakeStruct_FormatArgumentData_1, L.K2Node_MakeStruct_FormatArgumentData} + 1);
-  L_529:; L.CallFunc_Format_ReturnValue = U64_CALL(self, "Format", u64_str(""), L.K2Node_MakeArray_Array);
+  L_529:; L.CallFunc_Format_ReturnValue = U64_CALL(self, "Format", u64_str("{C} / {M}"), L.K2Node_MakeArray_Array);
   L_615:; 
   L_616:; ({ u64_v _o = (*u64_ivar(self, "TextBlock_Health")); U64_CALL(u64_asobj(_o), "SetText", L.CallFunc_Format_ReturnValue); });
   L_661:; 
@@ -1369,7 +1369,7 @@ void bp_UI_HUD__SetMana(u64_obj *self, const u64_v *args, int argc) {
   L_439:; (*u64_member(&L.K2Node_MakeStruct_FormatArgumentData_1, "ArgumentValueFloat")) = u64_float(0.0f);
   L_471:; (*u64_member(&L.K2Node_MakeStruct_FormatArgumentData_1, "ArgumentValueGender")) = u64_int(0);
   L_500:; u64_array_set(&L.K2Node_MakeArray_Array, 2, (u64_v[]){u64_int(0), L.K2Node_MakeStruct_FormatArgumentData_1, L.K2Node_MakeStruct_FormatArgumentData} + 1);
-  L_529:; L.CallFunc_Format_ReturnValue = U64_CALL(self, "Format", u64_str(""), L.K2Node_MakeArray_Array);
+  L_529:; L.CallFunc_Format_ReturnValue = U64_CALL(self, "Format", u64_str("{C} / {M}"), L.K2Node_MakeArray_Array);
   L_615:; 
   L_616:; ({ u64_v _o = (*u64_ivar(self, "TextBlock_Mana")); U64_CALL(u64_asobj(_o), "SetText", L.CallFunc_Format_ReturnValue); });
   L_661:; 
@@ -1405,7 +1405,7 @@ void bp_UI_HUD__SetStamina(u64_obj *self, const u64_v *args, int argc) {
   L_439:; (*u64_member(&L.K2Node_MakeStruct_FormatArgumentData_1, "ArgumentValueFloat")) = u64_float(0.0f);
   L_471:; (*u64_member(&L.K2Node_MakeStruct_FormatArgumentData_1, "ArgumentValueGender")) = u64_int(0);
   L_500:; u64_array_set(&L.K2Node_MakeArray_Array, 2, (u64_v[]){u64_int(0), L.K2Node_MakeStruct_FormatArgumentData_1, L.K2Node_MakeStruct_FormatArgumentData} + 1);
-  L_529:; L.CallFunc_Format_ReturnValue = U64_CALL(self, "Format", u64_str(""), L.K2Node_MakeArray_Array);
+  L_529:; L.CallFunc_Format_ReturnValue = U64_CALL(self, "Format", u64_str("{C} / {M}"), L.K2Node_MakeArray_Array);
   L_615:; 
   L_616:; ({ u64_v _o = (*u64_ivar(self, "TextBlock_Stamina")); U64_CALL(u64_asobj(_o), "SetText", L.CallFunc_Format_ReturnValue); });
   L_661:; 
@@ -1441,7 +1441,7 @@ void bp_UI_HUD__SetShield(u64_obj *self, const u64_v *args, int argc) {
   L_439:; (*u64_member(&L.K2Node_MakeStruct_FormatArgumentData_1, "ArgumentValueFloat")) = u64_float(0.0f);
   L_471:; (*u64_member(&L.K2Node_MakeStruct_FormatArgumentData_1, "ArgumentValueGender")) = u64_int(0);
   L_500:; u64_array_set(&L.K2Node_MakeArray_Array, 2, (u64_v[]){u64_int(0), L.K2Node_MakeStruct_FormatArgumentData_1, L.K2Node_MakeStruct_FormatArgumentData} + 1);
-  L_529:; L.CallFunc_Format_ReturnValue = U64_CALL(self, "Format", u64_str(""), L.K2Node_MakeArray_Array);
+  L_529:; L.CallFunc_Format_ReturnValue = U64_CALL(self, "Format", u64_str("{C} / {M}"), L.K2Node_MakeArray_Array);
   L_615:; 
   L_616:; ({ u64_v _o = (*u64_ivar(self, "TextBlock_Shield")); U64_CALL(u64_asobj(_o), "SetText", L.CallFunc_Format_ReturnValue); });
   L_661:; 

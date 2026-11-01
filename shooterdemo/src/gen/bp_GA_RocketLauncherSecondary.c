@@ -239,7 +239,7 @@ void bp_GA_RocketLauncherSecondary__ExecuteUbergraph_GA_RocketLauncherSecondary(
   L_3750:; U64_CALL(self, "StartTargeting");
   L_3764:; 
   L_3765:; 
-  L_3766:; (*u64_ivar(u64_asobj((*u64_ivar(self, "SourceWeapon"))), "StatusText")) = u64_str("");
+  L_3766:; (*u64_ivar(u64_asobj((*u64_ivar(self, "SourceWeapon"))), "StatusText")) = u64_str("Homing");
   L_3852:; 
   L_3853:; (*u64_pframe(self, "CallFunc_IsValid_ReturnValue_12")) = U64_CALL(self, "IsValid", (*u64_ivar(self, "PlayerController")));
   L_3882:; 
@@ -715,7 +715,7 @@ void bp_GA_RocketLauncherSecondary__ExecuteUbergraph_GA_RocketLauncherSecondary(
   L_10198:; 
   L_10199:; 
   L_10200:; 
-  L_10201:; (*u64_ivar(u64_asobj((*u64_ivar(self, "SourceWeapon"))), "StatusText")) = u64_str("");
+  L_10201:; (*u64_ivar(u64_asobj((*u64_ivar(self, "SourceWeapon"))), "StatusText")) = u64_str("Default");
   L_10288:; 
   L_10289:; goto L_9950;
   L_10294:; 

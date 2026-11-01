@@ -10,7 +10,7 @@ include $(N64_INST)/include/n64.mk
 N64_CFLAGS += -std=gnu2x -DU64_NO_MAIN -I../runtime -Wno-unused-label -Wno-unused-variable -Wno-unused-but-set-variable -Wno-error
 N64_LDFLAGS += -lm
 
-src = src/main.c src/u64_rt.c src/u64_natives.c src/u64_gas.c src/u64_gas_core.c src/u64_gas_extra.c src/u64_collision.c src/u64_anim.c src/u64_widgets.c src/u64_math.c src/u64_movement.c src/u64_cpp_game.c src/u64_cpp_gasshooter.c src/u64_game_loop.c src/scenarios.c $(wildcard src/gen/*.c)
+src = src/main.c src/hud_render.c src/u64_rt.c src/u64_natives.c src/u64_gas.c src/u64_gas_core.c src/u64_gas_extra.c src/u64_collision.c src/u64_anim.c src/u64_widgets.c src/u64_math.c src/u64_movement.c src/u64_cpp_game.c src/u64_cpp_gasshooter.c src/u64_game_loop.c src/scenarios.c $(wildcard src/gen/*.c)
 objs = $(patsubst $(SOURCE_DIR)/%.c,$(BUILD_DIR)/%.o,$(src))
 
 ifdef CXX_AMMO
